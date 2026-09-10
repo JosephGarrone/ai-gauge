@@ -28,14 +28,19 @@ into a full-frame RGB565 canvas held in PSRAM, which becomes the screen backgrou
 Steady-state cost of all that artwork: **zero**. This is the single biggest win, and it is why
 an expensive-looking gauge face costs no more per frame than a plain one.
 
-### 2. Only a small needle sprite moves
+### 2. Only the needle moves, and only its exact footprint is repainted
 
-The needle is an ARGB8888 sprite (~32×200) rotated about its pivot with
-`lv_image_set_rotation()`. LVGL invalidates the union of the needle's previous and current
-bounding boxes — for typical needle motion that is well under 15% of the screen.
+The needle is drawn by a custom `LV_EVENT_DRAW_MAIN` callback that renders the rotated
+triangle directly. The needle object itself stays put and covers the whole sweep; each
+update invalidates exactly two tight rectangles — where the needle was, and where it now
+is. Measured: **13.3% of the screen per frame**.
 
-Rotating ~6,400 pixels per frame is cheap, and the resulting blit is a fraction of the 11ms
-full-frame figure. This is what leaves real headroom at 60fps.
+**Do not be tempted back to `lv_image_set_rotation()`.** It is the obvious approach and it
+was tried first. LVGL grows a transformed object's invalidation area using `ext_draw_size`,
+a single scalar applied on all four sides, so a 14×170 needle pivoting about its end
+invalidates a ~354×354 square — essentially the whole dial. That measured 28.8% dirty and
+held only 45 fps. The sprite was small; its rotation envelope was not.
+See [performance.md](performance.md).
 
 ### 3. Readouts are separate objects
 

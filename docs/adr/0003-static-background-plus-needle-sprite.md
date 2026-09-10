@@ -1,6 +1,6 @@
 # ADR 0003 — Pre-rendered face plus needle sprite
 
-**Status:** Accepted
+**Status:** Accepted (needle mechanism revised after measurement, 2026-09-10)
 
 ## Context
 
@@ -21,9 +21,16 @@ Split the gauge into a static part rendered once and a moving part kept delibera
 1. **Pre-render the dial face to PSRAM.** Bezel, colour bands, ticks, numeric labels and
    static titles are rasterised from the gauge XML into a full-frame RGB565 canvas at boot and
    on config change. It becomes the screen background. Per-frame cost: zero.
-2. **The needle is a small rotated sprite.** ARGB8888, roughly 32×200, rotated about its pivot
-   with `lv_image_set_rotation()`. LVGL invalidates only the union of its previous and current
-   bounding boxes — typically under 15% of the screen.
+2. **The needle is drawn directly, not rotated as an image.** A `LV_EVENT_DRAW_MAIN` callback
+   draws the rotated triangle, and each update invalidates exactly two tight rectangles:
+   where the needle was, and where it now is. Measured at 13.3% of the screen per frame.
+
+   This replaced an earlier design using an ARGB8888 sprite rotated with
+   `lv_image_set_rotation()`, which **measured 28.8% dirty and only 45 fps**. LVGL grows a
+   transformed object's invalidation area with `ext_draw_size`, a single scalar applied on
+   all four sides, so a long thin needle pivoting about its end invalidates a square the
+   size of the whole dial regardless of how few pixels it covers. The sprite was small; its
+   rotation envelope was not. Full numbers in [../performance.md](../performance.md).
 3. **Readouts are separate small labels**, so a changing number dirties only its own box.
 4. **Two DMA flush buffers in internal SRAM** (~56KB each), not PSRAM, so DMA does not contend
    with instruction fetch through the same cache.
@@ -37,9 +44,12 @@ Detail and the rules this imposes on UI code are in
 a wide margin, and the cost scales with how elaborate the face is — meaning prettier gauges
 would be slower, exactly the wrong incentive for a customisable product.
 
-**Pre-render every needle angle as a sprite atlas.** Rejected as unnecessary. Rotating ~6,400
-pixels per frame is already cheap; caching 360 sprites would consume megabytes of PSRAM to
-optimise something that is not the bottleneck.
+**Pre-render every needle angle as a sprite atlas.** Rejected: megabytes of PSRAM, and it
+would not have helped anyway. The bottleneck was never the cost of rotating pixels — it was
+the size of the area LVGL invalidates around a transformed object.
+
+**Rotating an image sprite.** Tried, measured, rejected — see the Decision above. Recorded
+here as a warning: it is the obvious approach, and it does not work for a long thin needle.
 
 **Full-frame double buffering in PSRAM.** Rejected. It does not reduce the transfer cost,
 which is the dominant term, and adds ~868KB of PSRAM traffic per frame competing with XIP

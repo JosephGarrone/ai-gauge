@@ -48,7 +48,7 @@ static void test_minimal_document(void)
     CHECK(cfg.warning_count == 0, "unexpected warnings: %u", cfg.warning_count);
 
     /* Documented defaults must apply when attributes are absent. */
-    CHECK(near(cfg.face.start_angle, 135.0f), "default start-angle");
+    CHECK(near(cfg.face.start_angle, 225.0f), "default start-angle");
     CHECK(near(cfg.face.sweep, 270.0f), "default sweep");
     CHECK(near(cfg.source.damping, 0.15f), "default damping");
     CHECK(cfg.needle.style == GAUGE_NEEDLE_TAPER, "default needle style");
@@ -63,7 +63,7 @@ static void test_full_document(void)
         "<gauge version=\"1\" id=\"boost\">\n"
         "  <panel shape=\"round\" width=\"466\" height=\"466\"/>\n"
         "  <source channel=\"boost\" unit=\"psi\" min=\"0\" max=\"30\" damping=\"0.2\"/>\n"
-        "  <face start-angle=\"135\" sweep=\"270\" background=\"#101010\">\n"
+        "  <face start-angle=\"225\" sweep=\"270\" background=\"#101010\">\n"
         "    <band from=\"0\" to=\"18\" color=\"#00c853\"/>\n"
         "    <band from=\"18\" to=\"25\" color=\"#ffab00\" width=\"22\"/>\n"
         "    <band from=\"25\" to=\"30\" color=\"#d50000\"/>\n"

@@ -392,7 +392,7 @@ void gauge_config_set_defaults(gauge_config_t *cfg)
     cfg->source.max     = 100.0f;
     cfg->source.damping = 0.15f;
 
-    cfg->face.start_angle = 135.0f;
+    cfg->face.start_angle = 225.0f;
     cfg->face.sweep       = 270.0f;
     cfg->face.background  = (gauge_color_t){0x00, 0x00, 0x00};
     cfg->face.radius_px   = 0; /* fit the panel */

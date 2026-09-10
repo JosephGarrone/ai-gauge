@@ -1,20 +1,23 @@
 /*
  * AI-Gauge entry point.
  *
- * Milestone 1, step 2: bring-up smoke test. This confirms the toolchain, octal PSRAM, the
- * CO5300 QSPI panel, touch and the gauge XML parser all work before anything is built on top
- * of them. The dial renderer replaces this screen in a later step.
+ * Milestone 2: the 60fps gate. Renders the dial from the built-in config and drives it with
+ * a simulated source so the frame cost can be measured before sensors or networking are
+ * layered on top. See docs/performance.md for the gate and docs/display-pipeline.md for why
+ * the renderer is shaped the way it is.
  *
- * Startup ordering matters and is documented in docs/architecture.md: the gauge must show
- * something before the network is touched.
+ * Startup ordering is documented in docs/architecture.md: the gauge must show something
+ * before the network is touched.
  */
 
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 
 #include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
@@ -25,51 +28,43 @@
 
 #include "board_profile.h"
 #include "gauge_config.h"
+#include "gauge_perf.h"
+#include "gauge_render.h"
 
 static const char *TAG = "app_main";
 
-/* Milestone-1 placeholder screen: proves the panel, PSRAM and parser are all alive. */
-static void build_smoke_screen(const board_profile_t *board, const gauge_config_t *cfg)
+/*
+ * How often the UI samples the value source. Deliberately faster than the LVGL refresh
+ * period, so the needle differs on every single frame -- otherwise the measured frame rate
+ * just reports this tick rate rather than what the renderer can sustain.
+ */
+#define SIM_TICK_MS 5
+
+typedef struct {
+    gauge_render_t       *gauge;
+    const gauge_config_t *cfg;
+    uint32_t              elapsed_ms;
+} sim_ctx_t;
+
+/*
+ * Stands in for sensor_hub until the I2C front-end exists. A full-scale triangle sweep is
+ * deliberately harsher than real boost behaviour: it keeps the needle moving every single
+ * frame, which is the worst realistic case for the dirty region we are measuring.
+ */
+static void sim_timer_cb(lv_timer_t *t)
 {
-    lv_obj_t *scr = lv_screen_active();
-    lv_obj_set_style_bg_color(scr, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
+    sim_ctx_t *ctx = lv_timer_get_user_data(t);
 
-    lv_obj_t *col = lv_obj_create(scr);
-    lv_obj_remove_style_all(col);
-    lv_obj_set_size(col, board->width_px - (board->safe_inset_px * 4), LV_SIZE_CONTENT);
-    lv_obj_center(col);
-    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(col, 8, LV_PART_MAIN);
+    ctx->elapsed_ms += SIM_TICK_MS;
 
-    lv_obj_t *title = lv_label_create(col);
-    lv_label_set_text(title, "AI-GAUGE");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);
-    lv_obj_set_style_text_color(title, lv_color_hex(0xff1744), LV_PART_MAIN);
+    const uint32_t period_ms = 4000; /* one full up-and-down sweep */
+    float          phase     = (float)(ctx->elapsed_ms % period_ms) / (float)period_ms;
+    float          tri       = (phase < 0.5f) ? (phase * 2.0f) : ((1.0f - phase) * 2.0f);
 
-    lv_obj_t *panel = lv_label_create(col);
-    lv_label_set_text_fmt(panel, "%" PRIu16 " x %" PRIu16 " %s",
-                          board->width_px, board->height_px,
-                          board->shape == BOARD_PANEL_ROUND ? "round" : "square");
-    lv_obj_set_style_text_font(panel, &lv_font_montserrat_18, LV_PART_MAIN);
-    lv_obj_set_style_text_color(panel, lv_color_hex(0x9e9e9e), LV_PART_MAIN);
+    float min = ctx->cfg->source.min;
+    float max = ctx->cfg->source.max;
 
-    lv_obj_t *conf = lv_label_create(col);
-    lv_label_set_text_fmt(conf, "config: %s\n%s %.0f-%.0f %s",
-                          cfg->id, cfg->source.channel,
-                          (double)cfg->source.min, (double)cfg->source.max,
-                          cfg->source.unit);
-    lv_obj_set_style_text_align(conf, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_set_style_text_font(conf, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(conf, lv_color_hex(0xffffff), LV_PART_MAIN);
-
-    lv_obj_t *mem = lv_label_create(col);
-    lv_label_set_text_fmt(mem, "PSRAM free: %u KB",
-                          (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
-    lv_obj_set_style_text_font(mem, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(mem, lv_color_hex(0x00c853), LV_PART_MAIN);
+    gauge_render_set_value(ctx->gauge, min + tri * (max - min), true);
 }
 
 void app_main(void)
@@ -88,7 +83,7 @@ void app_main(void)
 
     /*
      * The built-in default face until LittleFS loading lands. It is parsed from XML through
-     * the same path as any other config, so this also smoke-tests the parser on target.
+     * the same path as any other config, so this also exercises the parser on target.
      */
     const gauge_config_t *cfg = gauge_config_builtin_default();
     ESP_LOGI(TAG, "config '%s': channel=%s range=%.1f..%.1f %s warnings=%" PRIu16,
@@ -109,9 +104,34 @@ void app_main(void)
         ESP_LOGE(TAG, "could not take the LVGL lock: %s", esp_err_to_name(lock_err));
         return;
     }
-    build_smoke_screen(board, cfg);
+
+    lv_obj_t *scr = lv_screen_active();
+    lv_obj_set_style_bg_color(scr, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+
+    int64_t         t0 = esp_timer_get_time();
+    gauge_render_t *gauge = NULL;
+    err = gauge_render_create(scr, cfg, board, &gauge);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "gauge_render_create failed: %s", esp_err_to_name(err));
+        bsp_display_unlock();
+        return;
+    }
+    ESP_LOGI(TAG, "face pre-render took %" PRId64 " ms",
+             (esp_timer_get_time() - t0) / 1000);
+
+    static sim_ctx_t sim;
+    sim.gauge = gauge;
+    sim.cfg   = cfg;
+    lv_timer_create(sim_timer_cb, SIM_TICK_MS, &sim);
+
+    ESP_ERROR_CHECK(gauge_perf_attach(NULL));
+    ESP_ERROR_CHECK(gauge_perf_start_reporting(5000, "needle sweep"));
+
     bsp_display_unlock();
 
-    ESP_LOGI(TAG, "display up; free internal heap: %u bytes",
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    ESP_LOGI(TAG, "running. internal heap free: %u B, PSRAM free: %u KB",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
 }

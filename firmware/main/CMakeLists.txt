@@ -5,6 +5,9 @@ idf_component_register(
         "."
     REQUIRES
         board_profile
-        nvs_flash
         gauge_config
+        gauge_render
+        gauge_perf
+        nvs_flash
+        esp_timer
 )

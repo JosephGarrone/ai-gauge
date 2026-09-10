@@ -18,7 +18,7 @@ static const char s_default_xml[] =
     "<gauge version=\"1\" id=\"default\">"
     "  <panel shape=\"round\" width=\"466\" height=\"466\"/>"
     "  <source channel=\"boost\" unit=\"psi\" min=\"0\" max=\"30\" damping=\"0.15\"/>"
-    "  <face start-angle=\"135\" sweep=\"270\" background=\"#000000\">"
+    "  <face start-angle=\"225\" sweep=\"270\" background=\"#000000\">"
     "    <band from=\"0\" to=\"18\" color=\"#00c853\"/>"
     "    <band from=\"18\" to=\"25\" color=\"#ffab00\"/>"
     "    <band from=\"25\" to=\"30\" color=\"#d50000\"/>"

@@ -55,16 +55,58 @@ they do not interfere is an assumption until it is measured.
 
 ## Results
 
-**None recorded yet — no measurements have been taken on hardware.**
+Measured on hardware: ESP32-S3 rev v0.2, 240MHz, 8MB octal PSRAM @80MHz, QIO flash @80MHz,
+466x466 CO5300 panel. Scenario 2 (needle sweeping full scale continuously), simulated source
+ticking every 5ms so the needle differs on every frame.
 
-The design is complete and the theory is in the *Budget* section above, but no board has been
-run. Do not cite the budget figures as achieved performance.
+| Date | Firmware | Scenario | FPS | Dirty % | Bytes/frame | Render ms | Notes |
+|---|---|---|---|---|---|---|---|
+| 2026-09-10 | needle as rotated `lv_image` | 2 | **45.4** | 28.8% (62,632 px) | 125,264 | 11.65 | **Failed the gate.** See below. |
+| 2026-09-10 | needle custom-drawn, tight invalidation | 2 | **66.2** | 13.3% (28,900 px) | 57,900 | 5.80 | **Passes.** |
 
-Fill in as measured:
+**The gate passes at 66.2 fps.** That figure is the LVGL refresh-period ceiling
+(`CONFIG_LV_DEF_REFR_PERIOD=15` gives 1000/15 = 66.7 fps), not a rendering limit: rendering
+consumes 5.8ms of each 15ms period, about 39% utilisation, so there is real headroom above
+the 60fps requirement rather than a result that only just scrapes in.
 
-| Date | Firmware | Scenario | FPS (min/mean) | Dirty % | Bytes/frame | Notes |
-|---|---|---|---|---|---|---|
-| | | | | | | |
+Other measurements from the same run:
+
+- Face pre-render: **36 ms**, once at startup. Zero per-frame cost thereafter, as designed.
+- Face buffer: 424KB in PSRAM. Free after startup: 6,874KB PSRAM, 165KB internal.
+- First measurement window shows a ~35ms max render: that is the initial full-screen paint,
+  not steady state.
+
+### What the first attempt got wrong
+
+ADR 0003 originally specified the needle as a small ARGB8888 sprite rotated with
+`lv_image_set_rotation()`, predicting under 15% dirty area. Measured, it produced **28.8%**
+and only 45 fps.
+
+The cause: LVGL grows a transformed object's invalidation area using `ext_draw_size`, which
+is a **single scalar applied on all four sides**. A 14x170 needle pivoting about its end
+therefore invalidates a square roughly 354x354 -- essentially the whole dial -- no matter how
+few pixels the needle itself covers. The sprite was small; its rotation envelope was not.
+
+The fix was to drop image rotation and draw the rotated triangle directly from a
+`LV_EVENT_DRAW_MAIN` callback, with the needle object left stationary and covering the whole
+sweep, and only two tight rectangles invalidated per update: where the needle was, and where
+it now is. Dirty area fell to 13.3% and render time roughly halved.
+
+Two smaller fixes in the same change:
+
+- The readout label was full panel width (466px), so every value change dirtied a
+  466 x 56 strip. It is now sized to its content.
+- The instrumentation itself was wrong at first: it summed `LV_EVENT_INVALIDATE_AREA`
+  events, which are per-request and overlap freely, and reported over 100% of the screen per
+  frame. It now measures `LV_EVENT_FLUSH_START` areas, which are what actually crosses the
+  QSPI bus. **A metric that can report 103% is not measuring a real quantity** -- worth
+  remembering before trusting any number here.
+
+### Not yet measured
+
+- Scenario 4 (swipe transition) -- the tileview screens do not exist yet.
+- Scenario 5 (WiFi active) -- `net_svc` does not exist yet.
+- Scenarios 1, 3 and 6.
 
 ## The gate
 
@@ -72,7 +114,12 @@ Fill in as measured:
 on.** If the render strategy cannot meet budget, that must be discovered while it is still
 cheap to change the approach — not after everything else has been built on top of it.
 
-If the gate fails, the fallbacks are in [display-pipeline.md](display-pipeline.md).
+**Status: passed** at 66.2 fps with 39% render utilisation — on the second attempt. The
+first attempt failed at 45 fps, which is precisely why this gate exists before the rest of
+the system is built on top of the renderer.
+
+If a future change fails the gate, the fallbacks are in
+[display-pipeline.md](display-pipeline.md).
 
 ## When something gets slower
 

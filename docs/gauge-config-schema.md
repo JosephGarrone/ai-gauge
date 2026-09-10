@@ -22,7 +22,7 @@ Files live on the LittleFS `storage` partition at `/storage/gauges/<id>.xml`.
   <panel shape="round" width="466" height="466"/>
   <source channel="boost" unit="psi" min="0" max="30"/>
 
-  <face start-angle="135" sweep="270" background="#000000">
+  <face start-angle="225" sweep="270" background="#000000">
     <band from="0"  to="18" color="#00c853"/>
     <band from="18" to="25" color="#ffab00"/>
     <band from="25" to="30" color="#d50000"/>
@@ -73,11 +73,14 @@ Binds the gauge to a data channel and sets the value range.
 
 ### `<face>` (optional)
 
-The static dial artwork. Angles are degrees clockwise from 12 o'clock.
+The static dial artwork. Angles are **degrees clockwise from 12 o'clock**, so 90 is the 3
+o'clock position and 225 is 7:30. The defaults (`start-angle="225"`, `sweep="270"`) give
+the conventional gauge: starting at lower-left and sweeping clockwise over the top to
+lower-right.
 
 | Attribute | Type | Default | Meaning |
 |---|---|---|---|
-| `start-angle` | float | `135` | Angle of the `min` end of the scale |
+| `start-angle` | float | `225` | Angle of the `min` end of the scale |
 | `sweep` | float | `270` | Total angular sweep, clockwise |
 | `background` | colour | `#000000` | Face fill |
 | `radius` | int | fits panel | Outer radius of the scale arc |
