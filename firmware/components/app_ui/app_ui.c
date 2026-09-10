@@ -21,6 +21,7 @@
 
 #include "app_settings.h"
 #include "gauge_perf.h"
+#include "gauge_store.h"
 
 static const char *TAG = "app_ui";
 
@@ -38,9 +39,27 @@ static struct {
     lv_obj_t *perf_label;     /**< On the settings tile. */
     lv_obj_t *warning_label;
     lv_obj_t *heap_label;
+    lv_obj_t *gauge_dropdown;
+    lv_obj_t *gauge_info_label;
+
+    /* Ids backing the dropdown, in the order they appear in it. */
+    char gauge_ids[GAUGE_STORE_MAX_GAUGES][GAUGE_CONFIG_MAX_ID_LEN];
+    int  gauge_count;
+
+    app_ui_gauge_selected_cb_t on_gauge_selected;
 
     const board_profile_t *board;
 } s;
+
+static void update_gauge_info(const gauge_config_t *cfg)
+{
+    if (s.gauge_info_label == NULL) {
+        return;
+    }
+    lv_label_set_text_fmt(s.gauge_info_label, "%s  %.0f-%.0f %s", cfg->id,
+                          (double)cfg->source.min, (double)cfg->source.max,
+                          cfg->source.unit);
+}
 
 /* ---------------------------------------------------------------- settings UI ------- */
 
@@ -93,6 +112,22 @@ static void show_fps_changed_cb(lv_event_t *e)
             lv_obj_add_flag(s.fps_badge, LV_OBJ_FLAG_HIDDEN);
         }
     }
+}
+
+static void gauge_selected_cb(lv_event_t *e)
+{
+    lv_obj_t *dd  = lv_event_get_target(e);
+    uint32_t  idx = lv_dropdown_get_selected(dd);
+
+    if ((int)idx >= s.gauge_count || s.on_gauge_selected == NULL) {
+        return;
+    }
+
+    /*
+     * Hand the id back rather than loading it here: app_ui knows about widgets, not about
+     * the filesystem. The owner decides what a selection means.
+     */
+    s.on_gauge_selected(s.gauge_ids[idx]);
 }
 
 /* Refreshes the live numbers on the settings page and the optional badge on the dial. */
@@ -183,13 +218,18 @@ static void build_settings_tile(lv_obj_t *tile, const gauge_config_t *cfg)
     lv_obj_set_style_text_font(s.perf_label, &lv_font_montserrat_16, LV_PART_MAIN);
     lv_obj_set_style_text_color(s.perf_label, lv_color_hex(0x00c853), LV_PART_MAIN);
 
-    /* --- gauge information --- */
-    lv_obj_t *info_row = add_row(col, "Gauge");
-    lv_obj_t *info     = lv_label_create(info_row);
-    lv_label_set_text_fmt(info, "%s  %.0f-%.0f %s", cfg->id,
-                          (double)cfg->source.min, (double)cfg->source.max, cfg->source.unit);
-    lv_obj_set_style_text_font(info, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(info, lv_color_hex(0xffffff), LV_PART_MAIN);
+    /* --- gauge picker --- */
+    lv_obj_t *gauge_row = add_row(col, "Gauge");
+
+    s.gauge_dropdown = lv_dropdown_create(gauge_row);
+    lv_obj_set_width(s.gauge_dropdown, LV_PCT(100));
+    lv_dropdown_set_options(s.gauge_dropdown, "(built-in)");
+    lv_obj_add_event_cb(s.gauge_dropdown, gauge_selected_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    s.gauge_info_label = lv_label_create(gauge_row);
+    lv_obj_set_style_text_font(s.gauge_info_label, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s.gauge_info_label, lv_color_hex(0xffffff), LV_PART_MAIN);
+    update_gauge_info(cfg);
 
     /* --- memory --- */
     lv_obj_t *heap_row = add_row(col, "Free memory");
@@ -295,6 +335,90 @@ esp_err_t app_ui_create(const gauge_config_t *cfg, const board_profile_t *board)
 gauge_render_t *app_ui_get_gauge(void)
 {
     return s.gauge;
+}
+
+esp_err_t app_ui_set_config(const gauge_config_t *cfg)
+{
+    ESP_RETURN_ON_FALSE(cfg != NULL, ESP_ERR_INVALID_ARG, TAG, "cfg is NULL");
+    ESP_RETURN_ON_FALSE(s.tile_gauge != NULL, ESP_ERR_INVALID_STATE, TAG, "no UI");
+
+    gauge_render_t *old_gauge = s.gauge;
+    gauge_render_t *replacement = NULL;
+
+    /*
+     * Build the replacement before destroying the old one. If it fails -- most likely on the
+     * PSRAM allocation for the face -- the gauge on screen keeps working rather than the
+     * driver being left with nothing.
+     */
+    esp_err_t err = gauge_render_create(s.tile_gauge, cfg, s.board, &replacement);
+    ESP_RETURN_ON_ERROR(err, TAG, "could not build the replacement gauge");
+
+    s.gauge = replacement;
+
+    if (old_gauge != NULL) {
+        gauge_render_destroy(old_gauge);
+    }
+
+    /* The new gauge objects were created after the badge, so lift it back on top. */
+    if (s.fps_badge != NULL) {
+        lv_obj_move_foreground(s.fps_badge);
+    }
+
+    update_gauge_info(cfg);
+
+    ESP_LOGI(TAG, "switched to gauge '%s'", cfg->id);
+    return ESP_OK;
+}
+
+void app_ui_set_gauge_list(const char (*ids)[GAUGE_CONFIG_MAX_ID_LEN], int count,
+                           const char *active)
+{
+    if (s.gauge_dropdown == NULL) {
+        return;
+    }
+
+    if (count > GAUGE_STORE_MAX_GAUGES) {
+        count = GAUGE_STORE_MAX_GAUGES;
+    }
+
+    if (ids == NULL || count <= 0) {
+        /* Nothing on the filesystem: say so rather than showing an empty picker. */
+        s.gauge_count = 0;
+        lv_dropdown_set_options(s.gauge_dropdown, "(built-in)");
+        lv_obj_add_state(s.gauge_dropdown, LV_STATE_DISABLED);
+        return;
+    }
+
+    lv_obj_remove_state(s.gauge_dropdown, LV_STATE_DISABLED);
+
+    char options[GAUGE_STORE_MAX_GAUGES * (GAUGE_CONFIG_MAX_ID_LEN + 1)];
+    size_t used     = 0;
+    int    selected = 0;
+
+    for (int i = 0; i < count; i++) {
+        snprintf(s.gauge_ids[i], GAUGE_CONFIG_MAX_ID_LEN, "%s", ids[i]);
+
+        int n = snprintf(options + used, sizeof(options) - used, "%s%s",
+                         (i == 0) ? "" : "\n", ids[i]);
+        if (n < 0 || (size_t)n >= sizeof(options) - used) {
+            count = i; /* ran out of room; show what fits */
+            break;
+        }
+        used += (size_t)n;
+
+        if (active != NULL && strcmp(ids[i], active) == 0) {
+            selected = i;
+        }
+    }
+
+    s.gauge_count = count;
+    lv_dropdown_set_options(s.gauge_dropdown, options);
+    lv_dropdown_set_selected(s.gauge_dropdown, (uint32_t)selected);
+}
+
+void app_ui_set_gauge_selected_cb(app_ui_gauge_selected_cb_t cb)
+{
+    s.on_gauge_selected = cb;
 }
 
 void app_ui_show_tile(app_ui_tile_t tile, bool animate)

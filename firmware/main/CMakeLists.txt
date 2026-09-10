@@ -10,6 +10,7 @@ idf_component_register(
         gauge_config
         gauge_perf
         gauge_render
+        gauge_store
         nvs_flash
         esp_timer
 )

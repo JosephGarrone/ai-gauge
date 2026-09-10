@@ -77,6 +77,9 @@ Other measurements from the same run:
 - Face buffer: 424KB in PSRAM. Free after startup: 6,874KB PSRAM, 165KB internal.
 - First measurement window shows a ~35ms max render: that is the initial full-screen paint,
   not steady state.
+- Switching gauges at runtime (tear down, re-rasterise the face, rebuild): **~41 ms**. Eight
+  consecutive switches left PSRAM free unchanged at 6,866 KB, so the 424 KB face buffer is
+  released cleanly.
 
 ### What the first attempt got wrong
 

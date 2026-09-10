@@ -122,8 +122,8 @@ when the code compiles.
 |---|---|---|
 | M1 | Foundation: docs, build, parser, CI, display bring-up | complete |
 | M2 | Renderer and screens; 60fps gate | complete |
-| **M3** | **Configuration from LittleFS, gauge switching** | **next** |
-| M4 | Networking: provisioning, HTTP API, telemetry, OTA | |
+| M3 | Configuration from LittleFS, gauge switching | complete |
+| **M4** | **Networking: provisioning, HTTP API, telemetry, OTA** | **next** |
 | M5 | Sensors: ADS1115 + MCP9600 front-end | blocked on hardware |
 | M6 | Alerts, chime, peak-hold, datalogging | |
 | M7 | Portability: a second board profile | |
@@ -133,6 +133,9 @@ when the code compiles.
 15ms period, with the needle sweeping continuously. The swipe transition costs ~33 fps, a
 documented and accepted trade. Numbers and the two designs that failed first are in
 [docs/performance.md](docs/performance.md).
+
+Faces load from `/storage/gauges/*.xml` on LittleFS, falling back to the next available
+config and then to the compiled-in face. All three paths are verified on hardware.
 
 **The value source is simulated** (`CONFIG_AI_GAUGE_SIMULATED_SOURCE`). **No sensor is being
 read**, and no sensor hardware exists yet.

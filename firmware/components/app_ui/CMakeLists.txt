@@ -10,6 +10,7 @@ idf_component_register(
         gauge_perf
         board_profile
         app_settings
+        gauge_store
     PRIV_REQUIRES
         esp_app_format
         waveshare__esp32_s3_touch_amoled_1_75

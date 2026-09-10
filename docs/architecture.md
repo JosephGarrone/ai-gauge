@@ -6,6 +6,7 @@
 |---|---|
 | `board_profile` | Panel geometry (shape, resolution, safe area) and which peripherals exist. The portability seam. |
 | `gauge_config` | Parse gauge XML into `gauge_config_t`; validate; supply defaults. No LVGL, no I/O — pure data, so it is testable on the host. |
+| `gauge_store` | Owns the LittleFS `storage` partition: list, load, save and delete configs. Keeps filesystem concerns out of `gauge_config`. |
 | `gauge_render` | Build the LVGL dial from a `gauge_config_t`: pre-rendered face, needle sprite, readouts, alerts. |
 | `sensor_hub` | Own `I2C_NUM_1`; drive ADS1115 and MCP9600; scale, filter and publish readings. Also hosts the simulated and network sources. |
 | `app_settings` | NVS-backed user settings (active gauge, brightness, units, overlay toggle). |
@@ -15,9 +16,11 @@ Dependency direction is strictly one-way:
 
 ```
 main
+ ├── app_ui       ──> gauge_render, gauge_store, gauge_perf, app_settings
  ├── gauge_render ──> gauge_config, board_profile
+ ├── gauge_store  ──> gauge_config
  ├── sensor_hub   ──> (nothing above it)
- ├── net_svc      ──> gauge_config, app_settings
+ ├── net_svc      ──> gauge_store, app_settings
  └── app_settings
 ```
 
@@ -98,8 +101,9 @@ thing the UI does — see the worst-case analysis in
 1. `bsp_display_start()` — brings up the QSPI panel, touch, and the LVGL port.
 2. Mount LittleFS on the `storage` partition. A failure here is non-fatal.
 3. `app_settings` loads from NVS; defaults on first boot.
-4. `gauge_config` loads the active gauge XML from LittleFS, falling back to the compiled-in
-   default face if the file is missing or malformed.
+4. `gauge_store` loads the active gauge XML from LittleFS. If it is missing or malformed the
+   next available config is tried, and the compiled-in default face is the last resort.
+   Whatever happened is surfaced on the settings page, not just in the serial log.
 5. `gauge_render` pre-renders the face and builds the screen.
 6. `sensor_hub` starts (real sources if the I2C front-end responds, simulated otherwise).
 7. `net_svc` starts last — nothing in the display path waits on the network.

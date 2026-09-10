@@ -49,7 +49,7 @@ designs failed on the way; both are recorded in [performance.md](performance.md)
 
 ---
 
-## M3 — Configuration from storage 🔜 next
+## M3 — Configuration from storage ✅ complete
 
 Make the gauge genuinely data-driven, which is the point of the XML schema.
 
@@ -60,14 +60,19 @@ Make the gauge genuinely data-driven, which is the point of the XML schema.
 - Gauge switching from the settings page, re-rendering the face without a reboot
 - Enumerate available configs so the picker lists what is actually on the device
 
-**Exit criteria:** boot with a valid config, a malformed config, and an empty filesystem, and
-confirm the gauge always displays something with an accurate warning. Switching gauges at
-runtime must not regress scenario 2.
+**Exit criteria met**, all verified on hardware:
 
-**Why first:** it is self-contained, needs no hardware, and everything after it (network
-upload, the web app) is meaningless until configs can be loaded from storage at all.
+| Case | Result |
+|---|---|
+| Valid config | `boost` loaded from `/storage/gauges/boost.xml` |
+| Malformed active config | rejected with the specific reason, fell back to `egt`, warning shown |
+| Empty or corrupt filesystem | auto-formatted, fell back to the built-in face, warning shown |
+| Runtime switching | 8 consecutive switches, ~41ms each, PSRAM free unchanged |
+| No regression | scenario 2 still 66.6 fps |
 
-## M4 — Networking
+`gauge_store_save()` already validates before replacing, ready for the M4 upload path.
+
+## M4 — Networking 🔜 next
 
 Remote access, and the last unmeasured performance question.
 

@@ -50,9 +50,14 @@ project follows, then [docs/](docs/) for detail:
 Running on hardware, driven by a **simulated** value source — no sensor is being read yet, and
 the sensor board does not exist.
 
-**Working today:** the dial renders from an XML configuration, with colour bands, ticks,
-labels, a damped needle and threshold alerts. Swipe up for settings — brightness, an FPS
-badge, live frame statistics and firmware information, all persisted across reboots.
+**Working today:** the dial renders from an XML configuration held on flash, with colour
+bands, ticks, labels, a damped needle and threshold alerts. Swipe up for settings — pick a
+different gauge, adjust brightness, toggle an FPS badge, read live frame statistics and
+firmware information. Choices persist across reboots.
+
+A missing or malformed configuration falls back to the next available one, and then to a
+compiled-in face, always saying on the settings page what went wrong. A bad config file must
+never leave a driver looking at a blank screen.
 
 **Measured on hardware** (ESP32-S3 rev v0.2), needle sweeping continuously:
 
@@ -74,8 +79,8 @@ Detail and exit criteria in [docs/roadmap.md](docs/roadmap.md).
 |---|---|---|
 | M1 | Foundation: docs, build, XML parser, CI, display bring-up | ✅ |
 | M2 | Renderer and screens; the 60fps gate | ✅ |
-| **M3** | **Load configurations from flash; switch gauges at runtime** | **next** |
-| M4 | WiFi: provisioning, config upload, telemetry feeds, OTA | |
+| M3 | Load configurations from flash; switch gauges at runtime | ✅ |
+| **M4** | **WiFi: provisioning, config upload, telemetry feeds, OTA** | **next** |
 | M5 | Sensors: boost via ADS1115, EGT via MCP9600 | blocked on hardware |
 | M6 | Audible alerts, peak-hold, datalogging | |
 | M7 | Portability: square and other round panels | |
