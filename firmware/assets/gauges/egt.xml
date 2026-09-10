@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Exhaust gas temperature gauge, 0-900 C.
+  Schema: docs/gauge-config-schema.md
+-->
+<gauge version="1" id="egt">
+  <panel shape="round" width="466" height="466"/>
+  <!-- Heavier damping than boost: EGT changes slowly, so smoothing costs nothing useful. -->
+  <source channel="egt" unit="C" min="0" max="900" damping="0.25"/>
+
+  <face start-angle="135" sweep="270" background="#000000">
+    <band from="0"   to="650" color="#00c853"/>
+    <band from="650" to="750" color="#ffab00"/>
+    <band from="750" to="900" color="#d50000"/>
+    <ticks major-every="100" minor-every="25"
+           major-len="24" minor-len="12" color="#ffffff"/>
+    <labels every="100" font="montserrat_22" color="#ffffff" radius="150"/>
+  </face>
+
+  <needle style="taper" length="170" width="14" color="#ff1744" pivot-radius="18"/>
+
+  <title text="EGT" y="150" font="montserrat_20" color="#9e9e9e"/>
+  <readout y="320" font="montserrat_48" format="%.0f" suffix=" C" color="#ffffff"/>
+
+  <alert above="750" flash-hz="2" color="#d50000" chime="true"/>
+</gauge>

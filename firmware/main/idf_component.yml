@@ -1,0 +1,20 @@
+## IDF Component Manager Manifest
+## See docs/adr/0005-consume-waveshare-bsp.md for why we depend on the upstream BSP.
+dependencies:
+  idf:
+    version: ">=5.5"
+
+  # Board support: CO5300 QSPI AMOLED, CST9217 touch, AXP2101 power, LVGL wiring.
+  waveshare/esp32_s3_touch_amoled_1_75:
+    version: "^3.0.1"
+
+  lvgl/lvgl:
+    version: "9.4.*"
+    public: true
+
+  espressif/esp_lvgl_port:
+    version: "^2.9.0"
+
+  # LittleFS on the `storage` partition, for gauge configs and assets.
+  joltwallet/littlefs:
+    version: "^1.16.0"
