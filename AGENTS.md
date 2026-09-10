@@ -39,6 +39,7 @@ future sessions. Propagate them — do not let them decay.**
 | Document | Contents |
 |---|---|
 | [docs/hardware-reference.md](docs/hardware-reference.md) | GPIO map, I2C addresses, pin-usage warnings |
+| [docs/roadmap.md](docs/roadmap.md) | Milestones, ordering and exit criteria |
 | [docs/architecture.md](docs/architecture.md) | Components, task model, data flow |
 | [docs/display-pipeline.md](docs/display-pipeline.md) | Frame budget, LVGL/DMA/TE strategy, render rules |
 | [docs/gauge-config-schema.md](docs/gauge-config-schema.md) | The gauge XML schema (normative) |
@@ -111,34 +112,35 @@ tools/         Host-side tooling (XML validation; future config web app)
 .github/       CI: build artifacts on every push, releases + browser flashing on tags
 ```
 
-## Status
+## Status and roadmap
 
-Milestone 2 complete: **the 60fps gate passes on hardware**, and the dial/settings screens
-are in place.
+Full plan, ordering and exit criteria: **[docs/roadmap.md](docs/roadmap.md)**. Update it when
+a milestone starts or finishes; a milestone is done when its exit criteria are *verified*, not
+when the code compiles.
 
-**Measured** (ESP32-S3 rev v0.2, full-scale needle sweep, simulated source):
-**66.6 fps**, 13.2% dirty, 57KB/frame, 5.9ms render per 15ms period -- the LVGL
-refresh-period ceiling, not a rendering limit. The swipe transition costs ~33 fps, which is
-the deliberate compromise documented in [docs/display-pipeline.md](docs/display-pipeline.md).
-Both numbers, and the two designs that failed before these, are in
+| | Milestone | State |
+|---|---|---|
+| M1 | Foundation: docs, build, parser, CI, display bring-up | complete |
+| M2 | Renderer and screens; 60fps gate | complete |
+| **M3** | **Configuration from LittleFS, gauge switching** | **next** |
+| M4 | Networking: provisioning, HTTP API, telemetry, OTA | |
+| M5 | Sensors: ADS1115 + MCP9600 front-end | blocked on hardware |
+| M6 | Alerts, chime, peak-hold, datalogging | |
+| M7 | Portability: a second board profile | |
+| M8 | Configuration web app | |
+
+**Verified on hardware** (ESP32-S3 rev v0.2): **66.6 fps**, 13.2% dirty, 5.9ms render per
+15ms period, with the needle sweeping continuously. The swipe transition costs ~33 fps, a
+documented and accepted trade. Numbers and the two designs that failed first are in
 [docs/performance.md](docs/performance.md).
 
-**Done:** docs and ADRs; ESP-IDF project building clean and running on hardware;
-`board_profile`; `gauge_config` parser (70 host-test checks, `-Werror`); `gauge_render`;
-`gauge_perf`; `app_settings` (NVS); `app_ui` (tileview, swipe-up settings with working
-brightness, FPS toggle, live stats); CI workflows and the web installer page.
-
-**Not yet done:** `sensor_hub`, `net_svc`, loading configs from LittleFS, gauge switching,
-and the audible alert chime. The value source is a simulated sweep
-(`CONFIG_AI_GAUGE_SIMULATED_SOURCE`) -- **no sensor is being read.**
-
-**Not yet measured:** behaviour with WiFi active (scenario 5). WiFi runs on core 0 and LVGL
-on core 1, and the claim that they do not interfere is an assumption until measured.
+**The value source is simulated** (`CONFIG_AI_GAUGE_SIMULATED_SOURCE`). **No sensor is being
+read**, and no sensor hardware exists yet.
 
 ### Measuring performance
 
-`CONFIG_AI_GAUGE_BENCH_TRANSITION=y` flips tiles continuously so scenario 4 is repeatable.
-Turn it off again afterwards -- it makes the display unusable.
+`CONFIG_AI_GAUGE_BENCH_TRANSITION=y` flips tiles continuously so the transition is a
+repeatable input. Turn it off afterwards -- it makes the display unusable.
 
 **Measure with nobody touching the screen.** Interaction pollutes the numbers badly: sitting
 on the settings tile reports single-digit fps simply because nothing is being redrawn, which
