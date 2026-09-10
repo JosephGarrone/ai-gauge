@@ -4,10 +4,12 @@ idf_component_register(
     INCLUDE_DIRS
         "."
     REQUIRES
+        app_settings
+        app_ui
         board_profile
         gauge_config
-        gauge_render
         gauge_perf
+        gauge_render
         nvs_flash
         esp_timer
 )

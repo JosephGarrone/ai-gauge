@@ -113,23 +113,33 @@ tools/         Host-side tooling (XML validation; future config web app)
 
 ## Status
 
-Milestone 2 complete: **the 60fps gate passes on hardware.**
+Milestone 2 complete: **the 60fps gate passes on hardware**, and the dial/settings screens
+are in place.
 
-**Measured** (ESP32-S3 rev v0.2, full-scale needle sweep, simulated source): **66.2 fps**,
-13.3% dirty area, 58KB/frame, 5.8ms render per 15ms period. That is the LVGL refresh-period
-ceiling, not a rendering limit, so there is genuine headroom. The first attempt failed at
-45 fps -- see [docs/performance.md](docs/performance.md), which records both the numbers and
-what was wrong.
+**Measured** (ESP32-S3 rev v0.2, full-scale needle sweep, simulated source):
+**66.6 fps**, 13.2% dirty, 57KB/frame, 5.9ms render per 15ms period -- the LVGL
+refresh-period ceiling, not a rendering limit. The swipe transition costs ~33 fps, which is
+the deliberate compromise documented in [docs/display-pipeline.md](docs/display-pipeline.md).
+Both numbers, and the two designs that failed before these, are in
+[docs/performance.md](docs/performance.md).
 
-**Done:** docs and ADRs; ESP-IDF project building clean and booting on hardware;
-`board_profile`; `gauge_config` parser (70 host-test checks, `-Werror`); `gauge_render`
-(pre-rendered PSRAM face, custom-drawn needle, readout, threshold alerts); `gauge_perf`
-instrumentation; CI workflows and the web installer page.
+**Done:** docs and ADRs; ESP-IDF project building clean and running on hardware;
+`board_profile`; `gauge_config` parser (70 host-test checks, `-Werror`); `gauge_render`;
+`gauge_perf`; `app_settings` (NVS); `app_ui` (tileview, swipe-up settings with working
+brightness, FPS toggle, live stats); CI workflows and the web installer page.
 
-**Not yet done:** `sensor_hub`, `net_svc`, `app_settings`, the tileview screens and swipe-up
-navigation, loading configs from LittleFS, and the audible alert chime. The value source is
-still a simulated sweep in `app_main`.
+**Not yet done:** `sensor_hub`, `net_svc`, loading configs from LittleFS, gauge switching,
+and the audible alert chime. The value source is a simulated sweep
+(`CONFIG_AI_GAUGE_SIMULATED_SOURCE`) -- **no sensor is being read.**
 
-**Not yet measured:** the swipe transition (scenario 4) and behaviour with WiFi active
-(scenario 5). Both are listed in [docs/performance.md](docs/performance.md) and neither has
-been run.
+**Not yet measured:** behaviour with WiFi active (scenario 5). WiFi runs on core 0 and LVGL
+on core 1, and the claim that they do not interfere is an assumption until measured.
+
+### Measuring performance
+
+`CONFIG_AI_GAUGE_BENCH_TRANSITION=y` flips tiles continuously so scenario 4 is repeatable.
+Turn it off again afterwards -- it makes the display unusable.
+
+**Measure with nobody touching the screen.** Interaction pollutes the numbers badly: sitting
+on the settings tile reports single-digit fps simply because nothing is being redrawn, which
+looks like a stall and is not one.

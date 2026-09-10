@@ -63,6 +63,8 @@ ticking every 5ms so the needle differs on every frame.
 |---|---|---|---|---|---|---|---|
 | 2026-09-10 | needle as rotated `lv_image` | 2 | **45.4** | 28.8% (62,632 px) | 125,264 | 11.65 | **Failed the gate.** See below. |
 | 2026-09-10 | needle custom-drawn, tight invalidation | 2 | **66.2** | 13.3% (28,900 px) | 57,900 | 5.80 | **Passes.** |
+| 2026-09-10 | + tileview screens | 2 | **66.6** | 13.2% (28,700 px) | 57,400 | 5.86 | No regression from adding the screens. |
+| 2026-09-10 | + tileview screens | 4 | **33.4** | 46.2% (100,200 px) | 200,500 | 15.76 | Transition. Accepted worst case — see below. |
 
 **The gate passes at 66.2 fps.** That figure is the LVGL refresh-period ceiling
 (`CONFIG_LV_DEF_REFR_PERIOD=15` gives 1000/15 = 66.7 fps), not a rendering limit: rendering
@@ -102,9 +104,27 @@ Two smaller fixes in the same change:
   QSPI bus. **A metric that can report 103% is not measuring a real quantity** -- worth
   remembering before trusting any number here.
 
+### Scenario 4: the swipe transition
+
+Measured with `CONFIG_AI_GAUGE_BENCH_TRANSITION=y`, which flips tiles every 1.2s so the
+transition is a repeatable input rather than a human swiping.
+
+**~33 fps** across the measurement window, which mixes animating frames with settled ones.
+The animating frames themselves are worse: max render sits at **34.5ms** with the full
+217,156 px invalidated, so during the slide the display runs at roughly **29 fps**.
+
+This is the compromise [display-pipeline.md](display-pipeline.md) anticipated and accepted.
+Sliding two full-screen tiles past each other cannot avoid redrawing everything, and a dip
+during a deliberate user gesture is far less costly than any dip in the needle's steady-state
+motion. The needle is unaffected: scenario 2 still measures 66.6 fps with the tileview in
+place.
+
+If the transition ever needs to be smoother, the fallbacks are listed in
+[display-pipeline.md](display-pipeline.md) -- snapshotting both tiles at gesture start and
+sliding the snapshots, so the transition becomes a pure blit. That work has **not** been done.
+
 ### Not yet measured
 
-- Scenario 4 (swipe transition) -- the tileview screens do not exist yet.
 - Scenario 5 (WiFi active) -- `net_svc` does not exist yet.
 - Scenarios 1, 3 and 6.
 
