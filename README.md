@@ -42,11 +42,45 @@ project follows, then [docs/](docs/) for detail:
 | [sensor-frontend.md](docs/sensor-frontend.md) | Boost and EGT signal conditioning |
 | [networking.md](docs/networking.md) | Provisioning, HTTP API, telemetry, OTA |
 | [performance.md](docs/performance.md) | Measurement method and results |
+| [roadmap.md](docs/roadmap.md) | Milestones and what is planned next |
 | [adr/](docs/adr/) | Why things are the way they are |
 
 ## Status
 
-Early. Milestone 1 (full vertical slice) is in progress: docs, board profile, gauge XML parser
-with host tests, and display bring-up are in place. The dial renderer, sensor hub and
-networking are not yet implemented, and **no performance figures have been measured on
-hardware** — see [docs/performance.md](docs/performance.md).
+Running on hardware, driven by a **simulated** value source — no sensor is being read yet, and
+the sensor board does not exist.
+
+**Working today:** the dial renders from an XML configuration, with colour bands, ticks,
+labels, a damped needle and threshold alerts. Swipe up for settings — brightness, an FPS
+badge, live frame statistics and firmware information, all persisted across reboots.
+
+**Measured on hardware** (ESP32-S3 rev v0.2), needle sweeping continuously:
+
+| | Result |
+|---|---|
+| Frame rate | **66.6 fps** (the LVGL refresh ceiling, not a rendering limit) |
+| Screen redrawn per frame | 13.2% |
+| Render time | 5.9 ms of each 15 ms period |
+| Swipe transition | ~33 fps — a documented, accepted trade |
+
+Method, and the two renderer designs that failed before this one, are in
+[docs/performance.md](docs/performance.md).
+
+## Roadmap
+
+Detail and exit criteria in [docs/roadmap.md](docs/roadmap.md).
+
+| | Milestone | State |
+|---|---|---|
+| M1 | Foundation: docs, build, XML parser, CI, display bring-up | ✅ |
+| M2 | Renderer and screens; the 60fps gate | ✅ |
+| **M3** | **Load configurations from flash; switch gauges at runtime** | **next** |
+| M4 | WiFi: provisioning, config upload, telemetry feeds, OTA | |
+| M5 | Sensors: boost via ADS1115, EGT via MCP9600 | blocked on hardware |
+| M6 | Audible alerts, peak-hold, datalogging | |
+| M7 | Portability: square and other round panels | |
+| M8 | Web app for designing gauge faces | |
+
+Software comes before sensors deliberately. The sensor board still has to be built, and the
+firmware treats a simulated source, a network feed and a real sensor identically — so the
+whole UI and network stack can be finished and verified before any wiring exists.
