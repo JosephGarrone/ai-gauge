@@ -1,0 +1,76 @@
+# On a v* tag: attach binaries to a GitHub Release and publish the ESP Web Tools
+# flashing page to GitHub Pages. See docs/ci-release.md.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  release:
+    name: build and release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive version
+        id: version
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        uses: espressif/esp-idf-ci-action@v1
+        env:
+          AI_GAUGE_VERSION: ${{ steps.version.outputs.value }}
+        with:
+          esp_idf_version: v5.5.1
+          target: esp32s3
+          path: firmware
+          command: |
+            idf.py build &&
+            cd build &&
+            esptool.py --chip esp32s3 merge_bin -o ai-gauge-merged.bin @flash_args
+
+      # The manifest points ESP Web Tools at the single merged image at offset 0.
+      - name: Assemble Pages site
+        run: |
+          mkdir -p site
+          cp tools/web-installer/index.html site/
+          cp firmware/build/ai-gauge-merged.bin site/
+          sed "s/__VERSION__/${{ steps.version.outputs.value }}/" \
+            tools/web-installer/manifest.json > site/manifest.json
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            firmware/build/ai-gauge-merged.bin
+            firmware/build/ai-gauge.bin
+            firmware/build/bootloader/bootloader.bin
+            firmware/build/partition_table/partition-table.bin
+            firmware/build/storage.bin
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  pages:
+    name: deploy flashing page
+    needs: release
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

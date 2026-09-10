@@ -1,0 +1,19 @@
+# ESP-IDF build output
+build/
+firmware/build/
+firmware/managed_components/
+firmware/dependencies.lock
+
+# Generated configuration. sdkconfig.defaults is the source of truth --
+# see docs/build-and-flash.md.
+sdkconfig
+sdkconfig.old
+firmware/sdkconfig
+firmware/sdkconfig.old
+
+# Editor / tooling
+.vscode/
+.idea/
+compile_commands.json
+*.swp
+.DS_Store

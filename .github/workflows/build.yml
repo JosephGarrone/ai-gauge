@@ -1,0 +1,78 @@
+# Build on every push and PR, and publish a flashable binary as an artifact.
+# See docs/ci-release.md.
+name: build
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  host-tests:
+    name: host tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # gauge_config has no ESP-IDF or LVGL dependency, so its parser is tested here
+      # rather than on hardware. See docs/architecture.md.
+      - name: Build and run parser tests
+        run: |
+          cmake -S tools/host-tests -B build/host-tests
+          cmake --build build/host-tests
+          ctest --test-dir build/host-tests --output-on-failure
+
+  firmware:
+    name: firmware (esp32s3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "value=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=0.0.0-dev+$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ESP-IDF version is pinned to match the local toolchain, so CI and developer
+      # builds cannot diverge. The BSP requires >= 5.5.
+      - name: Build
+        uses: espressif/esp-idf-ci-action@v1
+        env:
+          AI_GAUGE_VERSION: ${{ steps.version.outputs.value }}
+        with:
+          esp_idf_version: v5.5.1
+          target: esp32s3
+          path: firmware
+          command: |
+            idf.py build &&
+            cd build &&
+            esptool.py --chip esp32s3 merge_bin -o ai-gauge-merged.bin @flash_args
+
+      - name: Report size
+        run: |
+          {
+            echo '### Build size'
+            echo '```'
+            cat firmware/build/ai-gauge.map >/dev/null 2>&1 && \
+              ls -lh firmware/build/*.bin | awk '{print $9, $5}'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ai-gauge-merged.bin flashes to offset 0x0 and contains bootloader, partition
+      # table, application and filesystem. See docs/build-and-flash.md.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-gauge-${{ steps.version.outputs.value }}
+          if-no-files-found: error
+          path: |
+            firmware/build/ai-gauge-merged.bin
+            firmware/build/ai-gauge.bin
+            firmware/build/ai-gauge.map
+            firmware/build/bootloader/bootloader.bin
+            firmware/build/partition_table/partition-table.bin
+            firmware/build/storage.bin

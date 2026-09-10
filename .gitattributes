@@ -1,0 +1,8 @@
+# Normalise line endings in the repository. Shell scripts and CI YAML must stay LF so they
+# work in Espressif's Linux build container regardless of the developer's platform.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.pdf binary
+*.bin binary

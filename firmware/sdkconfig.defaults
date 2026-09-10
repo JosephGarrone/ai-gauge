@@ -1,0 +1,70 @@
+# AI-Gauge default configuration.
+#
+# This file is the source of truth -- `sdkconfig` is generated and git-ignored.
+# Change settings here, or via `menuconfig` followed by `save-defconfig`.
+#
+# Settings marked PERF are load-bearing for the 60fps requirement. Do not change them
+# without re-measuring; see docs/performance.md and docs/display-pipeline.md.
+
+# --- Flash and partitions -------------------------------------------------------------
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# --- PSRAM ----------------------------------------------------------------------------
+# PERF: the board has 8MB *octal* PSRAM. These settings are required for the display to
+# work at all, and XIP lets code execute from PSRAM without stalling the render path.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+
+# --- CPU and cache --------------------------------------------------------------------
+# PERF: full clock, larger data cache with 64-byte lines for DMA-friendly access.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# --- FreeRTOS -------------------------------------------------------------------------
+# 1ms tick so LVGL timing and sensor sampling are not quantised coarsely.
+CONFIG_FREERTOS_HZ=1000
+
+# --- OTA ------------------------------------------------------------------------------
+# A new image must confirm itself healthy or the bootloader reverts (docs/networking.md).
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# --- LVGL -----------------------------------------------------------------------------
+CONFIG_LV_OS_FREERTOS=y
+CONFIG_LV_USE_CLIB_MALLOC=y
+CONFIG_LV_USE_CLIB_STRING=y
+CONFIG_LV_USE_CLIB_SPRINTF=y
+
+# PERF: two software draw units so rendering spreads across both cores.
+CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+# PERF: LVGL's hot blend paths in IRAM.
+CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
+# PERF: 15ms refresh period targets ~66fps, leaving margin above the 60fps requirement.
+CONFIG_LV_DEF_REFR_PERIOD=15
+CONFIG_LV_OBJ_STYLE_CACHE=y
+
+# Fonts available to gauge configs -- see docs/gauge-config-schema.md.
+CONFIG_LV_FONT_MONTSERRAT_12=y
+CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_FONT_MONTSERRAT_18=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_22=y
+CONFIG_LV_FONT_MONTSERRAT_24=y
+CONFIG_LV_FONT_MONTSERRAT_26=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
+
+# Performance overlay, toggled from the settings screen.
+CONFIG_LV_USE_SYSMON=y
+CONFIG_LV_USE_PERF_MONITOR=y
+
+# --- Misc -----------------------------------------------------------------------------
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
