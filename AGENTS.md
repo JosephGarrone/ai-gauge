@@ -113,21 +113,23 @@ tools/         Host-side tooling (XML validation; future config web app)
 
 ## Status
 
-Milestone 1 (full vertical slice) in progress.
+Milestone 2 complete: **the 60fps gate passes on hardware.**
 
-**Done and verified:** docs and ADRs; ESP-IDF project scaffold building clean for `esp32s3`
-against the Waveshare BSP, LVGL 9.4.0 and LittleFS; `board_profile`; `gauge_config` parser
-with 70 host-test checks passing under `-Werror`; CI workflows and the web installer page.
+**Measured** (ESP32-S3 rev v0.2, full-scale needle sweep, simulated source): **66.2 fps**,
+13.3% dirty area, 58KB/frame, 5.8ms render per 15ms period. That is the LVGL refresh-period
+ceiling, not a rendering limit, so there is genuine headroom. The first attempt failed at
+45 fps -- see [docs/performance.md](docs/performance.md), which records both the numbers and
+what was wrong.
 
-**Not yet done:** `gauge_render`, `sensor_hub`, `net_svc`, `app_settings`, the tileview
-screens, and loading configs from LittleFS. `app_main` currently shows a bring-up smoke
-screen, not a gauge.
+**Done:** docs and ADRs; ESP-IDF project building clean and booting on hardware;
+`board_profile`; `gauge_config` parser (70 host-test checks, `-Werror`); `gauge_render`
+(pre-rendered PSRAM face, custom-drawn needle, readout, threshold alerts); `gauge_perf`
+instrumentation; CI workflows and the web installer page.
 
-**Verified on hardware** (ESP32-S3 rev v0.2, 16MB flash, COM10): boots clean from the merged
-CI image; QIO flash at 80MHz; 8MB octal PSRAM at 80MHz with code and rodata mapped to SPIRAM;
-CO5300 panel and CST9217 touch (reports 466x466, chip 0x9217) both initialise; the XML parser
-runs on target with zero warnings; LVGL task starts with ~168KB internal heap free.
+**Not yet done:** `sensor_hub`, `net_svc`, `app_settings`, the tileview screens and swipe-up
+navigation, loading configs from LittleFS, and the audible alert chime. The value source is
+still a simulated sweep in `app_main`.
 
-**Not yet measured:** **no performance figures exist** -- see
-[docs/performance.md](docs/performance.md). The frame budget there is arithmetic until a
-moving needle is rendered and counted. Do not describe it as achieved.
+**Not yet measured:** the swipe transition (scenario 4) and behaviour with WiFi active
+(scenario 5). Both are listed in [docs/performance.md](docs/performance.md) and neither has
+been run.

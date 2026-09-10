@@ -1,0 +1,10 @@
+idf_component_register(
+    SRCS
+        "gauge_perf.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        lvgl
+    PRIV_REQUIRES
+        esp_timer
+)

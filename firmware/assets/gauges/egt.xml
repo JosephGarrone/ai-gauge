@@ -8,7 +8,7 @@
   <!-- Heavier damping than boost: EGT changes slowly, so smoothing costs nothing useful. -->
   <source channel="egt" unit="C" min="0" max="900" damping="0.25"/>
 
-  <face start-angle="135" sweep="270" background="#000000">
+  <face start-angle="225" sweep="270" background="#000000">
     <band from="0"   to="650" color="#00c853"/>
     <band from="650" to="750" color="#ffab00"/>
     <band from="750" to="900" color="#d50000"/>
