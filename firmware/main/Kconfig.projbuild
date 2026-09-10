@@ -1,0 +1,22 @@
+menu "AI-Gauge"
+
+config AI_GAUGE_SIMULATED_SOURCE
+    bool "Drive channels from a simulated sweep"
+    default y
+    help
+        Sweeps the gauge across its full range instead of reading real sensors. Keep this
+        enabled until sensor_hub and the external I2C front-end exist; it also lets the
+        renderer be exercised on a bare board with nothing wired to the expansion header.
+
+config AI_GAUGE_BENCH_TRANSITION
+    bool "Benchmark the tile transition"
+    default n
+    help
+        Repeatedly animates between the dial and settings tiles and reports the frame cost,
+        so scenario 4 in docs/performance.md can be measured without a human swiping. The
+        transition redraws the whole screen for the duration of the animation and is the
+        most expensive thing the UI does.
+
+        Leave this off for normal use: it makes the display unusable.
+
+endmenu

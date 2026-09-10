@@ -1,13 +1,12 @@
 /*
  * AI-Gauge entry point.
  *
- * Milestone 2: the 60fps gate. Renders the dial from the built-in config and drives it with
- * a simulated source so the frame cost can be measured before sensors or networking are
- * layered on top. See docs/performance.md for the gate and docs/display-pipeline.md for why
- * the renderer is shaped the way it is.
+ * Startup ordering matters and is documented in docs/architecture.md: the gauge must show
+ * something before anything slow or fallible is touched. A driver turning the ignition on
+ * should see a needle immediately.
  *
- * Startup ordering is documented in docs/architecture.md: the gauge must show something
- * before the network is touched.
+ * The value source is still simulated -- sensor_hub and the external I2C front-end do not
+ * exist yet. See CONFIG_AI_GAUGE_SIMULATED_SOURCE.
  */
 
 #include <inttypes.h>
@@ -26,6 +25,8 @@
 #include "bsp/esp-bsp.h"
 #include "lvgl.h"
 
+#include "app_settings.h"
+#include "app_ui.h"
 #include "board_profile.h"
 #include "gauge_config.h"
 #include "gauge_perf.h"
@@ -35,21 +36,22 @@ static const char *TAG = "app_main";
 
 /*
  * How often the UI samples the value source. Deliberately faster than the LVGL refresh
- * period, so the needle differs on every single frame -- otherwise the measured frame rate
- * just reports this tick rate rather than what the renderer can sustain.
+ * period, so the needle differs on every frame -- otherwise a measured frame rate just
+ * reports this tick rate rather than what the renderer can sustain.
  */
 #define SIM_TICK_MS 5
 
+#if CONFIG_AI_GAUGE_SIMULATED_SOURCE
+
 typedef struct {
-    gauge_render_t       *gauge;
     const gauge_config_t *cfg;
     uint32_t              elapsed_ms;
 } sim_ctx_t;
 
 /*
- * Stands in for sensor_hub until the I2C front-end exists. A full-scale triangle sweep is
- * deliberately harsher than real boost behaviour: it keeps the needle moving every single
- * frame, which is the worst realistic case for the dirty region we are measuring.
+ * Stands in for sensor_hub. A full-scale triangle sweep is deliberately harsher than real
+ * boost behaviour: it keeps the needle moving every frame, which is the worst realistic case
+ * for the dirty region.
  */
 static void sim_timer_cb(lv_timer_t *t)
 {
@@ -64,8 +66,27 @@ static void sim_timer_cb(lv_timer_t *t)
     float min = ctx->cfg->source.min;
     float max = ctx->cfg->source.max;
 
-    gauge_render_set_value(ctx->gauge, min + tri * (max - min), true);
+    gauge_render_set_value(app_ui_get_gauge(), min + tri * (max - min), true);
 }
+
+#endif /* CONFIG_AI_GAUGE_SIMULATED_SOURCE */
+
+#if CONFIG_AI_GAUGE_BENCH_TRANSITION
+
+/*
+ * Scenario 4 in docs/performance.md. Swipe transitions redraw the whole screen for the
+ * duration of the animation, so they are measured separately from steady state -- and
+ * measured mechanically, because a human swiping is not a repeatable input.
+ */
+static void bench_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+    app_ui_show_tile(app_ui_get_tile() == APP_UI_TILE_GAUGE ? APP_UI_TILE_SETTINGS
+                                                            : APP_UI_TILE_GAUGE,
+                     true);
+}
+
+#endif /* CONFIG_AI_GAUGE_BENCH_TRANSITION */
 
 void app_main(void)
 {
@@ -76,6 +97,8 @@ void app_main(void)
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
+
+    app_settings_init();
 
     const board_profile_t *board = board_profile_get();
     ESP_LOGI(TAG, "board: %s (%" PRIu16 "x%" PRIu16 ", %" PRIu8 " Hz)",
@@ -92,7 +115,7 @@ void app_main(void)
 
     /* Brings up the CO5300 QSPI panel, CST9217 touch and the LVGL port. */
     bsp_display_start();
-    bsp_display_backlight_on();
+    bsp_display_brightness_set(app_settings_get()->brightness);
 
     /*
      * -1 blocks indefinitely. The BSP declares this as uint32_t but forwards it to an
@@ -105,29 +128,35 @@ void app_main(void)
         return;
     }
 
-    lv_obj_t *scr = lv_screen_active();
-    lv_obj_set_style_bg_color(scr, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
-
-    int64_t         t0 = esp_timer_get_time();
-    gauge_render_t *gauge = NULL;
-    err = gauge_render_create(scr, cfg, board, &gauge);
+    int64_t t0 = esp_timer_get_time();
+    err = app_ui_create(cfg, board);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "gauge_render_create failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "app_ui_create failed: %s", esp_err_to_name(err));
         bsp_display_unlock();
         return;
     }
-    ESP_LOGI(TAG, "face pre-render took %" PRId64 " ms",
-             (esp_timer_get_time() - t0) / 1000);
+    ESP_LOGI(TAG, "UI built in %" PRId64 " ms", (esp_timer_get_time() - t0) / 1000);
 
+    if (cfg->warning_count > 0) {
+        app_ui_set_warning("Gauge config had warnings; some values were adjusted.");
+    }
+
+#if CONFIG_AI_GAUGE_SIMULATED_SOURCE
     static sim_ctx_t sim;
-    sim.gauge = gauge;
-    sim.cfg   = cfg;
+    sim.cfg = cfg;
     lv_timer_create(sim_timer_cb, SIM_TICK_MS, &sim);
+    ESP_LOGW(TAG, "using a SIMULATED value source; no sensors are being read");
+#endif
 
     ESP_ERROR_CHECK(gauge_perf_attach(NULL));
+
+#if CONFIG_AI_GAUGE_BENCH_TRANSITION
+    lv_timer_create(bench_timer_cb, 1200, NULL);
+    ESP_ERROR_CHECK(gauge_perf_start_reporting(5000, "tile transition"));
+    ESP_LOGW(TAG, "transition benchmark active; the display will flip tiles continuously");
+#else
     ESP_ERROR_CHECK(gauge_perf_start_reporting(5000, "needle sweep"));
+#endif
 
     bsp_display_unlock();
 

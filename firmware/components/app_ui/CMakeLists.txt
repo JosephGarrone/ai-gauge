@@ -1,0 +1,16 @@
+idf_component_register(
+    SRCS
+        "app_ui.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        lvgl
+        gauge_render
+        gauge_config
+        gauge_perf
+        board_profile
+        app_settings
+    PRIV_REQUIRES
+        esp_app_format
+        waveshare__esp32_s3_touch_amoled_1_75
+)
