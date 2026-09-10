@@ -15,6 +15,7 @@ dependencies:
   espressif/esp_lvgl_port:
     version: "^2.9.0"
 
-  # LittleFS on the `storage` partition, for gauge configs and assets.
+  # LittleFS is also declared by the gauge_store component, which owns the filesystem.
+  # Kept here so littlefs_create_partition_image() is available at project scope.
   joltwallet/littlefs:
     version: "^1.16.0"
