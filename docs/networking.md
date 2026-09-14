@@ -127,6 +127,11 @@ last value rather than going invalid. That belongs with the channel snapshot in 
 - Confirming straight after the UI was built proved too early. A test image that crashed a few
   hundred milliseconds later, during audio start-up, had already confirmed itself, so it was
   never rolled back and the board boot-looped until it was reflashed over USB.
+- An image is also left **unconfirmed if networking fails to start**, since it could never be
+  updated remotely again. A missing WiFi network does not count; only a failure of the stack to
+  initialise does. Verified: a build whose WiFi could not initialise logged
+  `not confirming this image: networking failed to start`. Before this, a build that lost WiFi
+  confirmed itself 15s later and could only be recovered over USB.
 
 ## Memory constraints
 

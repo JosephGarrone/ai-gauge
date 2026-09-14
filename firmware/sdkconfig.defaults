@@ -32,10 +32,12 @@ CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 
 # WiFi buffer budget. Static RX buffers must live in internal DMA-capable memory -- PSRAM
 # cannot hold them -- and enabling the option above raises their default to 16, which this
-# board cannot afford alongside the LVGL flush buffers in internal RAM. Six is enough for the light
-# traffic this device sees (config uploads and a telemetry stream), and everything that can
-# be dynamic is, so it comes from PSRAM instead.
-CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
+# board cannot afford alongside the LVGL flush buffers in internal RAM. Everything that can be
+# dynamic is, so it comes from PSRAM instead.
+# Measured: with peak-hold added, WiFi could only initialise 5 (and in another order, 4) of 6
+# static RX buffers and failed to start at all. Four is what reliably fits, and is ample for
+# config uploads, OTA and a telemetry stream. The block-ack window below must stay <= 2x this.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=8
 CONFIG_ESP_WIFI_TX_BUFFER_TYPE=1
 CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=8

@@ -234,6 +234,10 @@ DMA buffers, drives the ES8311 directly, and synthesises an 11.8KB two-note chim
 all before WiFi starts. The chime plays on every alert crossing, rate-limited to one per 3s,
 and the dial stayed at **66.6 fps**.
 
+**No sound has actually been heard.** A test image at full volume with a near full-scale chime,
+explicitly unmuted, played with no codec errors but was inaudible. This unit most likely has no
+speaker fitted, so the chime is verified only as far as the codec, not as audible output.
+
 It did not fit cleanly at first. With audio claimed, the HTTP server — started after WiFi
 init — could no longer find a contiguous ~6KB block for its task stack, and `httpd_start()`
 failed, leaving the gauge with no API and no OTA. Starting the server **before** WiFi
@@ -244,6 +248,25 @@ a largest free block of ~60B, then settles at ~5.3KB. It has proved stable, incl
 update during which it remained the running image, but anything that adds internal allocations
 must be measured. The HTTP request body and OTA buffers are now explicitly PSRAM, since both sat
 at or under the 4KB threshold below which plain `malloc()` still takes internal memory.
+
+### WiFi static RX buffers
+
+Adding peak-hold stopped WiFi starting at all:
+
+```
+E wifi:Expected to init 6 rx buffer, actual is 5
+E net_svc: net_svc_start(356): wifi_init
+```
+
+The obvious explanation — the new UI objects taking internal memory WiFi needed — did not survive
+a test. Starting WiFi *before* building the UI made it worse, initialising only 4 of 6, even
+though a 32KB internal block was free at that moment. So this is not simple fragmentation by UI
+objects, and the underlying cause is **not yet understood**. The UI-first order was restored.
+
+Reducing `CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM` to 4 fixed it: WiFi connects, the HTTP server
+answers, the dial holds 66.7 fps, and internal free heap is ~7.4KB just after startup, settling at
+~11.6KB. Four is ample for config uploads, OTA and a telemetry stream. Treat the value as
+load-bearing and re-measure before raising it.
 
 ### Not yet measured
 - Internal heap behaviour during an OTA and during a config upload.

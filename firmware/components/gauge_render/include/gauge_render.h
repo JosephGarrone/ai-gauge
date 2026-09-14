@@ -70,6 +70,9 @@ float gauge_render_get_displayed(const gauge_render_t *g);
  */
 typedef void (*gauge_render_alert_cb_t)(const gauge_alert_t *alert, bool active, void *user_data);
 
+/** @brief Clear the peak marker and peak readout. No effect if the face has no `<peak>`. */
+void gauge_render_reset_peak(gauge_render_t *g);
+
 /** @brief Register an alert transition callback, or NULL to remove it. */
 void gauge_render_set_alert_cb(gauge_render_t *g, gauge_render_alert_cb_t cb, void *user_data);
 

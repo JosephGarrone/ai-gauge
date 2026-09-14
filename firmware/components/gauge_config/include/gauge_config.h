@@ -165,6 +165,19 @@ typedef struct {
         gauge_color_t color;
     } readout;
 
+    /* --- <peak> --- */
+    struct {
+        bool          present;
+        gauge_color_t color;
+        uint16_t      length_px;   /**< From the outer edge of the scale inward. */
+        uint16_t      width_px;
+        bool          show_value;
+        int16_t       value_y;     /**< INT16_MIN means "just below the readout". */
+        char          font[GAUGE_CONFIG_MAX_FONT_LEN];
+        char          format[GAUGE_CONFIG_MAX_FORMAT_LEN];
+        char          prefix[GAUGE_CONFIG_MAX_TEXT_LEN];
+    } peak;
+
     /* --- <alert> --- */
     gauge_alert_t alerts[GAUGE_CONFIG_MAX_ALERTS];
     uint8_t       alert_count;

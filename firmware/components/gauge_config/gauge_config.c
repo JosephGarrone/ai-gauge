@@ -422,6 +422,15 @@ void gauge_config_set_defaults(gauge_config_t *cfg)
     cfg->readout.color = (gauge_color_t){0xff, 0xff, 0xff};
     snprintf(cfg->readout.font, sizeof(cfg->readout.font), "montserrat_48");
     snprintf(cfg->readout.format, sizeof(cfg->readout.format), "%%.1f");
+
+    cfg->peak.color      = (gauge_color_t){0xff, 0xab, 0x00};
+    cfg->peak.length_px  = 28;
+    cfg->peak.width_px   = 5;
+    cfg->peak.show_value = true;
+    cfg->peak.value_y    = INT16_MIN;
+    snprintf(cfg->peak.font, sizeof(cfg->peak.font), "montserrat_16");
+    snprintf(cfg->peak.format, sizeof(cfg->peak.format), "%%.1f");
+    snprintf(cfg->peak.prefix, sizeof(cfg->peak.prefix), "PEAK ");
 }
 
 /* --------------------------------------------------------------- element parsers ---- */
@@ -616,6 +625,20 @@ static void parse_readout(const xml_tag_t *tag, gauge_config_t *cfg)
     attr_color(tag, "color", &cfg->readout.color, &cfg->warning_count);
 }
 
+static void parse_peak(const xml_tag_t *tag, gauge_config_t *cfg)
+{
+    cfg->peak.present = true;
+
+    attr_color(tag, "color", &cfg->peak.color, &cfg->warning_count);
+    attr_px(tag, "length", &cfg->peak.length_px, &cfg->warning_count);
+    attr_px(tag, "width", &cfg->peak.width_px, &cfg->warning_count);
+    attr_bool(tag, "show-value", &cfg->peak.show_value);
+    attr_coord(tag, "value-y", &cfg->peak.value_y, &cfg->warning_count);
+    attr_str(tag, "font", cfg->peak.font, sizeof(cfg->peak.font));
+    attr_str(tag, "format", cfg->peak.format, sizeof(cfg->peak.format));
+    attr_str(tag, "prefix", cfg->peak.prefix, sizeof(cfg->peak.prefix));
+}
+
 static void parse_alert(const xml_tag_t *tag, gauge_config_t *cfg)
 {
     if (cfg->alert_count >= GAUGE_CONFIG_MAX_ALERTS) {
@@ -731,6 +754,8 @@ gauge_config_err_t gauge_config_parse(const char *xml, size_t len, gauge_config_
             parse_title(&tag, cfg);
         } else if (tag_is(&tag, "readout")) {
             parse_readout(&tag, cfg);
+        } else if (tag_is(&tag, "peak")) {
+            parse_peak(&tag, cfg);
         } else if (tag_is(&tag, "alert")) {
             parse_alert(&tag, cfg);
         }

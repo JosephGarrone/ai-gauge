@@ -76,12 +76,13 @@ With `PGA = ±4.096V`, the ADS1115 gives `4.096V / 32768 = 125µV` per count.
 ```
 V_adc    = counts × 4.096 / 32768
 V_sensor = V_adc × (R1 + R2) / R2          = V_adc × 2.0
-PSI      = (V_sensor - 0.5) / 4.0 × 101.5  # assumed: 0.5V = 0, 4.5V = 7 bar (101.5 PSI)
+P_abs    = (V_sensor - 0.5) / 4.0 × 8.0    # bar absolute; assumed 0.5V = 0, 4.5V = 8 bar abs
+PSI      = (P_abs - P_zero) × 14.5038         # P_zero captured at key-on, engine off
 ```
 
-**The sensor spans 7 bar (101.5 PSI); 0-60 PSI is only the display range of the gauge face.**
-Scaling 4.5V to 60 PSI would read about 70% high. The 0.5-4.5V span itself is still an assumption
-until measured.
+**The sensor spans 0—8 bar absolute** (−1 to +7 bar gauge, about −14.5 to +101.5 PSI). 0—60 PSI is
+only the display range of the gauge face. The 0.5—4.5V endpoints are the usual convention for this
+class of sensor but are still an assumption until measured.
 
 Both the divider ratio and the sensor transfer function are **configuration, not constants** —
 they live in `sensor_hub` calibration settings so a different sensor is a settings change, not
@@ -99,21 +100,22 @@ PSI_gauge = PSI_abs - P_baro          # ~14.7 PSI at sea level
 Store `P_baro` as a calibration value, ideally captured at key-on with the engine off, so the
 gauge zeroes correctly at altitude.
 
-**For this sensor the question is still open.** The owner reports the existing JRP gauge reads
-0 PSI at rest, which suggests gauge pressure. But "7-bar MAP" sensors are normally *absolute*,
-and the JRP gauge has a sensor calibration feature, which could simply be zeroing out
-atmospheric pressure. A gauge that reads 0 at rest therefore does not settle it.
+**For this sensor it is settled: it is absolute.** JRP's own page for the sensor
+([JRP Boost Sensor v2 7-Bar](https://www.justraceparts.com.au/boost-map-sensor-7-bar-barb), product
+code `7-BAR-MAP-BARB`) gives its calibrated range as **0—8 bar absolute**, which is −1 to
++7 bar gauge. The "7-bar" name counts only the positive boost range. At normal atmospheric
+pressure it is already reading about 1 bar.
 
-The decisive check is a voltmeter on the signal wire with the engine off, assuming the 0.5-4.5V
-convention over 7 bar:
+That is why the JRP gauge reads 0 at rest: its "zeroing", done with the engine off and no
+pressure in the system, subtracts atmospheric pressure. The firmware does the same, capturing
+`P_zero` at key-on with the engine off. That also corrects for altitude and weather, which a fixed
+14.7 PSI offset would not.
 
-| Reading at rest | Meaning |
-|---|---|
-| about 0.5V | gauge pressure — no barometric subtraction |
-| about 1.1V | absolute (1 bar of 7 = one seventh of the 4V span, plus 0.5V) |
+Expected signal at rest, if the 0.5—4.5V convention holds: `0.5 + 4.0 × (1/8) — about 1.0V`. A
+measurement confirms the transfer function.
 
-Getting it wrong offsets every reading by about 14.7 PSI, so the firmware should support both
-and default to a calibrated zero captured at key-on, which is correct in either case.
+Note that JRP's 7-bar and 3-bar sensors use different calibrations and the connectors look alike;
+the firmware's scaling constants must match the sensor actually fitted.
 
 ### Sampling
 
@@ -185,7 +187,7 @@ Record measured results here as the hardware is built.
 - [x] Identify the sensor: JRP 7-bar, 0-5V, 3-wire MAP sensor (from the kit listing)
 - [ ] Confirm connector pinout and wire colours from the manual
 - [ ] Measure the output voltage at rest to establish the transfer function
-- [ ] Confirm whether the MAP sensor is absolute or gauge referenced
+- [x] Absolute or gauge referenced: **absolute**, 0—8 bar (JRP sensor specification)
 - [ ] Measure the actual divider ratio with a DMM and store it as the calibration value
 - [ ] Verify ADS1115 → PSI against a known pressure reference at several points
 - [ ] Verify MCP9600 → °C against ambient and boiling water

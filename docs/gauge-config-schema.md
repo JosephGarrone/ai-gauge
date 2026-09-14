@@ -151,6 +151,28 @@ The live numeric value. A separate LVGL label, not part of the background — se
 | `prefix`, `suffix` | string | `""` | Text either side of the number |
 | `color` | colour | `#ffffff` | |
 
+### `<peak>` (0..1)
+
+A telltale marker that stays at the highest value reached, with an optional peak readout.
+**Tapping the dial clears it.** The marker is drawn over the face and under the needle, and is
+repainted only when the peak rises, so it costs nothing while the value is below its peak.
+
+The peak tracks the **raw input value, before damping**, so a brief boost spike registers even
+if the damped needle never quite reaches it.
+
+| Attribute | Type | Default | Meaning |
+|---|---|---|---|
+| `color` | colour | `#ffab00` | Marker colour |
+| `length` | int | `28` | Marker length, from the outer edge of the scale inward |
+| `width` | int | `5` | Marker thickness |
+| `show-value` | bool | `true` | Show the peak value below the live readout |
+| `value-y` | int | below the readout | Vertical position of the peak value |
+| `font` | font name | `montserrat_16` | Peak value font |
+| `format` | printf | `%.1f` | Peak value format |
+| `prefix` | string | `PEAK ` | Text before the peak value |
+
+Omit the element to disable peak-hold.
+
 ### `<alert>` (0..n)
 
 Fires when the value crosses a threshold. Give `above`, `below`, or both.

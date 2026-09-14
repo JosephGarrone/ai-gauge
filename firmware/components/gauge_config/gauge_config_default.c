@@ -31,6 +31,7 @@ static const char s_default_xml[] =
     "  <title text=\"BOOST\" y=\"150\" font=\"montserrat_20\" color=\"#9e9e9e\"/>"
     "  <readout y=\"320\" font=\"montserrat_48\" format=\"%.1f\" suffix=\" psi\""
     "           color=\"#ffffff\"/>"
+    "  <peak color=\"#ffab00\"/>"
     "  <alert above=\"25\" flash-hz=\"2\" color=\"#d50000\"/>"
     "</gauge>";
 

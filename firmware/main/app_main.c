@@ -459,6 +459,7 @@ void app_main(void)
 
     bsp_display_unlock();
 
+
     /*
      * Audio before WiFi: its I2S DMA buffers must be claimed while internal memory is still
      * available. Failure only costs the chime; alerts stay visual.
@@ -466,21 +467,31 @@ void app_main(void)
     app_audio_init();
 
     /*
-     * Networking starts last and never blocks the display. By this point the gauge is
-     * already on screen, which is the whole point of the ordering in docs/architecture.md.
+     * Networking starts last and never blocks the display: by this point the gauge is on
+     * screen. Starting WiFi before building the UI was tried and was worse, not better -- WiFi
+     * initialised 4 of its static RX buffers instead of 5 (docs/performance.md).
      */
     const net_svc_callbacks_t net_cb = {
         .on_config_changed = on_config_changed,
         .on_telemetry      = on_telemetry,
     };
-    if (net_svc_start(&net_cb) != ESP_OK) {
+    bool net_ok = (net_svc_start(&net_cb) == ESP_OK);
+    if (!net_ok) {
         ESP_LOGE(TAG, "networking failed to start; the gauge continues without it");
     }
 
     /* Last thing at startup: arm the delayed confirmation (see ota_confirm_timer_cb). */
     const esp_timer_create_args_t confirm_args = {.callback = ota_confirm_timer_cb, .name = "ota_confirm"};
     esp_timer_handle_t            confirm_timer = NULL;
-    if (esp_timer_create(&confirm_args, &confirm_timer) == ESP_OK) {
+    /*
+     * An image whose networking failed to start cannot be updated remotely, so it must not
+     * confirm itself: leaving it unconfirmed lets the bootloader return to the previous
+     * image after the next reset. A missing WiFi network does not count as a failure --
+     * net_svc_start() only fails when the stack itself cannot initialise.
+     */
+    if (!net_ok) {
+        ESP_LOGW(TAG, "not confirming this image: networking failed to start");
+    } else if (esp_timer_create(&confirm_args, &confirm_timer) == ESP_OK) {
         esp_timer_start_once(confirm_timer, (uint64_t)OTA_CONFIRM_AFTER_MS * 1000);
     }
 
