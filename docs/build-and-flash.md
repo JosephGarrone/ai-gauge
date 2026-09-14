@@ -110,5 +110,6 @@ ctest --test-dir build/host-tests --output-on-failure
 | Flash mode reads `dio` despite `FLASHMODE_QIO=y` | Expected — the bootloader starts in DIO and upgrades itself to quad mode during init |
 | `Target esp32s3 not supported` | BSP needs IDF ≥5.5 — check `idf.py --version` |
 | Blank display, no errors | PSRAM config — the octal PSRAM settings in `sdkconfig.defaults` are required |
+| Screen shows the dial once, goes black, and the COM port disappears | Not enough USB current. Once WiFi starts, the radio plus the lit AMOLED can exceed what a front-panel port or hub supplies, and the port shuts off. Use a rear motherboard port. Confirmed on hardware: the same board ran indefinitely from a rear port. In a vehicle the gauge runs from its own 12V-to-5V supply, not a PC port |
 | Boot loop after flashing | Partition table changed without erasing; run `idf.py -C firmware erase-flash` first |
 | Poor frame rate | See [performance.md](performance.md); confirm `CONFIG_COMPILER_OPTIMIZATION_PERF` and the dual draw units are set |

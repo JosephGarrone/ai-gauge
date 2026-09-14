@@ -3,10 +3,22 @@
 WiFi exists to serve the gauge, never to delay it. `net_svc` starts **last** and runs on core
 0; nothing in the display path waits on it. See [architecture.md](architecture.md).
 
-> **Verification status:** the network stack starts on hardware (setup network, mDNS, HTTP
-> server, telemetry listener) and the display holds 66.6 fps with the radio active. The HTTP
-> endpoints, provisioning flow, telemetry ingest and OTA have **not yet been exercised end to
-> end** from a client. See the M4 exit criteria in [roadmap.md](roadmap.md).
+> **Verification status (2026-09-14, on hardware, gauge joined to a home network):**
+>
+> - Provisioning from a phone via the setup page, including a failed attempt that correctly fell
+>   back to the setup network without saving anything.
+> - Credentials persist across reboots and OTA updates.
+> - `ai-gauge-91e8.local` resolves from a Windows PC.
+> - 17 endpoint checks pass: status, gauge list, config get, 404 for unknown, malformed upload
+>   rejected with the live config intact, valid upload reloaded live, create, delete, path
+>   traversal rejected, malformed telemetry ignored, garbage OTA image rejected without a reboot.
+> - Telemetry drives the needle: a 58.6Hz feed rendered every datagram.
+> - OTA of a real 1.58MB image over WiFi in ~15s; the bootloader's OTA data then records ota_1 as
+>   VALID, and it stayed booted there across two further reboots.
+>
+> - Boot-time rollback: an image that passed upload validation, booted, and aborted before
+>   confirming itself was marked ABORTED by the bootloader, which then booted the previous image.
+>   The gauge was back on the network about 5s later.
 
 ## Provisioning
 
@@ -119,7 +131,7 @@ is recorded in [performance.md](performance.md) and [display-pipeline.md](displa
 
 ## Open items
 
-- End-to-end verification of every endpoint, provisioning, telemetry and OTA (M4 exit criteria).
+- Expose the running OTA partition in `GET /api/status`, so update checks do not need a serial cable.
 - Captive-portal DNS redirect for the setup network.
 - Settings-page controls to disable WiFi and to forget credentials (`net_svc_forget_credentials()`
   exists but is not wired to the UI).

@@ -55,6 +55,12 @@ bands, ticks, labels, a damped needle and threshold alerts. Swipe up for setting
 different gauge, adjust brightness, toggle an FPS badge, read live frame statistics and
 firmware information. Choices persist across reboots.
 
+Over WiFi, the gauge is set up from a phone and then reachable at `ai-gauge-XXXX.local`. Its HTTP
+API uploads new gauge faces and applies them live, accepts telemetry from other devices, and
+installs firmware updates, rolling back automatically if an update fails to start. See
+[docs/networking.md](docs/networking.md); note the API is unauthenticated, so use it only on a
+network you trust.
+
 A missing or malformed configuration falls back to the next available one, and then to a
 compiled-in face, always saying on the settings page what went wrong. A bad config file must
 never leave a driver looking at a blank screen.
@@ -80,8 +86,8 @@ Detail and exit criteria in [docs/roadmap.md](docs/roadmap.md).
 | M1 | Foundation: docs, build, XML parser, CI, display bring-up | ✅ |
 | M2 | Renderer and screens; the 60fps gate | ✅ |
 | M3 | Load configurations from flash; switch gauges at runtime | ✅ |
-| **M4** | **WiFi: provisioning, config upload, telemetry feeds, OTA** | **next** |
-| M5 | Sensors: boost via ADS1115, EGT via MCP9600 | blocked on hardware |
+| M4 | WiFi: provisioning, config upload, telemetry feeds, OTA | ✅ |
+| **M5** | **Sensors: boost via ADS1115, EGT via MCP9600** | **next, blocked on hardware** |
 | M6 | Audible alerts, peak-hold, datalogging | |
 | M7 | Portability: square and other round panels | |
 | M8 | Web app for designing gauge faces | |
