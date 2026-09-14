@@ -143,6 +143,10 @@ config and then to the compiled-in face. All three paths are verified on hardwar
 
 **Internal RAM is the binding constraint, not CPU.** After WiFi starts, only ~3KB of internal heap remains. The LVGL flush buffers are deliberately in internal DMA memory (`retarget_draw_buffers()` in `app_main.c`) because the BSP's PSRAM buffers forced a bounce copy on every flush and broke the display once WiFi ran. `DRAW_BUF_LINES` and the memory settings in `sdkconfig.defaults` are load-bearing: change them only with a hardware measurement. See [docs/performance.md](docs/performance.md).
 
+Two ways internal RAM leaks away unnoticed:
+- **Task stacks are internal RAM.** That includes LVGL's draw threads, the HTTP server and every `xTaskCreate()`. Size them from a measured high-water mark, not a default. WiFi's own startup needs ~48KB of internal DMA memory, and shrinking the draw-thread stacks is what made room for 6 static RX buffers.
+- **Plain `malloc()` of under 4KB is internal RAM too** (`SPIRAM_MALLOC_ALWAYSINTERNAL`). Allocate buffers and large structs, such as a 924-byte `gauge_config_t`, with `heap_caps_malloc(..., MALLOC_CAP_SPIRAM)`. Never put them on the stack of a network task.
+
 **Never call the BSP's audio init** (`bsp_audio_init()`, `bsp_audio_codec_*_init()`). It
 allocates speaker and microphone buffers that do not fit once WiFi runs, and the BSP aborts on
 the failure, boot-looping the board. OTA images confirm themselves 15s after startup, so a

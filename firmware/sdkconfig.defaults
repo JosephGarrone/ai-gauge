@@ -34,10 +34,11 @@ CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 # cannot hold them -- and enabling the option above raises their default to 16, which this
 # board cannot afford alongside the LVGL flush buffers in internal RAM. Everything that can be
 # dynamic is, so it comes from PSRAM instead.
-# Measured: with peak-hold added, WiFi could only initialise 5 (and in another order, 4) of 6
-# static RX buffers and failed to start at all. Four is what reliably fits, and is ample for
-# config uploads, OTA and a telemetry stream. The block-ack window below must stay <= 2x this.
-CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
+# Measured: with peak-hold added, WiFi could only initialise 5 of 6 static RX buffers and failed
+# to start at all -- esp_wifi_init() needs ~48KB of internal DMA memory. Shrinking the LVGL draw
+# thread stacks (below) paid for the headroom that restored six. The block-ack window below
+# must stay <= 2x this.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=8
 CONFIG_ESP_WIFI_TX_BUFFER_TYPE=1
 CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=8
@@ -89,6 +90,11 @@ CONFIG_LV_USE_CLIB_SPRINTF=y
 
 # PERF: two software draw units so rendering spreads across both cores.
 CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+# LVGL creates its draw threads with plain xTaskCreate(), so their stacks are internal RAM --
+# the same scarce heap WiFi needs. The 8KB default peaked at ~1.7KB used (needle sweep, face
+# pre-render and config reload measured with a task high-water dump); 4KB frees 8KB for WiFi.
+# Re-measure before adding draw work that recurses deeper (e.g. gradients, blur, masks).
+CONFIG_LV_DRAW_THREAD_STACK_SIZE=4096
 # PERF: LVGL's hot blend paths in IRAM.
 CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
 # PERF: 15ms refresh period targets ~66fps, leaving margin above the 60fps requirement.

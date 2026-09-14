@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_littlefs.h"
 #include "esp_log.h"
 
@@ -55,6 +56,18 @@ static bool id_is_safe(const char *id)
         }
     }
     return true;
+}
+
+/*
+ * Everything this component allocates goes to PSRAM explicitly. Plain malloc() would put
+ * anything under SPIRAM_MALLOC_ALWAYSINTERNAL (4KB) -- every config and every parsed
+ * gauge_config_t -- into internal RAM, which WiFi needs. And a gauge_config_t is too large for
+ * the stacks of the tasks that load one: config uploads had brought the HTTP server's
+ * internal-RAM stack to within 668 bytes of overflowing (docs/performance.md).
+ */
+static gauge_config_t *alloc_config(void)
+{
+    return heap_caps_malloc(sizeof(gauge_config_t), MALLOC_CAP_SPIRAM);
 }
 
 static void path_for(const char *id, char *out, size_t out_len)
@@ -181,7 +194,7 @@ static char *read_file(const char *path, size_t *out_len, char *err, size_t err_
     }
 
     size_t len = (size_t)st.st_size;
-    char  *buf = malloc(len + 1);
+    char  *buf = heap_caps_malloc(len + 1, MALLOC_CAP_SPIRAM);
     if (buf == NULL) {
         fclose(f);
         set_err(err, err_len, "out of memory");
@@ -224,26 +237,35 @@ esp_err_t gauge_store_load(const char *id, gauge_config_t *cfg, char *err, size_
         return ESP_ERR_NOT_FOUND;
     }
 
-    gauge_config_t parsed;
-    gauge_config_err_t perr = gauge_config_parse(xml, len, &parsed);
+    /* Parsed into a scratch copy so a rejected file leaves *cfg untouched. */
+    gauge_config_t *parsed = alloc_config();
+    if (parsed == NULL) {
+        free(xml);
+        set_err(err, err_len, "out of memory");
+        return ESP_ERR_NO_MEM;
+    }
+
+    gauge_config_err_t perr = gauge_config_parse(xml, len, parsed);
     free(xml);
 
     if (perr != GAUGE_CONFIG_OK) {
+        free(parsed);
         set_err(err, err_len, "%s", gauge_config_err_str(perr));
         ESP_LOGW(TAG, "'%s' rejected: %s", id, gauge_config_err_str(perr));
         return ESP_ERR_INVALID_ARG;
     }
 
-    *cfg = parsed;
+    *cfg = *parsed;
+    free(parsed);
 
-    if (parsed.warning_count > 0) {
+    if (cfg->warning_count > 0) {
         set_err(err, err_len, "loaded with %u adjusted value(s)",
-                (unsigned)parsed.warning_count);
-        ESP_LOGW(TAG, "'%s' loaded with %u warning(s)", id, parsed.warning_count);
+                (unsigned)cfg->warning_count);
+        ESP_LOGW(TAG, "'%s' loaded with %u warning(s)", id, cfg->warning_count);
     } else {
         set_err(err, err_len, "%s", "");
-        ESP_LOGI(TAG, "loaded '%s': %s %.1f..%.1f %s", id, parsed.source.channel,
-                 (double)parsed.source.min, (double)parsed.source.max, parsed.source.unit);
+        ESP_LOGI(TAG, "loaded '%s': %s %.1f..%.1f %s", id, cfg->source.channel,
+                 (double)cfg->source.min, (double)cfg->source.max, cfg->source.unit);
     }
 
     return ESP_OK;
@@ -273,8 +295,14 @@ esp_err_t gauge_store_save(const char *id, const char *xml, size_t len,
      * exactly as it was -- replacing it and then discovering the problem would strand a
      * vehicle with a blank gauge.
      */
-    gauge_config_t     parsed;
-    gauge_config_err_t perr = gauge_config_parse(xml, len, &parsed);
+    gauge_config_t *parsed = alloc_config();
+    if (parsed == NULL) {
+        set_err(err, err_len, "out of memory");
+        return ESP_ERR_NO_MEM;
+    }
+
+    gauge_config_err_t perr = gauge_config_parse(xml, len, parsed);
+    free(parsed);
     if (perr != GAUGE_CONFIG_OK) {
         set_err(err, err_len, "%s", gauge_config_err_str(perr));
         return ESP_ERR_INVALID_ARG;
