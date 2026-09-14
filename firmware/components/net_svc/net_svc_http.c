@@ -169,14 +169,19 @@ static esp_err_t config_get(httpd_req_t *req)
 {
     const char *id = last_segment(req->uri);
 
-    gauge_config_t cfg;
-    char           err[GAUGE_STORE_ERR_LEN] = {0};
+    /* PSRAM, not this task's internal-RAM stack -- see gauge_store.c. */
+    gauge_config_t *cfg = heap_caps_malloc(sizeof(*cfg), MALLOC_CAP_SPIRAM);
+    char            err[GAUGE_STORE_ERR_LEN] = {0};
+    if (cfg == NULL) {
+        return send_json_error(req, "500 Internal Server Error", "out of memory");
+    }
 
     /*
      * Loading through the parser means this reports the same verdict the gauge would reach,
      * rather than blindly streaming bytes that may not be usable.
      */
-    if (gauge_store_load(id, &cfg, err, sizeof(err)) != ESP_OK) {
+    if (gauge_store_load(id, cfg, err, sizeof(err)) != ESP_OK) {
+        free(cfg);
         return send_json_error(req, "404 Not Found", err[0] ? err : "not found");
     }
 
@@ -184,8 +189,9 @@ static esp_err_t config_get(httpd_req_t *req)
     snprintf(body, sizeof(body),
              "{\"id\":\"%s\",\"channel\":\"%s\",\"unit\":\"%s\","
              "\"min\":%.3f,\"max\":%.3f,\"warnings\":%u}",
-             cfg.id, cfg.source.channel, cfg.source.unit,
-             (double)cfg.source.min, (double)cfg.source.max, cfg.warning_count);
+             cfg->id, cfg->source.channel, cfg->source.unit,
+             (double)cfg->source.min, (double)cfg->source.max, cfg->warning_count);
+    free(cfg);
 
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, body);

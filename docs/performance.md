@@ -261,15 +261,58 @@ E net_svc: net_svc_start(356): wifi_init
 The obvious explanation — the new UI objects taking internal memory WiFi needed — did not survive
 a test. Starting WiFi *before* building the UI made it worse, initialising only 4 of 6, even
 though a 32KB internal block was free at that moment. So this is not simple fragmentation by UI
-objects, and the underlying cause is **not yet understood**. The UI-first order was restored.
+objects. The UI-first order was restored.
 
-Reducing `CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM` to 4 fixed it: WiFi connects, the HTTP server
-answers, the dial holds 66.7 fps, and internal free heap is ~7.4KB just after startup, settling at
-~11.6KB. Four is ample for config uploads, OTA and a telemetry stream. Treat the value as
-load-bearing and re-measure before raising it.
+As a stopgap, `CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM` was cut to 4. WiFi connected and the dial
+held 66.7 fps, but the cause was unexplained, so it was investigated.
+
+**What the diagnostic showed.** A temporary build with 6 static RX buffers hooked
+`heap_caps_register_failed_alloc_callback()` and dumped the internal heap either side of
+`esp_wifi_init()`:
+
+| Measurement | Value |
+|---|---|
+| Failing allocation | **1,604 bytes**, caps `0x80c` (8BIT + DMA + INTERNAL) — the 6th static RX buffer |
+| Internal DMA free before `esp_wifi_init()` | 50.9KB, largest block 31.7KB |
+| Internal DMA free at the failure | 2.7KB, largest block 1.4KB |
+| `SPIRAM_MALLOC_RESERVE_INTERNAL` pool during init | drained to 1,427B free — WiFi can and does use it |
+| RTC fast RAM | 7.7KB free throughout, but not DMA-capable, so unusable here |
+
+So this is **not fragmentation, and the reserve pool is not a trap**. WiFi's own initialisation
+consumes roughly 48KB of internal DMA-capable memory before it reaches its last RX buffer, and the
+total left over after the display, audio, HTTP server and every task stack is simply smaller than
+that. Real headroom has to come from removing other internal consumers; FreeRTOS task stacks are
+the prime suspects, since ESP-IDF forces them into internal memory.
+
+**Task stacks, measured.** A second temporary build dumped `vTaskList()` high-water marks every 20s
+through boot, the needle sweep, a config upload with live reload, and an OTA:
+
+| Task | Stack | Peak used | Notes |
+|---|---|---|---|
+| `swdraw` ×2 (LVGL draw threads) | 8,192 each | ~1.7KB | LVGL creates them with plain `xTaskCreate()`, so internal |
+| `lvgl` (adapter task) | 8,192 | ~3.7KB | Adapter default `stack_in_psram = false` |
+| `httpd` | 6,144 | **~5.5KB** | Only 668B left after a config upload |
+| `wifi` | 6,656 | ~3.2KB | Owned by the driver |
+
+**The fix, measured on hardware:**
+
+1. `CONFIG_LV_DRAW_THREAD_STACK_SIZE` 8,192 → **4,096**, freeing 8KB of internal RAM. The draw
+   threads still keep ~2.4KB free after boot, face pre-render, config reload and a sustained sweep.
+2. `CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM` restored to **6**. All six initialise and WiFi connects.
+3. **The HTTP server's near-overflow was a separate bug the dump uncovered.** A config upload put
+   three `gauge_config_t` (924 bytes each) on the server task's stack: one validating the save, and
+   two more in the reload callback, which runs on that same task and also rebuilds the face. All
+   are now allocated in PSRAM, as is `gauge_store`'s file buffer, which plain `malloc()` had been
+   placing in internal RAM because it is under 4KB. Minimum free `httpd` stack after an upload
+   went from **668B to 2,500B**.
+
+With all three: 66.7 fps, internal free heap ~8.6KB after startup (lowest ever 2.2KB), OTA
+succeeds and the new image confirms itself, and all 17 endpoint checks pass. Internal RAM is still
+the scarcest resource on the board, so anything that adds a task, a stack, or a small `malloc()`
+must be measured. The method above (a failed-allocation callback plus a periodic `vTaskList()`
+dump) is the quickest way to find where it went.
 
 ### Not yet measured
-- Internal heap behaviour during an OTA and during a config upload.
 - Scenarios 1, 3 and 6.
 
 ## The gate

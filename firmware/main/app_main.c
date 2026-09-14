@@ -257,15 +257,20 @@ static void on_config_changed(const char *id, bool deleted)
 
     /* Reload live only when the gauge on screen is the one that changed. */
     if (!deleted && strcmp(id, s_active_cfg.id) == 0) {
-        gauge_config_t cfg;
-        char           err[GAUGE_STORE_ERR_LEN] = {0};
+        /*
+         * PSRAM, not the stack: this runs on the HTTP server task, whose stack is internal RAM
+         * and which also has to rebuild the face from here (docs/performance.md).
+         */
+        gauge_config_t *cfg = heap_caps_malloc(sizeof(*cfg), MALLOC_CAP_SPIRAM);
+        char            err[GAUGE_STORE_ERR_LEN] = {0};
 
-        if (gauge_store_load(id, &cfg, err, sizeof(err)) == ESP_OK &&
-            app_ui_set_config(&cfg) == ESP_OK) {
-            s_active_cfg = cfg;
+        if (cfg != NULL && gauge_store_load(id, cfg, err, sizeof(err)) == ESP_OK &&
+            app_ui_set_config(cfg) == ESP_OK) {
+            s_active_cfg = *cfg;
             app_ui_set_warning(err[0] != '\0' ? err : NULL);
             ESP_LOGI(TAG, "reloaded '%s' without rebooting", id);
         }
+        free(cfg);
     }
 
     bsp_display_unlock();
