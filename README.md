@@ -51,9 +51,14 @@ Running on hardware, driven by a **simulated** value source — no sensor is bei
 the sensor board does not exist.
 
 **Working today:** the dial renders from an XML configuration held on flash, with colour
-bands, ticks, labels, a damped needle and threshold alerts. Swipe up for settings — pick a
-different gauge, adjust brightness, toggle an FPS badge, read live frame statistics and
-firmware information. Choices persist across reboots.
+bands, ticks, labels and a damped needle. Crossing an alert threshold flashes the needle in the
+alert colour. A peak-hold marker records the highest reading on the dial; tap the dial to reset
+it. Swipe up for settings — pick a different gauge, adjust brightness, toggle an FPS badge or the
+alert sound, and read live frame statistics and firmware information. Choices persist across
+reboots.
+
+The alert chime is implemented and plays through the audio codec without errors, but nothing is
+audible on the development board, which appears to have no speaker fitted.
 
 Over WiFi, the gauge is set up from a phone and then reachable at `ai-gauge-XXXX.local`. Its HTTP
 API uploads new gauge faces and applies them live, accepts telemetry from other devices, and
@@ -65,16 +70,23 @@ A missing or malformed configuration falls back to the next available one, and t
 compiled-in face, always saying on the settings page what went wrong. A bad config file must
 never leave a driver looking at a blank screen.
 
-**Measured on hardware** (ESP32-S3 rev v0.2), needle sweeping continuously:
+**Measured on hardware** (ESP32-S3 rev v0.2), needle sweeping continuously with WiFi connected,
+peak-hold and audio running:
 
 | | Result |
 |---|---|
-| Frame rate | **66.6 fps** (the LVGL refresh ceiling, not a rendering limit) |
-| Screen redrawn per frame | 13.2% |
-| Render time | 5.9 ms of each 15 ms period |
+| Frame rate | **66.7 fps** (the LVGL refresh ceiling, not a rendering limit) |
+| Screen redrawn per frame | ~13% |
+| Render time | ~7.7 ms of each 15 ms period |
 | Swipe transition | ~33 fps — a documented, accepted trade |
+| Internal RAM free after startup | ~8.6 KB — the board's scarcest resource |
 
-Method, and the two renderer designs that failed before this one, are in
+CPU is not the constraint on this board; **internal RAM is**. The display's flush buffers, WiFi's
+receive buffers and every task stack all compete for the ESP32-S3's ~512 KB of internal SRAM, while
+8 MB of PSRAM sits largely idle. Anything that adds a task, a stack or a small allocation has to
+be measured. The rules are in [AGENTS.md](AGENTS.md).
+
+Method, the renderer designs that failed, and how each memory limit was found and fixed, are in
 [docs/performance.md](docs/performance.md).
 
 ## Roadmap
@@ -87,10 +99,13 @@ Detail and exit criteria in [docs/roadmap.md](docs/roadmap.md).
 | M2 | Renderer and screens; the 60fps gate | ✅ |
 | M3 | Load configurations from flash; switch gauges at runtime | ✅ |
 | M4 | WiFi: provisioning, config upload, telemetry feeds, OTA | ✅ |
-| **M5** | **Sensors: boost via ADS1115, EGT via MCP9600** | **next, blocked on hardware** |
-| M6 | Audible alerts, peak-hold, datalogging | |
+| M5 | Sensors: boost via ADS1115, EGT via MCP9600 | blocked on hardware |
+| **M6** | **Alerts, peak-hold, min/max recall, datalogging** | **🚧 in progress** |
 | M7 | Portability: square and other round panels | |
 | M8 | Web app for designing gauge faces | |
+
+M6 so far: needle alert flash and peak-hold are verified on hardware; the chime is done but
+silent (no speaker). Min/max recall is next, and SD datalogging waits for a card.
 
 Software comes before sensors deliberately. The sensor board still has to be built, and the
 firmware treats a simulated source, a network feed and a real sensor identically — so the
