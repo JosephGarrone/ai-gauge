@@ -19,6 +19,8 @@ WiFi exists to serve the gauge, never to delay it. `net_svc` starts **last** and
 > - Boot-time rollback: an image that passed upload validation, booted, and aborted before
 >   confirming itself was marked ABORTED by the bootloader, which then booted the previous image.
 >   The gauge was back on the network about 5s later.
+> - Late-crash rollback: an image that built its UI, joined WiFi, then crashed 3s later (before
+>   its 15s confirmation) was marked ABORTED and the previous image booted and re-confirmed.
 
 ## Provisioning
 
@@ -119,8 +121,12 @@ last value rather than going invalid. That belongs with the channel snapshot in 
 - `POST /api/ota` streams the body into the inactive slot. `esp_ota_end()` validates the image
   before the boot partition is switched, so a corrupt upload is rejected rather than booted.
 - `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` is on. A newly installed image confirms itself with
-  `esp_ota_mark_app_valid_cancel_rollback()` only **after its UI has been built**. An image
-  that crashes before reaching that point is rolled back on the next boot.
+  `esp_ota_mark_app_valid_cancel_rollback()` only once **startup has finished and the gauge has
+  stayed up for 15 seconds**. A crash anywhere in that window leaves the image unconfirmed, and
+  the bootloader returns to the previous image on the next boot.
+- Confirming straight after the UI was built proved too early. A test image that crashed a few
+  hundred milliseconds later, during audio start-up, had already confirmed itself, so it was
+  never rolled back and the board boot-looped until it was reflashed over USB.
 
 ## Memory constraints
 

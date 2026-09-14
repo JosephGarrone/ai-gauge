@@ -203,6 +203,32 @@ the feed ran.
 Internal heap during the whole run held at ~8—9KB free, better than the ~3KB seen with the
 setup access point up.
 
+### Audio: the stock BSP setup does not fit alongside WiFi
+
+Measured with a temporary build that started the ES8311 speaker through the BSP after WiFi.
+
+`bsp_audio_init()` always creates **both** a speaker and a microphone I2S channel, each with the
+driver's default six DMA buffers of 480 bytes. DMA buffers must be internal memory. With WiFi
+running, internal free heap was ~8KB but the **largest free DMA block was only 480—2,688
+bytes**, and the allocation failed:
+
+```
+E i2s_common: i2s_alloc_dma_desc(510): allocate DMA buffer failed
+E ESP32-S3-Touch-AMOLED-1.75: bsp_audio_init(222): I2S channel initialization failed
+```
+
+The BSP is built with `CONFIG_BSP_ERROR_CHECK`, so that failure is an **abort, not an error
+return**: the board panicked about 2.7s into every boot. The test image also held a 4.4KB tone
+table in `.bss`, which is internal RAM, and that alone was enough to stop the HTTP server
+starting. Static buffers of that size must not live in internal memory on this board.
+
+Consequences for the M6 chime:
+
+- Do not call `bsp_audio_init()` or `bsp_audio_codec_speaker_init()`.
+- Create a speaker-only I2S channel directly, with small DMA buffers, and allocate it before WiFi
+  claims its share of internal memory — the same approach that made the flush buffers fit.
+- Generate the chime into PSRAM, never into a static internal array.
+
 ### Not yet measured
 - Internal heap behaviour during an OTA and during a config upload.
 - Scenarios 1, 3 and 6.

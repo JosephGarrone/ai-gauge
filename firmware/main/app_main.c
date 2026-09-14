@@ -335,6 +335,28 @@ static const char *reset_reason_str(esp_reset_reason_t r)
     }
 }
 
+/*
+ * Confirm a freshly installed OTA image only once it has run healthily for a while.
+ *
+ * Confirming as soon as the UI was built proved too early. A test image that panicked a few
+ * hundred milliseconds later, during audio start-up, had already confirmed itself, so the
+ * bootloader never rolled it back and the board boot-looped until it was reflashed over USB.
+ * Waiting until startup has finished and the system has stayed up means a crash anywhere in
+ * that window leaves the image unconfirmed, and the bootloader reverts on the next boot.
+ */
+#define OTA_CONFIRM_AFTER_MS 15000
+
+static void ota_confirm_timer_cb(void *arg)
+{
+    (void)arg;
+    esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "running image confirmed after %d s", OTA_CONFIRM_AFTER_MS / 1000);
+    } else if (err != ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGW(TAG, "could not confirm the running image: %s", esp_err_to_name(err));
+    }
+}
+
 /* ------------------------------------------------------------------- startup -------- */
 
 void app_main(void)
@@ -393,17 +415,6 @@ void app_main(void)
     }
     ESP_LOGI(TAG, "UI built in %" PRId64 " ms", (esp_timer_get_time() - t0) / 1000);
 
-    /*
-     * The gauge is on screen, so this image demonstrably works: confirm it. With
-     * CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE the bootloader otherwise treats a freshly
-     * OTA-installed image as unproven and reverts to the previous one on its next reboot --
-     * every update would silently undo itself. Confirming only after the UI is built means an
-     * image that cannot reach this point still rolls back, which is the point of the feature.
-     */
-    esp_err_t ota_err = esp_ota_mark_app_valid_cancel_rollback();
-    if (ota_err != ESP_OK && ota_err != ESP_ERR_NOT_SUPPORTED) {
-        ESP_LOGW(TAG, "could not confirm the running image: %s", esp_err_to_name(ota_err));
-    }
 
     gauge_store_list_t list;
     gauge_store_list(&list);
@@ -444,6 +455,13 @@ void app_main(void)
     };
     if (net_svc_start(&net_cb) != ESP_OK) {
         ESP_LOGE(TAG, "networking failed to start; the gauge continues without it");
+    }
+
+    /* Last thing at startup: arm the delayed confirmation (see ota_confirm_timer_cb). */
+    const esp_timer_create_args_t confirm_args = {.callback = ota_confirm_timer_cb, .name = "ota_confirm"};
+    esp_timer_handle_t            confirm_timer = NULL;
+    if (esp_timer_create(&confirm_args, &confirm_timer) == ESP_OK) {
+        esp_timer_start_once(confirm_timer, (uint64_t)OTA_CONFIRM_AFTER_MS * 1000);
     }
 
     /*

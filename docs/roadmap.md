@@ -134,7 +134,9 @@ pressure. Getting it wrong offsets every reading by about 14.7 PSI.
 ## M6 — Alerts and refinement
 
 - Audible over-boost / over-EGT chime through the ES8311 codec, wiring up
-  `<alert chime="true">` ([ADR 0004](adr/0004-retain-sd-and-audio.md))
+  `<alert chime="true">` ([ADR 0004](adr/0004-retain-sd-and-audio.md)). The BSP's own audio
+  setup does not fit alongside WiFi and aborts when it fails, so the chime needs its own
+  speaker-only I2S channel; see the audio section of [performance.md](performance.md).
 - Recolour the needle on alert, not just the readout
 - Peak-hold and min/max recall — conventional on boost and EGT gauges
 - Optional datalogging to the microSD slot
