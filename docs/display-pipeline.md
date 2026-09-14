@@ -47,12 +47,26 @@ See [performance.md](performance.md).
 Digital readouts are their own small labels with their own background, so a changing number
 dirties only its own box rather than the dial behind it.
 
-### 4. Two DMA buffers in internal SRAM
+### 4. Flush buffers in internal DMA memory, not PSRAM
 
-LVGL runs in **partial mode** with two flush buffers of roughly `466 × 60 × 2B ≈ 56KB` each,
-allocated in **internal** SRAM — deliberately not PSRAM. SPI DMA out of internal SRAM runs at
-full rate; out of PSRAM it contends for the same cache and bus as instruction fetch (this
-board runs `SPIRAM_XIP_FROM_PSRAM`), which shows up directly as reduced throughput.
+LVGL runs in **partial mode** with two flush buffers of `466 x 20 x 2B = 18,640 bytes` each,
+allocated in **internal** DMA-capable SRAM by `retarget_draw_buffers()` in `app_main.c`.
+
+This is not what the BSP does by default, and the difference is not a tuning detail. The
+Waveshare BSP allocates its flush buffers in **PSRAM** (`use_psram = true`, 50 lines). On
+ESP32-S3, `esp_ptr_dma_capable()` is false for PSRAM addresses, so the SPI master driver
+silently allocates an internal DMA **bounce buffer the size of the whole transfer and memcpys
+the frame into it, on every flush**. That only works while a contiguous ~46KB internal block
+happens to be free. The moment WiFi starts, the largest free DMA block drops to ~20KB, every
+transfer fails with `ESP_ERR_NO_MEM`, and the display stops outright.
+
+The BSP exposes no way to change this, so the buffers are swapped afterwards through LVGL's
+public `lv_display_set_buffers()`, before the UI is built and before WiFi claims its share of
+internal RAM. Internal buffers eliminate both the bounce allocation and the extra copy.
+
+**Keep them at 20 lines.** Measured: 12 lines hangs the LVGL task outright with no error
+logged, and larger buffers do not fit alongside the network stack. The reason 12 fails is not
+yet understood, so treat this value as load-bearing and re-measure before changing it.
 
 Rendering into one buffer overlaps with DMA-ing the other out.
 
@@ -106,7 +120,12 @@ needed.
 
 ## Measuring
 
-`CONFIG_LV_USE_PERF_MONITOR` gives an on-screen FPS and CPU-load overlay, toggleable from the
-settings screen. Beyond that, the flush callback accumulates **bytes transferred per frame**
-and **dirty area per frame** — the two numbers that actually predict whether a change is
-affordable. Method and results in [performance.md](performance.md).
+`gauge_perf` accumulates **bytes transferred per frame** and **dirty area per frame** — the
+two numbers that actually predict whether a change is affordable. They are logged
+periodically, shown live on the settings page, and available as an optional badge on the
+dial. Method and results in [performance.md](performance.md).
+
+**LVGL's own `CONFIG_LV_USE_PERF_MONITOR` is deliberately disabled.** It is pinned to a
+screen corner, and this panel is round — the corners are not there, so the overlay renders
+outside the visible area. It also reports LVGL's internal view of its own work rather than
+what reaches the panel.

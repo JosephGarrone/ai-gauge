@@ -41,6 +41,7 @@ static struct {
     lv_obj_t *heap_label;
     lv_obj_t *gauge_dropdown;
     lv_obj_t *gauge_info_label;
+    lv_obj_t *network_label;
 
     /* Ids backing the dropdown, in the order they appear in it. */
     char gauge_ids[GAUGE_STORE_MAX_GAUGES][GAUGE_CONFIG_MAX_ID_LEN];
@@ -210,6 +211,15 @@ static void build_settings_tile(lv_obj_t *tile, const gauge_config_t *cfg)
         lv_obj_add_state(sw, LV_STATE_CHECKED);
     }
     lv_obj_add_event_cb(sw, show_fps_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    /* --- network --- */
+    lv_obj_t *net_row = add_row(col, "Network");
+    s.network_label   = lv_label_create(net_row);
+    lv_label_set_long_mode(s.network_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(s.network_label, LV_PCT(100));
+    lv_label_set_text(s.network_label, "starting...");
+    lv_obj_set_style_text_font(s.network_label, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s.network_label, lv_color_hex(0xffffff), LV_PART_MAIN);
 
     /* --- live performance --- */
     lv_obj_t *perf_row = add_row(col, "Performance");
@@ -439,6 +449,19 @@ app_ui_tile_t app_ui_get_tile(void)
     /* Derive from scroll position: the tileview reports the tile it has settled on. */
     lv_obj_t *active = lv_tileview_get_tile_active(s.tileview);
     return (active == s.tile_settings) ? APP_UI_TILE_SETTINGS : APP_UI_TILE_GAUGE;
+}
+
+void app_ui_set_network_status(const char *state, const char *detail)
+{
+    if (s.network_label == NULL) {
+        return;
+    }
+
+    if (detail != NULL && detail[0] != '\0') {
+        lv_label_set_text_fmt(s.network_label, "%s\n%s", state, detail);
+    } else {
+        lv_label_set_text(s.network_label, state);
+    }
 }
 
 void app_ui_set_warning(const char *text)

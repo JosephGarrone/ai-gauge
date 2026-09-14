@@ -17,6 +17,7 @@
 #include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -33,6 +34,7 @@
 #include "gauge_perf.h"
 #include "gauge_render.h"
 #include "gauge_store.h"
+#include "net_svc.h"
 
 static const char *TAG = "app_main";
 
@@ -181,6 +183,138 @@ static void on_gauge_selected(const char *id)
     app_ui_set_warning(err[0] != '\0' ? err : NULL);
 }
 
+/* --------------------------------------------------------------- draw buffers ------- */
+
+/*
+ * Lines per LVGL flush buffer: 466 x 20 x 2B = 18,640 bytes each, in internal RAM.
+ *
+ * Load-bearing, measured on hardware. 12 lines hangs the LVGL task outright with no error
+ * logged -- the cause is not yet understood -- and larger buffers do not leave room for the
+ * network stack. Re-measure before changing it (docs/display-pipeline.md).
+ */
+#define DRAW_BUF_LINES 20
+
+/*
+ * Move the LVGL flush buffers into internal DMA-capable memory.
+ *
+ * The BSP allocates them in PSRAM (`use_psram = true`), and esp_ptr_dma_capable() is false
+ * for PSRAM addresses, so the SPI driver quietly allocated a ~46KB internal bounce buffer
+ * and memcpy'd the whole flush into it *on every single transfer*. That works only while a
+ * contiguous 46KB block happens to be free; once WiFi starts, the largest free DMA block
+ * drops to ~20KB and every transfer fails with ESP_ERR_NO_MEM -- the display simply stops.
+ *
+ * Allocating our own smaller buffers in internal RAM removes the bounce buffer and the copy
+ * entirely, and does it before WiFi has taken its share. This is what
+ * docs/display-pipeline.md always specified; the BSP just does not offer a way to configure
+ * it, so the buffers are swapped afterwards through LVGL's public API.
+ */
+static void retarget_draw_buffers(const board_profile_t *board)
+{
+    lv_display_t *disp = lv_display_get_default();
+    if (disp == NULL) {
+        return;
+    }
+
+    size_t bytes = (size_t)board->width_px * DRAW_BUF_LINES * 2; /* RGB565 */
+
+    void *buf1 = heap_caps_aligned_alloc(64, bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    void *buf2 = heap_caps_aligned_alloc(64, bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+
+    if (buf1 == NULL || buf2 == NULL) {
+        /* Keep the BSP's PSRAM buffers rather than leaving the display with none. */
+        free(buf1);
+        free(buf2);
+        ESP_LOGW(TAG, "could not allocate internal draw buffers (%u B each); "
+                      "staying on PSRAM buffers", (unsigned)bytes);
+        return;
+    }
+
+    lv_display_set_buffers(disp, buf1, buf2, bytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
+
+    ESP_LOGI(TAG, "draw buffers: 2 x %u B in internal DMA memory", (unsigned)bytes);
+}
+
+/* ---------------------------------------------------------------- networking -------- */
+
+/*
+ * These run on core-0 network tasks, never on the LVGL task, so every LVGL call is wrapped
+ * in the display lock (docs/architecture.md).
+ */
+
+static void on_config_changed(const char *id, bool deleted)
+{
+    ESP_LOGI(TAG, "config '%s' %s over HTTP", id, deleted ? "deleted" : "uploaded");
+
+    if (bsp_display_lock(-1) != ESP_OK) {
+        return;
+    }
+
+    gauge_store_list_t list;
+    gauge_store_list(&list);
+    app_ui_set_gauge_list(list.count > 0 ? list.ids : NULL, list.count, s_active_cfg.id);
+
+    /* Reload live only when the gauge on screen is the one that changed. */
+    if (!deleted && strcmp(id, s_active_cfg.id) == 0) {
+        gauge_config_t cfg;
+        char           err[GAUGE_STORE_ERR_LEN] = {0};
+
+        if (gauge_store_load(id, &cfg, err, sizeof(err)) == ESP_OK &&
+            app_ui_set_config(&cfg) == ESP_OK) {
+            s_active_cfg = cfg;
+            app_ui_set_warning(err[0] != '\0' ? err : NULL);
+            ESP_LOGI(TAG, "reloaded '%s' without rebooting", id);
+        }
+    }
+
+    bsp_display_unlock();
+}
+
+static void on_telemetry(const char *channel, float value)
+{
+    /*
+     * A remote feed and a local sensor are interchangeable to the renderer, so this is the
+     * same path a real sensor will use once sensor_hub exists.
+     */
+    if (strcmp(channel, s_active_cfg.source.channel) != 0) {
+        return;
+    }
+
+    if (bsp_display_lock(-1) == ESP_OK) {
+        gauge_render_set_value(app_ui_get_gauge(), value, true);
+        bsp_display_unlock();
+    }
+}
+
+/* Keeps the settings page's network line current. Runs on the LVGL task. */
+static void network_status_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+
+    net_svc_status_t net;
+    net_svc_get_status(&net);
+
+    char detail[96] = {0};
+
+    switch (net.state) {
+    case NET_SVC_CONNECTED:
+        snprintf(detail, sizeof(detail), "%s\n%s  (%s.local)",
+                 net.ssid, net.ip, net.hostname);
+        break;
+    case NET_SVC_AP_MODE:
+        snprintf(detail, sizeof(detail), "Join '%s'\nthen open %s", net.ssid, net.ip);
+        break;
+    case NET_SVC_CONNECTING:
+        snprintf(detail, sizeof(detail), "%s", net.ssid);
+        break;
+    case NET_SVC_DISABLED:
+    case NET_SVC_FAILED:
+    default:
+        break;
+    }
+
+    app_ui_set_network_status(net_svc_state_str(net.state), detail);
+}
+
 /* ------------------------------------------------------------------- startup -------- */
 
 void app_main(void)
@@ -225,6 +359,9 @@ void app_main(void)
         return;
     }
 
+    /* Before anything draws, and before WiFi claims its share of internal memory. */
+    retarget_draw_buffers(board);
+
     int64_t t0 = esp_timer_get_time();
     err = app_ui_create(&s_active_cfg, board);
     if (err != ESP_OK) {
@@ -233,6 +370,18 @@ void app_main(void)
         return;
     }
     ESP_LOGI(TAG, "UI built in %" PRId64 " ms", (esp_timer_get_time() - t0) / 1000);
+
+    /*
+     * The gauge is on screen, so this image demonstrably works: confirm it. With
+     * CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE the bootloader otherwise treats a freshly
+     * OTA-installed image as unproven and reverts to the previous one on its next reboot --
+     * every update would silently undo itself. Confirming only after the UI is built means an
+     * image that cannot reach this point still rolls back, which is the point of the feature.
+     */
+    esp_err_t ota_err = esp_ota_mark_app_valid_cancel_rollback();
+    if (ota_err != ESP_OK && ota_err != ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGW(TAG, "could not confirm the running image: %s", esp_err_to_name(ota_err));
+    }
 
     gauge_store_list_t list;
     gauge_store_list(&list);
@@ -259,9 +408,29 @@ void app_main(void)
     ESP_ERROR_CHECK(gauge_perf_start_reporting(5000, "needle sweep"));
 #endif
 
+    lv_timer_create(network_status_timer_cb, 1000, NULL);
+
     bsp_display_unlock();
 
-    ESP_LOGI(TAG, "running. internal heap free: %u B, PSRAM free: %u KB",
+    /*
+     * Networking starts last and never blocks the display. By this point the gauge is
+     * already on screen, which is the whole point of the ordering in docs/architecture.md.
+     */
+    const net_svc_callbacks_t net_cb = {
+        .on_config_changed = on_config_changed,
+        .on_telemetry      = on_telemetry,
+    };
+    if (net_svc_start(&net_cb) != ESP_OK) {
+        ESP_LOGE(TAG, "networking failed to start; the gauge continues without it");
+    }
+
+    /*
+     * The largest free DMA-capable block, not total free internal heap, is what predicts
+     * whether the QSPI driver can still queue a transfer. Bringing WiFi up eats into it, and
+     * when it runs out the display fails outright rather than merely slowing down.
+     */
+    ESP_LOGI(TAG, "running. internal free: %u B (largest DMA block %u B), PSRAM free: %u KB",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL),
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
 }

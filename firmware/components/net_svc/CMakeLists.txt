@@ -1,0 +1,23 @@
+idf_component_register(
+    SRCS
+        "net_svc.c"
+        "net_svc_http.c"
+        "net_svc_telemetry.c"
+    INCLUDE_DIRS
+        "include"
+    PRIV_INCLUDE_DIRS
+        "."
+    REQUIRES
+        gauge_store
+    PRIV_REQUIRES
+        esp_wifi
+        esp_netif
+        esp_event
+        esp_http_server
+        esp_timer
+        esp_app_format
+        app_update
+        nvs_flash
+        lwip
+        espressif__mdns
+)

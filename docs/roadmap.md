@@ -72,7 +72,7 @@ Make the gauge genuinely data-driven, which is the point of the XML schema.
 
 `gauge_store_save()` already validates before replacing, ready for the M4 upload path.
 
-## M4 — Networking 🔜 next
+## M4 — Networking 🚧 in progress
 
 Remote access, and the last unmeasured performance question.
 
@@ -91,6 +91,21 @@ confirm the existing config survives; complete an OTA and roll back a deliberate
 **Also closes scenario 5** in [performance.md](performance.md): WiFi runs on core 0 and LVGL
 on core 1, and the claim that they do not interfere is an assumption until measured with a
 telemetry stream running.
+
+**Progress (in progress, not complete):**
+
+| Item | State |
+|---|---|
+| `net_svc`: WiFi station + open setup AP, backoff, credentials saved only on success | built; setup AP verified on hardware |
+| mDNS as `ai-gauge-XXXX.local` | built; advertises on hardware |
+| HTTP API: status, gauges, config get/put/delete, wifi, OTA | built; **no endpoint exercised from a client yet** |
+| UDP telemetry on 5005 | built; socket binds; **no datagram received yet** |
+| OTA with rollback confirmation | built; **not tested** |
+| Scenario 5 | **partial:** 66.6 fps with the radio up and no traffic |
+
+Bringing WiFi up exposed a memory fault that had existed since M2: the BSP's PSRAM flush buffers forced a ~46KB internal bounce buffer and copy on every flush, and WiFi took the memory it relied on, stopping the display. Fixed by moving the flush buffers into internal RAM; the full account is in [performance.md](performance.md).
+
+**Remaining exit criteria** need a client on the device's network, which means either joining `ai-gauge-setup` or provisioning the device onto a real network.
 
 **Known gap:** the HTTP API is unauthenticated and unencrypted. Acceptable on a private
 network, not a considered security posture. See *Security* in

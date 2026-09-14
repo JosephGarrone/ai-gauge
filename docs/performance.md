@@ -65,6 +65,7 @@ ticking every 5ms so the needle differs on every frame.
 | 2026-09-10 | needle custom-drawn, tight invalidation | 2 | **66.2** | 13.3% (28,900 px) | 57,900 | 5.80 | **Passes.** |
 | 2026-09-10 | + tileview screens | 2 | **66.6** | 13.2% (28,700 px) | 57,400 | 5.86 | No regression from adding the screens. |
 | 2026-09-10 | + tileview screens | 4 | **33.4** | 46.2% (100,200 px) | 200,500 | 15.76 | Transition. Accepted worst case — see below. |
+| 2026-09-14 | + net_svc, radio up (setup AP), internal flush buffers | 5 (partial) | **66.6** | 11.8% (25,600 px) | 51,200 | 6.12 | Radio active, no client traffic. See below. |
 
 **The gate passes at 66.2 fps.** That figure is the LVGL refresh-period ceiling
 (`CONFIG_LV_DEF_REFR_PERIOD=15` gives 1000/15 = 66.7 fps), not a rendering limit: rendering
@@ -126,9 +127,55 @@ If the transition ever needs to be smoother, the fallbacks are listed in
 [display-pipeline.md](display-pipeline.md) -- snapshotting both tiles at gesture start and
 sliding the snapshots, so the transition becomes a pure blit. That work has **not** been done.
 
+### Scenario 5: WiFi active (partial)
+
+Measured with the setup access point up, the HTTP server listening, mDNS advertising and the
+telemetry socket bound — but **with no client connected and no traffic flowing**. That is
+radio overhead only. The full scenario, with a telemetry stream running, is still owed.
+
+**66.6 fps, 11.8% dirty, 6.12ms render.** The claim that WiFi on core 0 would not disturb
+LVGL on core 1 holds for CPU time.
+
+It did **not** hold for memory, and that was the real finding. The first build with WiFi
+enabled did not drop frames — it stopped drawing entirely:
+
+```
+E lcd_panel.io.spi: panel_io_spi_tx_color(395): spi transmit (queue) color failed
+E esp_lvgl:bridge_v9: Draw bitmap failed: ESP_ERR_NO_MEM
+```
+
+The chain of causes, each confirmed by measurement or by reading the driver source:
+
+1. The BSP puts LVGL's flush buffers in **PSRAM**. PSRAM is not DMA-capable for SPI, so the
+   SPI master driver allocates a **~46KB internal bounce buffer and copies every flush into
+   it**. This had been happening on every frame since M2, invisibly, because a large enough
+   internal block happened to be free.
+2. WiFi's static RX buffers must live in internal DMA memory, and bringing the radio up cut
+   the largest free DMA block to ~20KB — below the bounce buffer's size.
+
+The fix, and the dead ends on the way:
+
+| Change | Result |
+|---|---|
+| `SPIRAM_TRY_ALLOCATE_WIFI_LWIP` | Display survived, but WiFi then failed to init: the option raises static RX buffers to 16 |
+| Static RX buffers 16 -> 6, block-ack window 6 | WiFi up; display broke again, internal free 36KB |
+| **Flush buffers moved to internal RAM** via `lv_display_set_buffers()` | **Bounce buffer and per-frame copy eliminated.** Display works with WiFi up |
+| Flush buffers 20 -> 12 lines | LVGL task hung with no error. **Reverted to 20**; cause unknown |
+| lwIP buffers and sockets trimmed | HTTP server could start |
+| `SPIRAM_USE_CAPS_ALLOC` | Wrong direction: kept plain `malloc()` internal. Task watchdog fired |
+| **`SPIRAM_USE_MALLOC`**, 4KB internal threshold, 32KB reserve | Full stack up at 66.6 fps |
+
+**Headroom is thin.** After startup, internal free heap is ~3KB with a largest free DMA block
+of a few hundred bytes. It is stable — the flush buffers are already allocated and nothing
+on the render path allocates internal memory any more — but OTA, a reconnect, or a config
+upload could push something over. A 1KB internal threshold was built to test for more
+headroom but **not measured**, because the board was disconnected; the verified 4KB value is
+what is committed.
+
 ### Not yet measured
 
-- Scenario 5 (WiFi active) -- `net_svc` does not exist yet.
+- Scenario 5 in full: with a client connected and telemetry streaming.
+- Internal heap behaviour during an OTA and during a config upload.
 - Scenarios 1, 3 and 6.
 
 ## The gate
