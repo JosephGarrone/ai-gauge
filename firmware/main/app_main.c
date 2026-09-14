@@ -18,6 +18,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -315,10 +316,31 @@ static void network_status_timer_cb(lv_timer_t *t)
     app_ui_set_network_status(net_svc_state_str(net.state), detail);
 }
 
+/* Why the chip last reset. A brownout reports itself here, which makes power problems visible
+ * instead of looking like a flaky USB connection. */
+static const char *reset_reason_str(esp_reset_reason_t r)
+{
+    switch (r) {
+    case ESP_RST_POWERON:  return "power-on";
+    case ESP_RST_SW:       return "software";
+    case ESP_RST_PANIC:    return "panic";
+    case ESP_RST_INT_WDT:  return "interrupt watchdog";
+    case ESP_RST_TASK_WDT: return "task watchdog";
+    case ESP_RST_WDT:      return "other watchdog";
+    case ESP_RST_BROWNOUT: return "BROWNOUT";
+    case ESP_RST_USB:      return "USB";
+    case ESP_RST_JTAG:     return "JTAG";
+    case ESP_RST_DEEPSLEEP:return "deep sleep";
+    default:               return "unknown";
+    }
+}
+
 /* ------------------------------------------------------------------- startup -------- */
 
 void app_main(void)
 {
+    ESP_LOGW(TAG, "reset reason: %s", reset_reason_str(esp_reset_reason()));
+
     /* NVS backs both WiFi credentials and user settings, so it comes up first. */
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {

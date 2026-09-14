@@ -353,6 +353,13 @@ static void update_needle(gauge_render_t *g)
 {
     const gauge_config_t *c = &g->cfg;
 
+    /* Snapshot the current geometry so an update that lands on the same pixels can be skipped. */
+    bool               old_tri_valid  = g->tri_valid;
+    lv_point_precise_t old_tri[3]     = {g->tri[0], g->tri[1], g->tri[2]};
+    bool               old_line_valid = g->line_valid;
+    lv_point_precise_t old_p1         = g->line_p1;
+    lv_point_precise_t old_p2         = g->line_p2;
+
     /* Absolute centre: the parent may not be at the screen origin. */
     lv_area_t pa;
     lv_obj_get_coords(g->parent, &pa);
@@ -433,6 +440,19 @@ static void update_needle(gauge_render_t *g)
     }
     }
 
+    /*
+     * Nothing moved on screen, so repaint nothing. Without this every value update invalidated
+     * the needle even when damping had settled or the input was constant. Measured with a
+     * steady 22.5 psi telemetry feed: ~17 redraws a second of an unchanged needle, for as long as
+     * the feed ran. A real sensor at idle would do the same at its full sampling rate.
+     */
+    if (g->prev_valid && old_tri_valid == g->tri_valid && old_line_valid == g->line_valid &&
+        memcmp(old_tri, g->tri, sizeof(old_tri)) == 0 &&
+        memcmp(&old_p1, &g->line_p1, sizeof(old_p1)) == 0 &&
+        memcmp(&old_p2, &g->line_p2, sizeof(old_p2)) == 0) {
+        return;
+    }
+
     /* Bounding box over whatever we are about to draw, plus slack for anti-aliasing. */
     int32_t x1 = INT32_MAX, y1 = INT32_MAX, x2 = INT32_MIN, y2 = INT32_MIN;
 
@@ -500,7 +520,11 @@ static void update_readout(gauge_render_t *g)
 
     char text[96];
     snprintf(text, sizeof(text), "%s%s%s", c->readout.prefix, num, c->readout.suffix);
-    lv_label_set_text(g->readout, text);
+
+    /* lv_label_set_text() invalidates even when the text is identical, so compare first. */
+    if (strcmp(lv_label_get_text(g->readout), text) != 0) {
+        lv_label_set_text(g->readout, text);
+    }
 }
 
 static void apply_alert_style(gauge_render_t *g)

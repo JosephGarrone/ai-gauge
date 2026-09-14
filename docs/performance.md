@@ -66,6 +66,8 @@ ticking every 5ms so the needle differs on every frame.
 | 2026-09-10 | + tileview screens | 2 | **66.6** | 13.2% (28,700 px) | 57,400 | 5.86 | No regression from adding the screens. |
 | 2026-09-10 | + tileview screens | 4 | **33.4** | 46.2% (100,200 px) | 200,500 | 15.76 | Transition. Accepted worst case — see below. |
 | 2026-09-14 | + net_svc, radio up (setup AP), internal flush buffers | 5 (partial) | **66.6** | 11.8% (25,600 px) | 51,200 | 6.12 | Radio active, no client traffic. See below. |
+| 2026-09-14 | sim off, telemetry sweep at 58.6Hz over WiFi (STA) | 5 | **58.6** | 13.7% (29,800 px) | 59,700 | 7.59 | Every datagram rendered; rate equals the input rate, not a ceiling. |
+| 2026-09-14 | + redraw fix, sim on, WiFi STA connected | 2 | **66.7** | 13.0% (28,200 px) | 56,300 | 6.91 | No regression from WiFi or the fix. |
 
 **The gate passes at 66.2 fps.** That figure is the LVGL refresh-period ceiling
 (`CONFIG_LV_DEF_REFR_PERIOD=15` gives 1000/15 = 66.7 fps), not a rendering limit: rendering
@@ -172,9 +174,36 @@ upload could push something over. A 1KB internal threshold was built to test for
 headroom but **not measured**, because the board was disconnected; the verified 4KB value is
 what is committed.
 
-### Not yet measured
+### Scenario 5: telemetry streaming over WiFi
 
-- Scenario 5 in full: with a client connected and telemetry streaming.
+Measured with the gauge joined to a home network as a station, the simulated source compiled
+out, and this PC streaming UDP telemetry to it. Three phases:
+
+| Phase | Input | Drawn | Reading |
+|---|---|---|---|
+| A | none, 12s | **no frames** | Nothing redraws with no input — the sweep really is off |
+| B | sine sweep, 1173 datagrams in 20s (58.6Hz) | **58.6 fps**, 13.7% dirty, 7.6ms render | Frame rate equals the send rate exactly: every datagram was rendered, none dropped |
+| C | constant 22.5 psi at 20Hz, 14s | **16—17 fps** of an unchanged needle | Wasted work — see below |
+
+Phase B shows the renderer keeps up with a 60Hz feed while WiFi is carrying it. It does not
+measure a ceiling: the input, not the renderer, set the rate.
+
+**Phase C exposed a real inefficiency** the always-moving simulated source had hidden.
+`gauge_render_set_value()` invalidated the needle and readout on every call, even once damping
+had settled and nothing on screen changed. A real sensor at idle would have repainted the gauge
+continuously at its full sampling rate for no visible change. The needle now skips
+invalidation when its geometry lands on the same pixels, and the readout skips
+`lv_label_set_text()` when the text is identical.
+
+**Verified after the fix**, same protocol (sweep, then hold 22.5 psi at 20Hz): the hold settled
+within one 5-second window — 3.0 fps, the damping tail — and every window after that reported
+**no frames drawn** while the feed kept arriving. The unfixed build drew 16—17 fps for as long as
+the feed ran.
+
+Internal heap during the whole run held at ~8—9KB free, better than the ~3KB seen with the
+setup access point up.
+
+### Not yet measured
 - Internal heap behaviour during an OTA and during a config upload.
 - Scenarios 1, 3 and 6.
 
