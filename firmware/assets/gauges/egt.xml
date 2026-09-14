@@ -22,5 +22,6 @@
   <title text="EGT" y="150" font="montserrat_20" color="#9e9e9e"/>
   <readout y="320" font="montserrat_48" format="%.0f" suffix=" C" color="#ffffff"/>
 
+  <peak color="#ffab00" length="28" width="5" format="%.0f"/>
   <alert above="750" flash-hz="2" color="#d50000" chime="true"/>
 </gauge>

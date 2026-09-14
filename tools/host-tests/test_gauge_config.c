@@ -275,6 +275,38 @@ static void test_builtin_default_is_valid(void)
 
 /* ------------------------------------------------------------------------------------ */
 
+static void test_peak(void)
+{
+    gauge_config_t cfg;
+
+    CHECK(gauge_config_parse(MINIMAL, 0, &cfg) == GAUGE_CONFIG_OK, "minimal should parse");
+    CHECK(!cfg.peak.present, "peak should be off unless the element is present");
+
+    static const char *XML =
+        "<gauge version=\"1\" id=\"p\">"
+        "<source channel=\"c\" min=\"0\" max=\"10\"/>"
+        "<peak color=\"#00ff00\" length=\"30\" width=\"6\" show-value=\"false\" "
+        "value-y=\"380\" format=\"%.0f\" prefix=\"MAX \"/>"
+        "</gauge>";
+    CHECK(gauge_config_parse(XML, 0, &cfg) == GAUGE_CONFIG_OK, "should parse");
+    CHECK(cfg.peak.present, "peak present");
+    CHECK(cfg.peak.color.g == 0xff && cfg.peak.color.r == 0x00, "peak colour");
+    CHECK(cfg.peak.length_px == 30 && cfg.peak.width_px == 6, "peak geometry");
+    CHECK(!cfg.peak.show_value, "show-value=false");
+    CHECK(cfg.peak.value_y == 380, "value-y");
+    CHECK(strcmp(cfg.peak.format, "%.0f") == 0, "format was '%s'", cfg.peak.format);
+    CHECK(strcmp(cfg.peak.prefix, "MAX ") == 0, "prefix was '%s'", cfg.peak.prefix);
+    CHECK(cfg.warning_count == 0, "unexpected warnings: %u", cfg.warning_count);
+
+    /* A bare element takes every documented default. */
+    CHECK(gauge_config_parse("<gauge version=\"1\" id=\"p\"><source channel=\"c\" min=\"0\" "
+                             "max=\"10\"/><peak/></gauge>", 0, &cfg) == GAUGE_CONFIG_OK,
+          "bare peak should parse");
+    CHECK(cfg.peak.present && cfg.peak.show_value, "bare peak defaults on");
+    CHECK(cfg.peak.color.r == 0xff && cfg.peak.color.g == 0xab, "default amber");
+    CHECK(cfg.peak.value_y == INT16_MIN, "default value-y is below the readout");
+}
+
 int main(void)
 {
     struct {
@@ -290,6 +322,7 @@ int main(void)
         {"overflow_is_bounded",      test_overflow_is_bounded},
         {"long_strings_truncate",    test_long_strings_truncate},
         {"builtin_default_is_valid", test_builtin_default_is_valid},
+        {"peak",                     test_peak},
     };
 
     for (size_t i = 0; i < sizeof(tests) / sizeof(tests[0]); i++) {

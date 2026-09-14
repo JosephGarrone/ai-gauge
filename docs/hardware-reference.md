@@ -87,6 +87,10 @@ Upstream warning: *"Do not repurpose GPIO1, GPIO2, or GPIO3 while the card is mo
 
 MCLK **must** be GPIO42.
 
+**Speaker:** the playback path ends at a small speaker connector. On the unit used for
+development nothing was audible even at full volume, with the codec reporting no errors, so a
+speaker appears not to be fitted. Check for one before relying on the audible alert.
+
 ## 8-pin expansion header — the only solder-free I/O
 
 | Pin | Signal | Notes |

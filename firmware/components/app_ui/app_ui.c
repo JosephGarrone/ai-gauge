@@ -134,6 +134,15 @@ static void gauge_selected_cb(lv_event_t *e)
     s.on_gauge_selected(s.gauge_ids[idx]);
 }
 
+/* Tapping the dial clears the peak marker. LVGL does not report a swipe as a click. */
+static void dial_tapped_cb(lv_event_t *e)
+{
+    (void)e;
+    if (s.gauge != NULL) {
+        gauge_render_reset_peak(s.gauge);
+    }
+}
+
 static void alert_sound_changed_cb(lv_event_t *e)
 {
     lv_obj_t *sw = lv_event_get_target(e);
@@ -337,6 +346,7 @@ esp_err_t app_ui_create(const gauge_config_t *cfg, const board_profile_t *board)
     }
 
     lv_obj_remove_flag(s.tile_gauge, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(s.tile_gauge, dial_tapped_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_set_style_bg_color(s.tile_gauge, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s.tile_gauge, LV_OPA_COVER, LV_PART_MAIN);
 

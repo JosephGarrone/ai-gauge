@@ -145,9 +145,10 @@ pressure. Getting it wrong offsets every reading by about 14.7 PSI.
 
 | Item | State |
 |---|---|
-| Audible chime on `<alert chime="true">` | **verified on hardware:** speaker-only channel, fits alongside WiFi, rate-limited, user toggle in settings |
+| Audible chime on `<alert chime="true">` | code complete and running: the codec accepts playback at full volume without errors, fits alongside WiFi, rate-limited, user toggle in settings. **Silent on this board, which appears to have no speaker fitted** (nothing audible at 100% volume). Ready for when one is connected |
 | Needle takes the alert colour while flashing | built; flashing repaints the needle even when it is not moving |
-| Peak-hold and min/max recall | not started; needs a schema addition first |
+| Peak-hold marker, tap to reset | **verified on hardware:** amber marker and PEAK readout appear, a tap clears both, 66.7 fps; `<peak>` schema element with 85 host checks |
+| Min/max recall | not started |
 | SD datalogging | not started; SD mounting has its own internal-memory cost to measure |
 
 ## M7 — Portability

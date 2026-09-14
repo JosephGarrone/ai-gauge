@@ -68,6 +68,15 @@ struct gauge_render_t {
     lv_timer_t *flash_timer;
 
     int8_t                  active_alert_idx; /**< Index into cfg.alerts, or -1. */
+
+    /* Peak-hold marker: same stationary-object, tight-invalidation approach as the needle. */
+    lv_obj_t          *peak_marker;
+    lv_obj_t          *peak_label;
+    bool               peak_valid;
+    float              peak_value;
+    lv_point_precise_t peak_p1, peak_p2;
+    lv_area_t          peak_bbox;
+    bool               peak_bbox_valid;
     gauge_render_alert_cb_t alert_cb;
     void                   *alert_cb_user;
 };
@@ -508,6 +517,117 @@ static void update_needle(gauge_render_t *g)
     g->prev_valid = true;
 }
 
+/* --------------------------------------------------------------------- peak --------- */
+
+static void peak_draw_cb(lv_event_t *e)
+{
+    gauge_render_t *g     = lv_event_get_user_data(e);
+    lv_layer_t     *layer = lv_event_get_layer(e);
+
+    if (layer == NULL || !g->peak_valid) {
+        return;
+    }
+
+    lv_draw_line_dsc_t dsc;
+    lv_draw_line_dsc_init(&dsc);
+    dsc.color       = to_lv(g->cfg.peak.color);
+    dsc.width       = g->cfg.peak.width_px;
+    dsc.opa         = LV_OPA_COVER;
+    dsc.round_start = 1;
+    dsc.round_end   = 1;
+    dsc.p1          = g->peak_p1;
+    dsc.p2          = g->peak_p2;
+    lv_draw_line(layer, &dsc);
+}
+
+static void set_peak_label(gauge_render_t *g)
+{
+    if (g->peak_label == NULL) {
+        return;
+    }
+
+    char num[32];
+    if (g->peak_valid) {
+        snprintf(num, sizeof(num), g->cfg.peak.format, (double)g->peak_value);
+    } else {
+        snprintf(num, sizeof(num), "--");
+    }
+
+    char text[80];
+    snprintf(text, sizeof(text), "%s%s", g->cfg.peak.prefix, num);
+    if (strcmp(lv_label_get_text(g->peak_label), text) != 0) {
+        lv_label_set_text(g->peak_label, text);
+    }
+}
+
+/*
+ * Track the highest raw value and move the marker when it rises. The marker only repaints when
+ * it lands on different pixels, so a value sitting below its peak costs nothing.
+ */
+static void update_peak(gauge_render_t *g, float value, bool valid)
+{
+    if (g->peak_marker == NULL || !valid) {
+        return;
+    }
+    if (g->peak_valid && value <= g->peak_value) {
+        return;
+    }
+
+    g->peak_value = value;
+    g->peak_valid = true;
+    set_peak_label(g);
+
+    lv_area_t pa;
+    lv_obj_get_coords(g->parent, &pa);
+    float acx = (float)(pa.x1 + g->cx);
+    float acy = (float)(pa.y1 + g->cy);
+
+    float rad   = DEG2RAD(value_to_deg(g, value));
+    float dx    = sinf(rad);
+    float dy    = -cosf(rad);
+    float outer = (float)g->radius;
+    float inner = outer - (float)g->cfg.peak.length_px;
+
+    lv_point_precise_t p1 = {.x = (int32_t)lroundf(acx + dx * outer),
+                             .y = (int32_t)lroundf(acy + dy * outer)};
+    lv_point_precise_t p2 = {.x = (int32_t)lroundf(acx + dx * inner),
+                             .y = (int32_t)lroundf(acy + dy * inner)};
+
+    if (g->peak_bbox_valid && memcmp(&p1, &g->peak_p1, sizeof(p1)) == 0 &&
+        memcmp(&p2, &g->peak_p2, sizeof(p2)) == 0) {
+        return; /* same pixels: nothing to repaint */
+    }
+
+    g->peak_p1 = p1;
+    g->peak_p2 = p2;
+
+    int32_t   slack = g->cfg.peak.width_px / 2 + 3;
+    lv_area_t bbox  = {
+        .x1 = LV_MIN(p1.x, p2.x) - slack, .y1 = LV_MIN(p1.y, p2.y) - slack,
+        .x2 = LV_MAX(p1.x, p2.x) + slack, .y2 = LV_MAX(p1.y, p2.y) + slack,
+    };
+
+    if (g->peak_bbox_valid) {
+        lv_obj_invalidate_area(g->peak_marker, &g->peak_bbox);
+    }
+    lv_obj_invalidate_area(g->peak_marker, &bbox);
+    g->peak_bbox       = bbox;
+    g->peak_bbox_valid = true;
+}
+
+void gauge_render_reset_peak(gauge_render_t *g)
+{
+    if (g == NULL || g->peak_marker == NULL) {
+        return;
+    }
+    if (g->peak_bbox_valid) {
+        lv_obj_invalidate_area(g->peak_marker, &g->peak_bbox);
+    }
+    g->peak_valid      = false;
+    g->peak_bbox_valid = false;
+    set_peak_label(g);
+}
+
 /* ------------------------------------------------------------------ readout --------- */
 
 static void update_readout(gauge_render_t *g)
@@ -661,6 +781,18 @@ esp_err_t gauge_render_create(lv_obj_t *parent, const gauge_config_t *cfg,
 
     render_face(g);
 
+    /* --- peak marker: under the needle, over the face --- */
+    if (cfg->peak.present) {
+        g->peak_marker = lv_obj_create(parent);
+        ESP_GOTO_ON_FALSE(g->peak_marker != NULL, ESP_ERR_NO_MEM, fail, TAG, "peak marker failed");
+        lv_obj_remove_style_all(g->peak_marker);
+        lv_obj_remove_flag(g->peak_marker, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_remove_flag(g->peak_marker, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_size(g->peak_marker, g->radius * 2 + 16, g->radius * 2 + 16);
+        lv_obj_set_pos(g->peak_marker, g->cx - g->radius - 8, g->cy - g->radius - 8);
+        lv_obj_add_event_cb(g->peak_marker, peak_draw_cb, LV_EVENT_DRAW_MAIN, g);
+    }
+
     /* --- needle: a bare object sized to the polygon, drawn by needle_draw_cb --- */
     g->needle_len = (cfg->needle.length_px > 0) ? cfg->needle.length_px
                                                 : (int32_t)((float)g->radius * 0.72f);
@@ -689,6 +821,8 @@ esp_err_t gauge_render_create(lv_obj_t *parent, const gauge_config_t *cfg,
         if (g->hub != NULL) {
             lv_obj_remove_style_all(g->hub);
             lv_obj_remove_flag(g->hub, LV_OBJ_FLAG_SCROLLABLE);
+            /* Taps on the dial clear the peak; the hub must not swallow them. */
+            lv_obj_remove_flag(g->hub, LV_OBJ_FLAG_CLICKABLE);
             lv_obj_set_size(g->hub, r * 2, r * 2);
             lv_obj_set_pos(g->hub, g->cx - r, g->cy - r);
             lv_obj_set_style_radius(g->hub, LV_RADIUS_CIRCLE, LV_PART_MAIN);
@@ -714,10 +848,30 @@ esp_err_t gauge_render_create(lv_obj_t *parent, const gauge_config_t *cfg,
         lv_obj_align(g->readout, LV_ALIGN_TOP_MID, rx - w / 2, cfg->readout.y);
     }
 
+    /* --- peak readout, below the live readout --- */
+    if (cfg->peak.present && cfg->peak.show_value) {
+        g->peak_label = lv_label_create(parent);
+        ESP_GOTO_ON_FALSE(g->peak_label != NULL, ESP_ERR_NO_MEM, fail, TAG, "peak label failed");
+
+        lv_obj_set_style_text_font(g->peak_label, font_by_name(cfg->peak.font), LV_PART_MAIN);
+        lv_obj_set_style_text_color(g->peak_label, to_lv(cfg->peak.color), LV_PART_MAIN);
+        lv_obj_set_width(g->peak_label, LV_SIZE_CONTENT);
+        lv_label_set_text(g->peak_label, "");
+
+        int32_t py = cfg->peak.value_y;
+        if (py == INT16_MIN) {
+            py = cfg->readout.present
+                     ? cfg->readout.y + lv_font_get_line_height(font_by_name(cfg->readout.font)) + 2
+                     : g->cy + 60;
+        }
+        lv_obj_align(g->peak_label, LV_ALIGN_TOP_MID, 0, py);
+    }
+
     g->valid     = true;
     g->displayed = cfg->source.min;
     update_readout(g);
     update_needle(g);
+    set_peak_label(g);
 
     ESP_LOGI(TAG, "gauge '%s' ready: r=%" PRId32 " needle_len=%" PRId32 " face=%uKB",
              cfg->id, g->radius, g->needle_len, (unsigned)(face_size / 1024));
@@ -743,6 +897,12 @@ void gauge_render_destroy(gauge_render_t *g)
     /* Delete the objects before the buffer they point into. */
     if (g->readout != NULL) {
         lv_obj_delete(g->readout);
+    }
+    if (g->peak_label != NULL) {
+        lv_obj_delete(g->peak_label);
+    }
+    if (g->peak_marker != NULL) {
+        lv_obj_delete(g->peak_marker);
     }
     if (g->hub != NULL) {
         lv_obj_delete(g->hub);
@@ -787,6 +947,7 @@ void gauge_render_set_value(gauge_render_t *g, float value, bool valid)
         g->displayed = target;
     }
 
+    update_peak(g, target, valid);
     update_needle(g);
     update_readout(g);
     evaluate_alerts(g);
