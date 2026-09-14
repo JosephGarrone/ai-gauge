@@ -128,8 +128,9 @@ The actual product goal. **Blocked on hardware that does not exist yet.**
 function, measured divider ratio, ADS1115 verified against a pressure reference, MCP9600
 verified against ambient and boiling water, and readings stable with the engine running.
 
-**Prerequisite that is not code:** confirm whether the MAP sensor reads absolute or gauge
-pressure. Getting it wrong offsets every reading by about 14.7 PSI.
+**Settled:** the JRP 7-bar sensor is **absolute** (0–8 bar abs), so the firmware must capture a
+zero at key-on with the engine off, as the JRP gauge does. See
+[sensor-frontend.md](sensor-frontend.md).
 
 ## M6 — Alerts and refinement 🚧 in progress
 
@@ -146,9 +147,10 @@ pressure. Getting it wrong offsets every reading by about 14.7 PSI.
 | Item | State |
 |---|---|
 | Audible chime on `<alert chime="true">` | code complete and running: the codec accepts playback at full volume without errors, fits alongside WiFi, rate-limited, user toggle in settings. **Silent on this board, which appears to have no speaker fitted** (nothing audible at 100% volume). Ready for when one is connected |
-| Needle takes the alert colour while flashing | built; flashing repaints the needle even when it is not moving |
+| Needle takes the alert colour while flashing | **verified on hardware**; flashing repaints the needle even when it is not moving |
 | Peak-hold marker, tap to reset | **verified on hardware:** amber marker and PEAK readout appear, a tap clears both, 66.7 fps; `<peak>` schema element with 85 host checks |
-| Min/max recall | not started |
+| WiFi memory ceiling (found while adding peak-hold) | **fixed and verified:** smaller LVGL draw-thread stacks restored 6 WiFi RX buffers; config uploads no longer near-overflow the HTTP server stack. 66.7 fps, OTA and 17/17 endpoint checks pass. See [performance.md](performance.md) |
+| Min/max recall | not started — next |
 | SD datalogging | not started; SD mounting has its own internal-memory cost to measure |
 
 ## M7 — Portability
