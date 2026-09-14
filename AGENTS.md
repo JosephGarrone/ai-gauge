@@ -143,6 +143,11 @@ config and then to the compiled-in face. All three paths are verified on hardwar
 
 **Internal RAM is the binding constraint, not CPU.** After WiFi starts, only ~3KB of internal heap remains. The LVGL flush buffers are deliberately in internal DMA memory (`retarget_draw_buffers()` in `app_main.c`) because the BSP's PSRAM buffers forced a bounce copy on every flush and broke the display once WiFi ran. `DRAW_BUF_LINES` and the memory settings in `sdkconfig.defaults` are load-bearing: change them only with a hardware measurement. See [docs/performance.md](docs/performance.md).
 
+**Never call the BSP's audio init** (`bsp_audio_init()`, `bsp_audio_codec_*_init()`). It
+allocates speaker and microphone buffers that do not fit once WiFi runs, and the BSP aborts on
+the failure, boot-looping the board. OTA images confirm themselves 15s after startup, so a
+crash in that window rolls back rather than looping.
+
 **The value source is simulated** (`CONFIG_AI_GAUGE_SIMULATED_SOURCE`). **No sensor is being
 read**, and no sensor hardware exists yet.
 
