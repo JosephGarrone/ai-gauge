@@ -20,12 +20,14 @@ static const char *NAMESPACE = "ai_gauge";
 static const char *KEY_BRIGHTNESS = "bright";
 static const char *KEY_SHOW_FPS   = "showfps";
 static const char *KEY_SOUND      = "sound";
+static const char *KEY_ROTATION   = "rotate";
 static const char *KEY_GAUGE      = "gauge";
 
 static app_settings_t s_settings = {
     .brightness   = 80,
     .show_fps     = false,
     .alert_sound  = true,
+    .rotation     = APP_SETTINGS_ROTATION_0,
     .active_gauge = "boost",
 };
 
@@ -63,6 +65,9 @@ esp_err_t app_settings_init(void)
     if (nvs_get_u8(h, KEY_SOUND, &u8) == ESP_OK) {
         s_settings.alert_sound = (u8 != 0);
     }
+    if (nvs_get_u8(h, KEY_ROTATION, &u8) == ESP_OK && u8 < APP_SETTINGS_ROTATION_COUNT) {
+        s_settings.rotation = (app_settings_rotation_t)u8;
+    }
 
     size_t len = sizeof(s_settings.active_gauge);
     if (nvs_get_str(h, KEY_GAUGE, s_settings.active_gauge, &len) != ESP_OK) {
@@ -72,8 +77,9 @@ esp_err_t app_settings_init(void)
 
     nvs_close(h);
 
-    ESP_LOGI(TAG, "loaded: brightness=%u%% show_fps=%d gauge='%s'",
-             s_settings.brightness, (int)s_settings.show_fps, s_settings.active_gauge);
+    ESP_LOGI(TAG, "loaded: brightness=%u%% show_fps=%d rotation=%d gauge='%s'",
+             s_settings.brightness, (int)s_settings.show_fps, (int)s_settings.rotation * 90,
+             s_settings.active_gauge);
     return ESP_OK;
 }
 
@@ -107,6 +113,17 @@ void app_settings_set_alert_sound(bool on)
     }
 }
 
+void app_settings_set_rotation(app_settings_rotation_t rotation)
+{
+    if ((unsigned)rotation >= APP_SETTINGS_ROTATION_COUNT) {
+        return;
+    }
+    if (rotation != s_settings.rotation) {
+        s_settings.rotation = rotation;
+        s_dirty             = true;
+    }
+}
+
 void app_settings_set_active_gauge(const char *id)
 {
     if (id == NULL || id[0] == '\0') {
@@ -137,6 +154,9 @@ esp_err_t app_settings_commit(void)
     }
     if (err == ESP_OK) {
         err = nvs_set_u8(h, KEY_SOUND, s_settings.alert_sound ? 1 : 0);
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_u8(h, KEY_ROTATION, (uint8_t)s_settings.rotation);
     }
     if (err == ESP_OK) {
         err = nvs_set_str(h, KEY_GAUGE, s_settings.active_gauge);

@@ -20,7 +20,7 @@ Re-uses the vehicle's existing boost and EGT sensors. Because no internal ADC is
 | 5V | — | Header pin 1 (VBUS) — **see the power warning below** |
 | GND | — | Header pin 2 |
 
-`I2C_NUM_1` at 400kHz. Separate from the system bus (GPIO14/15) so sensor polling never
+`I2C_NUM_1` at **100kHz**: the MCP9600 datasheet limits its I2C interface to 10–100kHz. Separate from the system bus (GPIO14/15) so sensor polling never
 contends with touch, and a wiring fault on the harness cannot take down the touchscreen.
 
 | Address | Device | Channel |
@@ -140,8 +140,10 @@ MAX31855/MAX31856 are the common alternatives but are SPI, and no SPI pins remai
 | Filter | Mid-range MCP9600 internal filter |
 | Range | Up to ~1372°C for K-type — beyond any realistic EGT |
 
-Reads `T_hot` directly in °C over I2C; no scaling maths needed. The alert output can drive
-GPIO16 for a hardware over-temperature signal independent of firmware polling.
+Reads `T_hot` directly in °C over I2C; no scaling maths needed. Its alert outputs are **push-pull**
+(datasheet section 3), so they must not join the shared open-drain ALERT line on GPIO16. They
+are left unconnected; thermocouple faults are read by polling. See
+[rear-pcb-parts.md](rear-pcb-parts.md).
 
 **Thermocouple wiring:** use K-type extension wire and connectors for the whole run. Any
 junction with copper creates a parasitic thermocouple and an error the MCP9600's CJC cannot
@@ -149,7 +151,8 @@ correct for. Keep the wiring away from ignition leads.
 
 ## Power and automotive protection
 
-> **Not yet designed.** This is a hardware requirement, recorded so it is not forgotten.
+> **Not yet designed.** This is a hardware requirement, recorded so it is not forgotten. The
+> board that will implement it is being planned in [rear-pcb.md](rear-pcb.md).
 
 Running from vehicle 12V is the hostile part of this project. The board's USB VBUS rail is
 **not** an appropriate source for the sensor 5V supply once installed in a vehicle.

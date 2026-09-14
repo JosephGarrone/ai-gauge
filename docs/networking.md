@@ -37,7 +37,9 @@ This is a plain setup page at a fixed address, not a captive portal: phones will
 automatically. A DNS-redirecting captive portal is an open item.
 
 The settings page shows the current state: connected network and address, setup mode with
-instructions, or connecting.
+instructions, or connecting. Its **Reset network** button (tap, then tap again within 4s to
+confirm) forgets the stored credentials and brings the setup network straight back up, with no
+reboot.
 
 ## Hostname and mDNS
 
@@ -147,5 +149,8 @@ is recorded in [performance.md](performance.md) and [display-pipeline.md](displa
 - Settings-page controls to disable WiFi and to forget credentials (`net_svc_forget_credentials()`
   exists but is not wired to the UI).
 - Raw XML download for `GET /api/config/<id>`.
+- Browser access for the M7 web app: no CORS headers or `OPTIONS` handler, and plain HTTP is
+  blocked from an `https://` page such as GitHub Pages. No approach decided; see
+  [gauge-xml-interface.md](gauge-xml-interface.md#8-known-gaps-for-a-browser-app).
 - Telemetry staleness.
 - Authentication, TLS and signed OTA images.

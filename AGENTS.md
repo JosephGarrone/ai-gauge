@@ -43,7 +43,11 @@ future sessions. Propagate them — do not let them decay.**
 | [docs/architecture.md](docs/architecture.md) | Components, task model, data flow |
 | [docs/display-pipeline.md](docs/display-pipeline.md) | Frame budget, LVGL/DMA/TE strategy, render rules |
 | [docs/gauge-config-schema.md](docs/gauge-config-schema.md) | The gauge XML schema (normative) |
+| [docs/gauge-xml-interface.md](docs/gauge-xml-interface.md) | Authoring guide for the web app: format, rendering model, upload API. Update with the schema |
+| [docs/config-app.md](docs/config-app.md) | The face editor (M7): structure, firmware parity testing, Pages publishing, device-upload status |
 | [docs/sensor-frontend.md](docs/sensor-frontend.md) | ADS1115/MCP9600 wiring, scaling maths, 12V conditioning |
+| [docs/rear-pcb.md](docs/rear-pcb.md) | Rear PCB plan (planning only): 12V input and daisy chain, sensor connectors, speaker, 45mm outline |
+| [docs/rear-pcb-parts.md](docs/rear-pcb-parts.md) | Rear PCB parts: BOM, KiCad symbols/footprints, per-pin nets, SVG wiring sheets in `docs/rear-pcb/` |
 | [docs/networking.md](docs/networking.md) | Provisioning, HTTP API, telemetry ingest, OTA |
 | [docs/build-and-flash.md](docs/build-and-flash.md) | Local toolchain, build and flash |
 | [docs/ci-release.md](docs/ci-release.md) | CI pipeline, versioning, browser flashing |
@@ -77,6 +81,8 @@ the architecture:
 | [0003](docs/adr/0003-static-background-plus-needle-sprite.md) | Pre-render the dial face once to PSRAM; animate only a needle sprite | Bounds the per-frame dirty region, which is what makes 60fps reachable |
 | [0004](docs/adr/0004-retain-sd-and-audio.md) | Keep the microSD slot and audio codecs | Their pins are not connector-accessible anyway, and both have real uses |
 | [0005](docs/adr/0005-consume-waveshare-bsp.md) | Use the upstream `waveshare/esp32_s3_touch_amoled_1_75` BSP | Maintained CO5300/CST9217 drivers; effort goes into rendering instead |
+| [0006](docs/adr/0006-custom-shapes-as-polygons.md) | Custom tick/needle/hub shapes are SVG-style polygons and circles, filled by our own anti-aliased rasteriser (`gauge_shape`) | Keeps the needle's tight dirty box; LVGL triangles seam, rotated images blow the budget |
+| [0007](docs/adr/0007-face-editor-static-app-with-parser-port.md) | The face editor is a dependency-free static web app carrying a line-for-line JS port of the gauge XML parser, held to the C by a differential test in CI | Its device verdict must follow the firmware's forgiving rules exactly; no JS toolchain in a C repository |
 
 ---
 
@@ -106,9 +112,9 @@ the architecture:
 docs/          Design documentation and ADRs
 firmware/      The ESP-IDF project
   main/        Entry point and screen wiring
-  components/  board_profile, gauge_config, gauge_render, sensor_hub, app_settings, net_svc
+  components/  board_profile, gauge_config, gauge_shape, gauge_render, sensor_hub, app_settings, net_svc
   assets/      Contents of the LittleFS storage partition
-tools/         Host-side tooling (XML validation; future config web app)
+tools/         Host-side tooling: host tests, web installer, config-app (the face editor)
 .github/       CI: build artifacts on every push, releases + browser flashing on tags
 ```
 
@@ -126,13 +132,17 @@ when the code compiles.
 | M4 | Networking: provisioning, HTTP API, telemetry, OTA | complete |
 | **M5** | **Sensors: ADS1115 + MCP9600 front-end** | **next, blocked on hardware** |
 | M6 | Alerts, chime, peak-hold, datalogging | in progress |
-| M7 | Portability: a second board profile | |
-| M8 | Configuration web app | |
+| M7 | Configuration web app | in progress |
+| M8 | Portability: a second board profile | |
 
 **Verified on hardware** (ESP32-S3 rev v0.2): **66.6 fps**, 13.2% dirty, 5.9ms render per
 15ms period, with the needle sweeping continuously. The swipe transition costs ~33 fps, a
 documented and accepted trade. Numbers and the two designs that failed first are in
 [docs/performance.md](docs/performance.md).
+
+**Custom shapes (ADR 0006) are built and host-tested only**: not yet run on a board, frame cost unmeasured.
+
+**The face editor (`tools/config-app`) is built and tested, not yet deployed.** Its parser is a port of `gauge_config.c`: change both in the same commit, or CI's differential test fails. Uploading from it is blocked by the firmware's missing CORS and HTTP-only API. See [docs/config-app.md](docs/config-app.md).
 
 Faces load from `/storage/gauges/*.xml` on LittleFS, falling back to the next available
 config and then to the compiled-in face. All three paths are verified on hardware.
@@ -145,7 +155,7 @@ config and then to the compiled-in face. All three paths are verified on hardwar
 
 Two ways internal RAM leaks away unnoticed:
 - **Task stacks are internal RAM.** That includes LVGL's draw threads, the HTTP server and every `xTaskCreate()`. Size them from a measured high-water mark, not a default. WiFi's own startup needs ~48KB of internal DMA memory, and shrinking the draw-thread stacks is what made room for 6 static RX buffers.
-- **Plain `malloc()` of under 4KB is internal RAM too** (`SPIRAM_MALLOC_ALWAYSINTERNAL`). Allocate buffers and large structs, such as a 924-byte `gauge_config_t`, with `heap_caps_malloc(..., MALLOC_CAP_SPIRAM)`. Never put them on the stack of a network task.
+- **Plain `malloc()` of under 4KB is internal RAM too** (`SPIRAM_MALLOC_ALWAYSINTERNAL`). Allocate buffers and large structs, such as a 2.3KB `gauge_config_t`, with `heap_caps_malloc(..., MALLOC_CAP_SPIRAM)`. Never put them on a task stack or in a static.
 
 **Never call the BSP's audio init** (`bsp_audio_init()`, `bsp_audio_codec_*_init()`). It
 allocates speaker and microphone buffers that do not fit once WiFi runs, and the BSP aborts on

@@ -9,6 +9,7 @@
 #include "app_ui.h"
 
 #include <inttypes.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -25,8 +26,63 @@
 
 static const char *TAG = "app_ui";
 
+/*
+ * The whole panel is 1.75" across (~266 ppi), so the settings page is sized for a finger, not a
+ * stylus: 26px text is about the smallest that reads comfortably at arm's length, and controls
+ * are at least 54px tall.
+ */
+
 /* Round panels clip their corners, so settings content is inset from the edge. */
-#define SETTINGS_SIDE_PAD 56
+#define SETTINGS_SIDE_PAD 44
+#define SETTINGS_TOP_PAD  56
+/* Generous, so the last rows can be scrolled up into the wide middle of the panel. */
+#define SETTINGS_BOTTOM_PAD 140
+#define SETTINGS_ROW_GAP    28
+
+#define SETTINGS_CONTROL_H 64
+#define SETTINGS_SWITCH_W  100
+#define SETTINGS_SWITCH_H  54
+
+#define SETTINGS_FONT (&lv_font_montserrat_26)
+#if LV_FONT_MONTSERRAT_32
+#define SETTINGS_TITLE_FONT (&lv_font_montserrat_32)
+#else
+/* sdkconfig predates CONFIG_LV_FONT_MONTSERRAT_32 (see sdkconfig.defaults). */
+#define SETTINGS_TITLE_FONT (&lv_font_montserrat_26)
+#endif
+
+#define COLOR_CAPTION 0x9e9e9e
+#define COLOR_VALUE   0xffffff
+
+#define COLOR_RESET_IDLE  0x37373d
+#define COLOR_RESET_ARMED 0xc62828
+
+/* How long "Reset network" waits for the confirming second tap. */
+#define NET_RESET_CONFIRM_MS 4000
+
+/*
+ * Rotation is done by the panel (MADCTL), not by LVGL. The BSP registers this QSPI panel with
+ * the adapter as interface OTHER, for which the adapter never rotates frames -- and a hardware
+ * rotation costs nothing per frame anyway. The panel is square, so LVGL's resolution does not
+ * change and nothing needs rebuilding.
+ *
+ * LVGL is still told, purely so it maps touch input to match. Degrees in the settings are
+ * clockwise; LVGL counts the other way, hence 90 <-> 270 in its column. If taps land mirrored
+ * at 90 and 270 on hardware, swap the two LVGL entries.
+ */
+static const struct {
+    bsp_display_rotation_t panel;
+    lv_display_rotation_t  lvgl;
+} k_rotations[APP_SETTINGS_ROTATION_COUNT] = {
+    [APP_SETTINGS_ROTATION_0]   = {BSP_DISPLAY_ROTATE_0,   LV_DISPLAY_ROTATION_0},
+    [APP_SETTINGS_ROTATION_90]  = {BSP_DISPLAY_ROTATE_90,  LV_DISPLAY_ROTATION_270},
+    [APP_SETTINGS_ROTATION_180] = {BSP_DISPLAY_ROTATE_180, LV_DISPLAY_ROTATION_180},
+    [APP_SETTINGS_ROTATION_270] = {BSP_DISPLAY_ROTATE_270, LV_DISPLAY_ROTATION_90},
+};
+
+static const char *const k_rotation_map[] = {
+    "0" "\xC2\xB0", "90" "\xC2\xB0", "180" "\xC2\xB0", "270" "\xC2\xB0", "",
+};
 
 static struct {
     lv_obj_t *tileview;
@@ -42,6 +98,13 @@ static struct {
     lv_obj_t *gauge_dropdown;
     lv_obj_t *gauge_info_label;
     lv_obj_t *network_label;
+
+    lv_obj_t   *net_reset_btn;
+    lv_obj_t   *net_reset_label;
+    lv_timer_t *net_reset_timer; /**< Disarms the button if no second tap comes. */
+    bool        net_reset_armed;
+
+    app_ui_network_reset_cb_t on_network_reset;
 
     /* Ids backing the dropdown, in the order they appear in it. */
     char gauge_ids[GAUGE_STORE_MAX_GAUGES][GAUGE_CONFIG_MAX_ID_LEN];
@@ -60,9 +123,32 @@ static void update_gauge_info(const gauge_config_t *cfg)
     if (s.gauge_info_label == NULL) {
         return;
     }
-    lv_label_set_text_fmt(s.gauge_info_label, "%s  %.0f-%.0f %s", cfg->id,
+    lv_label_set_text_fmt(s.gauge_info_label, "%s\n%.0f-%.0f %s", cfg->id,
                           (double)cfg->source.min, (double)cfg->source.max,
                           cfg->source.unit);
+}
+
+static void apply_rotation(app_settings_rotation_t rotation)
+{
+    if ((unsigned)rotation >= APP_SETTINGS_ROTATION_COUNT) {
+        return;
+    }
+
+    esp_err_t err = bsp_display_rotation_set(k_rotations[rotation].panel);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "panel rotation failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    lv_display_set_rotation(NULL, k_rotations[rotation].lvgl);
+
+    /* What is on the glass was drawn for the old orientation. */
+    lv_obj_invalidate(lv_screen_active());
+}
+
+static void apply_rotation_async_cb(void *arg)
+{
+    apply_rotation((app_settings_rotation_t)(uintptr_t)arg);
 }
 
 /* ---------------------------------------------------------------- settings UI ------- */
@@ -74,16 +160,59 @@ static lv_obj_t *add_row(lv_obj_t *parent, const char *caption)
     lv_obj_set_width(row, LV_PCT(100));
     lv_obj_set_height(row, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(row, 4, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(row, 8, LV_PART_MAIN);
+    lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
     if (caption != NULL) {
         lv_obj_t *label = lv_label_create(row);
         lv_label_set_text(label, caption);
-        lv_obj_set_style_text_font(label, &lv_font_montserrat_16, LV_PART_MAIN);
-        lv_obj_set_style_text_color(label, lv_color_hex(0x9e9e9e), LV_PART_MAIN);
+        lv_obj_set_style_text_font(label, SETTINGS_FONT, LV_PART_MAIN);
+        lv_obj_set_style_text_color(label, lv_color_hex(COLOR_CAPTION), LV_PART_MAIN);
     }
 
     return row;
+}
+
+/* A wrapping read-only value under a row's caption. */
+static lv_obj_t *add_value_label(lv_obj_t *row, const char *text, uint32_t color)
+{
+    lv_obj_t *label = lv_label_create(row);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(label, LV_PCT(100));
+    lv_label_set_text(label, text);
+    lv_obj_set_style_text_font(label, SETTINGS_FONT, LV_PART_MAIN);
+    lv_obj_set_style_text_color(label, lv_color_hex(color), LV_PART_MAIN);
+    return label;
+}
+
+/* Caption on the left, switch on the right. The whole row height is a comfortable target. */
+static lv_obj_t *add_toggle_row(lv_obj_t *parent, const char *caption, bool on,
+                                lv_event_cb_t cb)
+{
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_width(row, LV_PCT(100));
+    lv_obj_set_height(row, LV_SIZE_CONTENT);
+    lv_obj_set_style_min_height(row, SETTINGS_CONTROL_H, LV_PART_MAIN);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *label = lv_label_create(row);
+    lv_label_set_text(label, caption);
+    lv_obj_set_style_text_font(label, SETTINGS_FONT, LV_PART_MAIN);
+    lv_obj_set_style_text_color(label, lv_color_hex(COLOR_CAPTION), LV_PART_MAIN);
+
+    lv_obj_t *sw = lv_switch_create(row);
+    lv_obj_set_size(sw, SETTINGS_SWITCH_W, SETTINGS_SWITCH_H);
+    lv_obj_set_ext_click_area(sw, 12);
+    if (on) {
+        lv_obj_add_state(sw, LV_STATE_CHECKED);
+    }
+    lv_obj_add_event_cb(sw, cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    return sw;
 }
 
 static void brightness_changed_cb(lv_event_t *e)
@@ -98,6 +227,70 @@ static void brightness_changed_cb(lv_event_t *e)
     /* ...but only write flash when the interaction ends. */
     if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
         app_settings_commit();
+    }
+}
+
+static void rotation_changed_cb(lv_event_t *e)
+{
+    lv_obj_t *bm  = lv_event_get_target(e);
+    uint32_t  idx = lv_buttonmatrix_get_selected_button(bm);
+
+    if (idx >= APP_SETTINGS_ROTATION_COUNT) {
+        return; /* LV_BUTTONMATRIX_BUTTON_NONE */
+    }
+
+    app_settings_rotation_t rotation = (app_settings_rotation_t)idx;
+    if (rotation == app_settings_get()->rotation) {
+        return;
+    }
+
+    app_settings_set_rotation(rotation);
+    app_settings_commit();
+
+    /*
+     * Rotating remaps touch coordinates, so LVGL sees the finger jump. Done while this tap is
+     * still being processed, the buttonmatrix ended up checking the wrong button (or none), so
+     * wait until the tap has been fully handled.
+     */
+    lv_async_call(apply_rotation_async_cb, (void *)(uintptr_t)rotation);
+}
+
+static void set_net_reset_armed(bool armed)
+{
+    s.net_reset_armed = armed;
+    lv_label_set_text(s.net_reset_label, armed ? "Tap again to reset" : "Reset network");
+    lv_obj_set_style_bg_color(s.net_reset_btn,
+                              lv_color_hex(armed ? COLOR_RESET_ARMED : COLOR_RESET_IDLE),
+                              LV_PART_MAIN);
+}
+
+static void net_reset_disarm_cb(lv_timer_t *t)
+{
+    (void)t;
+    s.net_reset_timer = NULL; /* one-shot: LVGL deletes it after this returns */
+    set_net_reset_armed(false);
+}
+
+/* Two taps: dropping the connection from a stray touch in a moving vehicle would be a nuisance. */
+static void network_reset_clicked_cb(lv_event_t *e)
+{
+    (void)e;
+
+    if (!s.net_reset_armed) {
+        set_net_reset_armed(true);
+        s.net_reset_timer = lv_timer_create(net_reset_disarm_cb, NET_RESET_CONFIRM_MS, NULL);
+        lv_timer_set_repeat_count(s.net_reset_timer, 1);
+        return;
+    }
+
+    if (s.net_reset_timer != NULL) {
+        lv_timer_delete(s.net_reset_timer);
+        s.net_reset_timer = NULL;
+    }
+    set_net_reset_armed(false);
+
+    if (s.on_network_reset != NULL) {
+        s.on_network_reset();
     }
 }
 
@@ -165,13 +358,13 @@ static void status_timer_cb(lv_timer_t *t)
 
     if (s.perf_label != NULL && app_ui_get_tile() == APP_UI_TILE_SETTINGS) {
         lv_label_set_text_fmt(s.perf_label,
-                              "%.1f fps  %.1f%% dirty\n%.2f ms render",
+                              "%.1f fps\n%.1f%% dirty\n%.2f ms render",
                               (double)st.fps, (double)st.dirty_pct_mean,
                               (double)st.render_ms_mean);
     }
 
     if (s.heap_label != NULL && app_ui_get_tile() == APP_UI_TILE_SETTINGS) {
-        lv_label_set_text_fmt(s.heap_label, "%u KB internal  %u KB PSRAM",
+        lv_label_set_text_fmt(s.heap_label, "%u KB internal\n%u KB PSRAM",
                               (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
                               (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
     }
@@ -188,119 +381,113 @@ static void build_settings_tile(lv_obj_t *tile, const gauge_config_t *cfg)
     lv_obj_remove_style_all(col);
     lv_obj_set_size(col, LV_PCT(100), LV_PCT(100));
     lv_obj_set_style_pad_hor(col, SETTINGS_SIDE_PAD, LV_PART_MAIN);
-    lv_obj_set_style_pad_ver(col, 40, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(col, SETTINGS_TOP_PAD, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(col, SETTINGS_BOTTOM_PAD, LV_PART_MAIN);
     lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(col, 14, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(col, SETTINGS_ROW_GAP, LV_PART_MAIN);
     lv_obj_set_scroll_dir(col, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(col, LV_SCROLLBAR_MODE_OFF);
 
     /* --- heading --- */
     lv_obj_t *title = lv_label_create(col);
     lv_label_set_text(title, "SETTINGS");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, LV_PART_MAIN);
-    lv_obj_set_style_text_color(title, lv_color_hex(0xffffff), LV_PART_MAIN);
+    lv_obj_set_style_text_font(title, SETTINGS_TITLE_FONT, LV_PART_MAIN);
+    lv_obj_set_style_text_color(title, lv_color_hex(COLOR_VALUE), LV_PART_MAIN);
     lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_obj_set_width(title, LV_PCT(100));
 
     /* --- brightness --- */
     lv_obj_t *bright_row = add_row(col, "Brightness");
-    lv_obj_t *slider     = lv_slider_create(bright_row);
-    lv_obj_set_width(slider, LV_PCT(100));
+    /*
+     * The knob is larger than the track, so give it room: inset the row so the knob stays on
+     * the glass at either end, and let it draw outside the row's bounds vertically.
+     */
+    lv_obj_set_style_pad_hor(bright_row, 22, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(bright_row, 26, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(bright_row, 14, LV_PART_MAIN);
+    lv_obj_add_flag(bright_row, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+
+    lv_obj_t *slider = lv_slider_create(bright_row);
+    lv_obj_set_size(slider, LV_PCT(100), 20);
+    lv_obj_set_style_pad_all(slider, 14, LV_PART_KNOB);
+    lv_obj_set_ext_click_area(slider, 24);
     lv_slider_set_range(slider, APP_SETTINGS_BRIGHTNESS_MIN, APP_SETTINGS_BRIGHTNESS_MAX);
     lv_slider_set_value(slider, set->brightness, LV_ANIM_OFF);
     lv_obj_add_event_cb(slider, brightness_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_event_cb(slider, brightness_changed_cb, LV_EVENT_RELEASED, NULL);
 
-    /* --- FPS badge toggle --- */
-    lv_obj_t *fps_row = lv_obj_create(col);
-    lv_obj_remove_style_all(fps_row);
-    lv_obj_set_width(fps_row, LV_PCT(100));
-    lv_obj_set_height(fps_row, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(fps_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(fps_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
+    /* --- rotation --- */
+    lv_obj_t *rot_row = add_row(col, "Rotation");
+    lv_obj_t *rot     = lv_buttonmatrix_create(rot_row);
+    lv_buttonmatrix_set_map(rot, k_rotation_map);
+    /* CLICK_TRIG: report the change on release, after the button has been checked. */
+    lv_buttonmatrix_set_button_ctrl_all(
+        rot, (lv_buttonmatrix_ctrl_t)(LV_BUTTONMATRIX_CTRL_CHECKABLE | LV_BUTTONMATRIX_CTRL_CLICK_TRIG));
+    lv_buttonmatrix_set_one_checked(rot, true);
+    lv_buttonmatrix_set_button_ctrl(rot, (uint32_t)set->rotation, LV_BUTTONMATRIX_CTRL_CHECKED);
+    lv_obj_set_size(rot, LV_PCT(100), SETTINGS_CONTROL_H);
+    lv_obj_set_style_pad_all(rot, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_gap(rot, 6, LV_PART_MAIN);
+    lv_obj_set_style_border_width(rot, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(rot, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_text_font(rot, SETTINGS_FONT, LV_PART_ITEMS);
+    lv_obj_add_event_cb(rot, rotation_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
-    lv_obj_t *fps_caption = lv_label_create(fps_row);
-    lv_label_set_text(fps_caption, "Show FPS");
-    lv_obj_set_style_text_font(fps_caption, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(fps_caption, lv_color_hex(0x9e9e9e), LV_PART_MAIN);
-
-    lv_obj_t *sw = lv_switch_create(fps_row);
-    if (set->show_fps) {
-        lv_obj_add_state(sw, LV_STATE_CHECKED);
-    }
-    lv_obj_add_event_cb(sw, show_fps_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
-
-    /* --- alert sound toggle --- */
-    lv_obj_t *sound_row = lv_obj_create(col);
-    lv_obj_remove_style_all(sound_row);
-    lv_obj_set_width(sound_row, LV_PCT(100));
-    lv_obj_set_height(sound_row, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(sound_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(sound_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-
-    lv_obj_t *sound_caption = lv_label_create(sound_row);
-    lv_label_set_text(sound_caption, "Alert sound");
-    lv_obj_set_style_text_font(sound_caption, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(sound_caption, lv_color_hex(0x9e9e9e), LV_PART_MAIN);
-
-    lv_obj_t *sound_sw = lv_switch_create(sound_row);
-    if (set->alert_sound) {
-        lv_obj_add_state(sound_sw, LV_STATE_CHECKED);
-    }
-    lv_obj_add_event_cb(sound_sw, alert_sound_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
-
-    /* --- network --- */
-    lv_obj_t *net_row = add_row(col, "Network");
-    s.network_label   = lv_label_create(net_row);
-    lv_label_set_long_mode(s.network_label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(s.network_label, LV_PCT(100));
-    lv_label_set_text(s.network_label, "starting...");
-    lv_obj_set_style_text_font(s.network_label, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s.network_label, lv_color_hex(0xffffff), LV_PART_MAIN);
-
-    /* --- live performance --- */
-    lv_obj_t *perf_row = add_row(col, "Performance");
-    s.perf_label       = lv_label_create(perf_row);
-    lv_label_set_text(s.perf_label, "measuring...");
-    lv_obj_set_style_text_font(s.perf_label, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s.perf_label, lv_color_hex(0x00c853), LV_PART_MAIN);
+    /* --- toggles --- */
+    add_toggle_row(col, "Show FPS", set->show_fps, show_fps_changed_cb);
+    add_toggle_row(col, "Alert sound", set->alert_sound, alert_sound_changed_cb);
 
     /* --- gauge picker --- */
     lv_obj_t *gauge_row = add_row(col, "Gauge");
 
     s.gauge_dropdown = lv_dropdown_create(gauge_row);
     lv_obj_set_width(s.gauge_dropdown, LV_PCT(100));
+    lv_obj_set_style_min_height(s.gauge_dropdown, SETTINGS_CONTROL_H, LV_PART_MAIN);
+    lv_obj_set_style_pad_ver(s.gauge_dropdown, 16, LV_PART_MAIN);
+    lv_obj_set_style_text_font(s.gauge_dropdown, SETTINGS_FONT, LV_PART_MAIN);
     lv_dropdown_set_options(s.gauge_dropdown, "(built-in)");
     lv_obj_add_event_cb(s.gauge_dropdown, gauge_selected_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
-    s.gauge_info_label = lv_label_create(gauge_row);
-    lv_obj_set_style_text_font(s.gauge_info_label, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s.gauge_info_label, lv_color_hex(0xffffff), LV_PART_MAIN);
+    /* The open list is a separate object; space its options out so each is easy to hit. */
+    lv_obj_t *dd_list = lv_dropdown_get_list(s.gauge_dropdown);
+    lv_obj_set_style_text_font(dd_list, SETTINGS_FONT, LV_PART_MAIN);
+    lv_obj_set_style_text_line_space(dd_list, 28, LV_PART_MAIN);
+    lv_obj_set_style_pad_ver(dd_list, 14, LV_PART_MAIN);
+
+    s.gauge_info_label = add_value_label(gauge_row, "", COLOR_VALUE);
     update_gauge_info(cfg);
+
+    /* --- network --- */
+    lv_obj_t *net_row = add_row(col, "Network");
+    s.network_label   = add_value_label(net_row, "starting...", COLOR_VALUE);
+
+    s.net_reset_btn = lv_button_create(net_row);
+    lv_obj_set_size(s.net_reset_btn, LV_PCT(100), SETTINGS_CONTROL_H);
+    lv_obj_set_style_margin_top(s.net_reset_btn, 8, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(s.net_reset_btn, 0, LV_PART_MAIN);
+    lv_obj_add_event_cb(s.net_reset_btn, network_reset_clicked_cb, LV_EVENT_CLICKED, NULL);
+
+    s.net_reset_label = lv_label_create(s.net_reset_btn);
+    lv_obj_set_style_text_font(s.net_reset_label, SETTINGS_FONT, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s.net_reset_label, lv_color_hex(COLOR_VALUE), LV_PART_MAIN);
+    lv_obj_center(s.net_reset_label);
+    set_net_reset_armed(false);
+
+    /* --- live performance --- */
+    lv_obj_t *perf_row = add_row(col, "Performance");
+    s.perf_label       = add_value_label(perf_row, "measuring...", 0x00c853);
 
     /* --- memory --- */
     lv_obj_t *heap_row = add_row(col, "Free memory");
-    s.heap_label       = lv_label_create(heap_row);
-    lv_label_set_text(s.heap_label, "-");
-    lv_obj_set_style_text_font(s.heap_label, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s.heap_label, lv_color_hex(0xffffff), LV_PART_MAIN);
+    s.heap_label       = add_value_label(heap_row, "-", COLOR_VALUE);
 
     /* --- firmware version --- */
-    const esp_app_desc_t *desc     = esp_app_get_description();
-    lv_obj_t             *ver_row  = add_row(col, "Firmware");
-    lv_obj_t             *ver      = lv_label_create(ver_row);
-    lv_label_set_text_fmt(ver, "%s", desc ? desc->version : "unknown");
-    lv_obj_set_style_text_font(ver, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(ver, lv_color_hex(0xffffff), LV_PART_MAIN);
+    const esp_app_desc_t *desc    = esp_app_get_description();
+    lv_obj_t             *ver_row = add_row(col, "Firmware");
+    add_value_label(ver_row, desc ? desc->version : "unknown", COLOR_VALUE);
 
     /* --- warnings, hidden unless there is something to say --- */
-    s.warning_label = lv_label_create(col);
-    lv_label_set_long_mode(s.warning_label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(s.warning_label, LV_PCT(100));
-    lv_obj_set_style_text_font(s.warning_label, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s.warning_label, lv_color_hex(0xffab00), LV_PART_MAIN);
+    s.warning_label = add_value_label(col, "", 0xffab00);
     lv_obj_add_flag(s.warning_label, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -311,6 +498,8 @@ esp_err_t app_ui_create(const gauge_config_t *cfg, const board_profile_t *board)
     ESP_RETURN_ON_FALSE(cfg && board, ESP_ERR_INVALID_ARG, TAG, "bad args");
 
     s.board = board;
+
+    apply_rotation(app_settings_get()->rotation);
 
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_black(), LV_PART_MAIN);
@@ -473,6 +662,11 @@ void app_ui_set_gauge_selected_cb(app_ui_gauge_selected_cb_t cb)
     s.on_gauge_selected = cb;
 }
 
+void app_ui_set_network_reset_cb(app_ui_network_reset_cb_t cb)
+{
+    s.on_network_reset = cb;
+}
+
 void app_ui_set_alert_cb(gauge_render_alert_cb_t cb, void *user_data)
 {
     s.alert_cb      = cb;
@@ -522,6 +716,7 @@ void app_ui_set_warning(const char *text)
     }
 
     if (text == NULL || text[0] == '\0') {
+        lv_label_set_text(s.warning_label, "");
         lv_obj_add_flag(s.warning_label, LV_OBJ_FLAG_HIDDEN);
         return;
     }

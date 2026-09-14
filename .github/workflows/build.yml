@@ -23,6 +23,29 @@ jobs:
           cmake --build build/host-tests
           ctest --test-dir build/host-tests --output-on-failure
 
+  editor:
+    name: face editor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The editor carries a port of the firmware's XML parser. Build the C parser's JSON dump so
+      # the differential test can compare the two over the same corpus. See docs/config-app.md.
+      - name: Build firmware parser dump
+        run: |
+          cmake -S tools/host-tests -B build/host-tests
+          cmake --build build/host-tests --target gauge_config_dump
+
+      - name: Test
+        working-directory: tools/config-app
+        env:
+          GAUGE_CONFIG_DUMP: ${{ github.workspace }}/build/host-tests/gauge_config_dump
+        run: npm test
+
   firmware:
     name: firmware (esp32s3)
     runs-on: ubuntu-latest

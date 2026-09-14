@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI-Gauge Face Editor</title>
+<meta name="description" content="Design, preview and validate dial faces for the AI-Gauge, and export them as gauge XML.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23000' stroke='%23444' stroke-width='2'/%3E%3Cpath d='M6 22 A11 11 0 1 1 26 22' fill='none' stroke='%2300c853' stroke-width='3'/%3E%3Cpath d='M16 16 L24 8' stroke='%23ff1744' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<!-- Montserrat is the face the gauge's fonts are cut from, so the preview uses it too. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500&display=swap">
+<link rel="stylesheet" href="css/app.css">
+<script type="module" src="js/app.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../" title="AI-Gauge installer">AI<span>-</span>Gauge</a>
+  <span class="product">Face editor</span>
+  <label class="face-switch">
+    <span class="visually-hidden">Face</span>
+    <select id="face-select" aria-label="Open face"></select>
+  </label>
+  <div class="top-actions">
+    <button type="button" id="btn-undo" class="icon" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>↶</button>
+    <button type="button" id="btn-redo" class="icon" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled>↷</button>
+    <button type="button" id="btn-new">New…</button>
+    <button type="button" id="btn-import">Import…</button>
+    <button type="button" id="btn-export" class="primary" title="Download XML (Ctrl+S)">Download XML</button>
+    <input type="file" id="file-input" accept=".xml,application/xml,text/xml" multiple hidden>
+  </div>
+</header>
+
+<main class="workspace">
+  <nav id="sections" class="sections" aria-label="Face sections"></nav>
+
+  <section class="stage" aria-label="Preview">
+    <div class="dial-wrap">
+      <svg id="preview" viewBox="0 0 466 466" role="img" aria-label="Live preview of the gauge face">
+        <defs>
+          <clipPath id="panel-clip"><circle cx="233" cy="233" r="233"/></clipPath>
+        </defs>
+        <g clip-path="url(#panel-clip)">
+          <g id="layer-face"></g>
+          <g id="layer-peak" pointer-events="none"></g>
+          <g id="layer-needle" pointer-events="none"></g>
+          <g id="layer-hub" pointer-events="none"></g>
+          <g id="layer-readout"></g>
+          <g id="layer-peaktext"></g>
+        </g>
+        <g id="layer-guides" pointer-events="none"></g>
+        <circle class="bezel" cx="233" cy="233" r="233" fill="none" pointer-events="none"/>
+      </svg>
+    </div>
+
+    <div class="controls">
+      <label class="value-control">
+        <span>Value</span>
+        <input id="value-slider" type="range" aria-label="Simulated value">
+        <input id="value-number" type="number" step="any" aria-label="Simulated value, exact">
+      </label>
+      <div class="control-buttons">
+        <button type="button" id="btn-sweep" aria-pressed="false" title="Sweep the value back and forth">Sweep</button>
+        <button type="button" id="btn-peak-reset" title="What tapping the dial does on the gauge">Reset peak</button>
+        <label class="guides"><input type="checkbox" id="toggle-guides"> Guides</label>
+      </div>
+      <p class="sim-state" id="sim-state" aria-live="polite"></p>
+    </div>
+    <p class="stage-note">Click part of the face to edit it; drag titles and the readout to move them. The damping and alerts behave as on the gauge. Text metrics are close, not pixel-exact.</p>
+  </section>
+
+  <section id="inspector" class="inspector" aria-label="Settings"></section>
+</main>
+
+<section class="dock" aria-label="Validation and XML">
+  <div class="dock-bar" role="tablist">
+    <button type="button" role="tab" id="tab-issues" aria-selected="true" aria-controls="pane-issues">Issues <span id="tab-issues-count" class="count"></span></button>
+    <button type="button" role="tab" id="tab-xml" aria-selected="false" aria-controls="pane-xml">XML</button>
+    <span id="device-verdict" class="verdict"></span>
+    <span id="byte-count" class="bytes"></span>
+  </div>
+  <div id="pane-issues" role="tabpanel" aria-labelledby="tab-issues">
+    <ul id="issues-list" class="issues"></ul>
+  </div>
+  <div id="pane-xml" role="tabpanel" aria-labelledby="tab-xml" hidden>
+    <div class="xml-tools"><button type="button" id="btn-copy-xml">Copy</button></div>
+    <pre class="xml"><code id="xml-code"></code></pre>
+  </div>
+</section>
+
+<div id="toasts" class="toasts"></div>
+<noscript><p class="noscript">The face editor needs JavaScript.</p></noscript>
+</body>
+</html>

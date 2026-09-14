@@ -87,9 +87,12 @@ Upstream warning: *"Do not repurpose GPIO1, GPIO2, or GPIO3 while the card is mo
 
 MCLK **must** be GPIO42.
 
-**Speaker:** the playback path ends at a small speaker connector. On the unit used for
-development nothing was audible even at full volume, with the codec reporting no errors, so a
-speaker appears not to be fitted. Check for one before relying on the audible alert.
+**Speaker:** the ES8311 drives an **NS4150B** class-D amplifier (enabled by GPIO46), powered
+from **VCC3V3**, with a **bridged** output on a 2-pin **MX1.25** connector (H3) — upstream
+schematic and `HARDWARE_REFERENCE.md`. On the unit used for development nothing was audible even
+at full volume, with the codec reporting no errors, so no speaker is fitted. A speaker plugged
+into H3 needs no extra amplifier. Never ground either speaker terminal. See
+[rear-pcb.md](rear-pcb.md#speaker).
 
 ## 8-pin expansion header — the only solder-free I/O
 
@@ -103,6 +106,13 @@ speaker appears not to be fitted. Check for one before relying on the audible al
 | 6 | **GPIO17** | Free (LC76G RX on `-G`) |
 | 7 | **GPIO18** | Free (LC76G TX on `-G`) |
 | 8 | **GPIO16** | Free |
+
+> **Upstream sources disagree on pins 4–8.** The table above follows upstream
+> `HARDWARE_REFERENCE.md`. The upstream schematic's header symbol (H2) reads pin 4 U0TXD,
+> 5 U0RXD, 6 GPIO16, 7 GPIO17, 8 GPIO18. Confirm on the board with a meter before wiring
+> anything to pins 6–8 — see [rear-pcb.md](rear-pcb.md#the-header--source-conflict-resolve-before-layout).
+> Header VBUS is the same net as USB-C VBUS with no diode between them, so an external 5V
+> supply on pin 1 must block reverse current.
 
 This project's allocation — see [sensor-frontend.md](sensor-frontend.md):
 

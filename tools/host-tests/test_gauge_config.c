@@ -261,16 +261,214 @@ static void test_builtin_default_is_valid(void)
      * The built-in face is the last line of defence when a stored config is bad. If it does
      * not parse, a filesystem problem becomes a blank screen -- so this is worth asserting.
      */
-    const gauge_config_t *cfg = gauge_config_builtin_default();
+    gauge_config_t cfg;
+    memset(&cfg, 0xa5, sizeof(cfg));
+    gauge_config_builtin_default(&cfg);
 
-    CHECK(cfg != NULL, "must never be NULL");
-    CHECK(strcmp(cfg->id, "default") == 0, "id was '%s'", cfg->id);
-    CHECK(cfg->face.band_count == 3, "expected 3 bands, got %u", cfg->face.band_count);
-    CHECK(cfg->readout.present, "should have a readout");
-    CHECK(cfg->title_count == 1, "should have a title");
-    CHECK(cfg->warning_count == 0,
-          "the built-in face should parse cleanly, got %u warnings", cfg->warning_count);
-    CHECK(cfg->source.max > cfg->source.min, "range must be sane");
+    CHECK(strcmp(cfg.id, "default") == 0, "id was '%s'", cfg.id);
+    CHECK(cfg.face.band_count == 3, "expected 3 bands, got %u", cfg.face.band_count);
+    CHECK(cfg.readout.present, "should have a readout");
+    CHECK(cfg.title_count == 1, "should have a title");
+    CHECK(cfg.warning_count == 0,
+          "the built-in face should parse cleanly, got %u warnings", cfg.warning_count);
+    CHECK(cfg.source.max > cfg.source.min, "range must be sane");
+    CHECK(cfg.needle.shape.part_count == 0, "built-in face uses the built-in needle");
+
+    gauge_config_builtin_default(NULL); /* must not crash */
+}
+
+/* --- custom shapes ------------------------------------------------------------------ */
+
+#define PX(v) ((int16_t)((v) * GAUGE_SHAPE_COORD_SCALE))
+
+static void test_shapes_absent_by_default(void)
+{
+    gauge_config_t cfg;
+    CHECK(gauge_config_parse(MINIMAL, 0, &cfg) == GAUGE_CONFIG_OK, "should parse");
+    CHECK(cfg.face.ticks.major_shape.part_count == 0, "no major tick shape");
+    CHECK(cfg.face.ticks.minor_shape.part_count == 0, "no minor tick shape");
+    CHECK(cfg.needle.shape.part_count == 0, "no needle shape");
+    CHECK(cfg.needle.hub_shape.part_count == 0, "no hub shape");
+}
+
+static void test_shapes_parse(void)
+{
+    static const char *XML =
+        "<gauge version=\"1\" id=\"s\">"
+        "<source channel=\"c\" min=\"0\" max=\"10\"/>"
+        "<face>"
+        "  <ticks major-every=\"5\" minor-every=\"1\" color=\"#ffffff\">"
+        "    <major-shape><polygon points=\"-3,0 3,0 1.5,26 -1.5,26\"/></major-shape>"
+        "    <minor-shape color=\"#808080\"><polygon points=\"-1 0  1 0\n1 12 -1 12\"/></minor-shape>"
+        "  </ticks>"
+        "</face>"
+        "<needle color=\"#ff1744\">"
+        "  <shape>"
+        "    <polygon points=\"0,-170 9,0 0,30 -9,0\"/>"
+        "    <circle r=\"10\" color=\"#202020\"/>"
+        "  </shape>"
+        "  <hub color=\"#333\">"
+        "    <circle r=\"18\"/>"
+        "    <circle cx=\"1\" cy=\"-2\" r=\"6\" color=\"#ff1744\"/>"
+        "  </hub>"
+        "</needle>"
+        "</gauge>";
+
+    gauge_config_t cfg;
+    CHECK(gauge_config_parse(XML, 0, &cfg) == GAUGE_CONFIG_OK, "should parse");
+    CHECK(cfg.warning_count == 0, "unexpected warnings: %u", cfg.warning_count);
+
+    const gauge_shape_t *maj = &cfg.face.ticks.major_shape;
+    CHECK(maj->part_count == 1 && maj->point_count == 4, "major shape %u parts %u points",
+          maj->part_count, maj->point_count);
+    CHECK(maj->parts[0].kind == GAUGE_SHAPE_PART_POLYGON && maj->parts[0].count == 4, "major part");
+    CHECK(maj->points[2].x == PX(1.5) && maj->points[2].y == PX(26), "sub-pixel point kept");
+    CHECK(!maj->has_color && !maj->parts[0].has_color, "major shape inherits the tick colour");
+    CHECK(cfg.face.ticks.present && near(cfg.face.ticks.major_every, 5.0f),
+          "ticks attributes still apply alongside shapes");
+
+    const gauge_shape_t *min = &cfg.face.ticks.minor_shape;
+    CHECK(min->part_count == 1 && min->point_count == 4, "space-separated points");
+    CHECK(min->has_color && min->color.r == 0x80, "shape container colour");
+
+    const gauge_shape_t *ndl = &cfg.needle.shape;
+    CHECK(ndl->part_count == 2, "needle parts %u", ndl->part_count);
+    CHECK(ndl->points[0].y == PX(-170), "needle tip");
+    CHECK(ndl->parts[1].kind == GAUGE_SHAPE_PART_CIRCLE && ndl->parts[1].radius == PX(10),
+          "needle circle");
+    CHECK(ndl->parts[1].has_color && ndl->parts[1].color.r == 0x20, "part colour");
+
+    const gauge_shape_t *hub = &cfg.needle.hub_shape;
+    CHECK(hub->part_count == 2 && hub->has_color && hub->color.g == 0x33, "hub");
+    CHECK(hub->parts[1].center.x == PX(1) && hub->parts[1].center.y == PX(-2), "circle centre");
+    CHECK(hub->parts[0].center.x == 0 && hub->parts[0].center.y == 0, "centre defaults to origin");
+}
+
+static void test_shape_context(void)
+{
+    /* Shape elements outside their parent are unknown elements: ignored, and silently. */
+    static const char *XML =
+        "<gauge version=\"1\" id=\"s\">"
+        "<source channel=\"c\" min=\"0\" max=\"10\"/>"
+        "<shape><polygon points=\"0,0 10,0 0,10\"/></shape>"
+        "<hub><circle r=\"5\"/></hub>"
+        "<needle><major-shape><polygon points=\"0,0 10,0 0,10\"/></major-shape></needle>"
+        "<ticks><polygon points=\"0,0 10,0 0,10\"/><shape><circle r=\"3\"/></shape></ticks>"
+        "<needle/><polygon points=\"0,0 10,0 0,10\"/>"
+        "<needle><shape><polygon points=\"0,-10 2,0 -2,0\"/></shape></needle>"
+        "<circle r=\"4\"/>"
+        "</gauge>";
+
+    gauge_config_t cfg;
+    CHECK(gauge_config_parse(XML, 0, &cfg) == GAUGE_CONFIG_OK, "should parse");
+    CHECK(cfg.warning_count == 0, "out-of-context shapes should not warn: %u", cfg.warning_count);
+    CHECK(cfg.face.ticks.major_shape.part_count == 0, "major-shape inside needle is ignored");
+    CHECK(cfg.needle.hub_shape.part_count == 0, "hub outside needle is ignored");
+    CHECK(cfg.needle.shape.part_count == 1, "needle shape parts %u", cfg.needle.shape.part_count);
+    CHECK(cfg.needle.shape.points[0].y == PX(-10), "only the in-context polygon lands");
+}
+
+/* Parses a needle shape body and reports the resulting shape and warning count. */
+static gauge_config_err_t parse_needle_shape(const char *body, gauge_config_t *cfg)
+{
+    static char xml[4096];
+    snprintf(xml, sizeof(xml),
+             "<gauge version=\"1\" id=\"s\"><source channel=\"c\" min=\"0\" max=\"10\"/>"
+             "<needle><shape>%s</shape></needle></gauge>", body);
+    return gauge_config_parse(xml, 0, cfg);
+}
+
+static void test_shape_validation(void)
+{
+    gauge_config_t cfg;
+    const gauge_shape_t *s = &cfg.needle.shape;
+
+    static const struct {
+        const char *body;
+        const char *why;
+    } rejected[] = {
+        {"<polygon points=\"0,0 10,0\"/>",          "fewer than three points"},
+        {"<polygon points=\"0,0 10,0 5\"/>",         "odd coordinate count"},
+        {"<polygon points=\"0,0 10,x 5,5\"/>",       "junk in the list"},
+        {"<polygon/>",                               "no points attribute"},
+        {"<polygon points=\"0,0 10,0 20,0\"/>",      "zero area"},
+        {"<circle/>",                                "circle with no radius"},
+        {"<circle r=\"0\"/>",                        "zero radius"},
+        {"<circle r=\"-4\"/>",                       "negative radius"},
+        {"<circle r=\"0.01\"/>",                     "radius below 1/16 px"},
+    };
+    for (size_t i = 0; i < sizeof(rejected) / sizeof(rejected[0]); i++) {
+        CHECK(parse_needle_shape(rejected[i].body, &cfg) == GAUGE_CONFIG_OK,
+              "%s: file should still parse", rejected[i].why);
+        CHECK(s->part_count == 0 && s->point_count == 0, "%s: part should be dropped",
+              rejected[i].why);
+        CHECK(cfg.warning_count == 1, "%s: expected 1 warning, got %u", rejected[i].why,
+              cfg.warning_count);
+    }
+
+    /* Out-of-range coordinates clamp rather than reject. */
+    CHECK(parse_needle_shape("<polygon points=\"0,0 3000,0 0,10\"/>", &cfg) == GAUGE_CONFIG_OK,
+          "should parse");
+    CHECK(s->part_count == 1 && s->points[1].x == PX(GAUGE_SHAPE_COORD_LIMIT_PX), "clamped x");
+    CHECK(cfg.warning_count == 1, "clamp should warn once, got %u", cfg.warning_count);
+
+    /* Number formats drawing tools emit. */
+    CHECK(parse_needle_shape("<polygon points=\"1e1,-2.5 .5.5 3-4\"/>", &cfg) == GAUGE_CONFIG_OK,
+          "should parse");
+    CHECK(cfg.warning_count == 0 && s->part_count == 1 && s->point_count == 3,
+          "exponent and run-together numbers: %u warnings", cfg.warning_count);
+    CHECK(s->points[0].x == PX(10) && s->points[0].y == (int16_t)(-2.5 * 16), "1e1,-2.5");
+    CHECK(s->points[1].x == PX(0.5) && s->points[1].y == PX(0.5), ".5.5");
+    CHECK(s->points[2].x == PX(3) && s->points[2].y == PX(-4), "3-4");
+
+    /* Parts beyond the cap are dropped with a warning each. */
+    CHECK(parse_needle_shape("<circle r=\"1\"/><circle r=\"2\"/><circle r=\"3\"/><circle r=\"4\"/>"
+                             "<circle r=\"5\"/><circle r=\"6\"/><circle r=\"7\"/><circle r=\"8\"/>",
+                             &cfg) == GAUGE_CONFIG_OK, "should parse");
+    CHECK(s->part_count == GAUGE_SHAPE_MAX_PARTS, "part cap, got %u", s->part_count);
+    CHECK(cfg.warning_count == 8 - GAUGE_SHAPE_MAX_PARTS, "one warning per dropped part, got %u",
+          cfg.warning_count);
+
+    /* A polygon that would overrun the shared point pool is dropped whole. */
+    char body[2048];
+    int  n = snprintf(body, sizeof(body), "<polygon points=\"");
+    for (int i = 0; i < 40; i++) {
+        float a = (float)i * 2.0f * 3.14159265f / 40.0f;
+        n += snprintf(body + n, sizeof(body) - (size_t)n, "%.2f,%.2f ", 50 * cos(a), 50 * sin(a));
+    }
+    n += snprintf(body + n, sizeof(body) - (size_t)n, "\"/><polygon points=\"");
+    for (int i = 0; i < 30; i++) {
+        float a = (float)i * 2.0f * 3.14159265f / 30.0f;
+        n += snprintf(body + n, sizeof(body) - (size_t)n, "%.2f,%.2f ", 20 * cos(a), 20 * sin(a));
+    }
+    snprintf(body + n, sizeof(body) - (size_t)n, "\"/><circle r=\"3\"/>");
+    CHECK(parse_needle_shape(body, &cfg) == GAUGE_CONFIG_OK, "should parse");
+    CHECK(s->point_count == 40 && s->part_count == 2, "pool overflow: %u points, %u parts",
+          s->point_count, s->part_count);
+    CHECK(s->parts[1].kind == GAUGE_SHAPE_PART_CIRCLE, "circles need no pool space");
+    CHECK(cfg.warning_count == 1, "overflowing polygon should warn once, got %u",
+          cfg.warning_count);
+
+    /* A malformed container colour warns and falls back to inheriting. */
+    static const char *BAD_COLOUR =
+        "<gauge version=\"1\" id=\"s\"><source channel=\"c\" min=\"0\" max=\"10\"/>"
+        "<needle><hub color=\"nope\"><circle r=\"5\"/></hub></needle></gauge>";
+    CHECK(gauge_config_parse(BAD_COLOUR, 0, &cfg) == GAUGE_CONFIG_OK, "should parse");
+    CHECK(!cfg.needle.hub_shape.has_color && cfg.needle.hub_shape.part_count == 1, "hub kept");
+    CHECK(cfg.warning_count == 1, "bad colour should warn, got %u", cfg.warning_count);
+
+    /* A repeated container replaces the earlier one. */
+    static const char *REPEATED =
+        "<gauge version=\"1\" id=\"s\"><source channel=\"c\" min=\"0\" max=\"10\"/>"
+        "<needle><shape><circle r=\"5\"/><circle r=\"6\"/></shape>"
+        "<shape><circle r=\"9\"/></shape></needle></gauge>";
+    CHECK(gauge_config_parse(REPEATED, 0, &cfg) == GAUGE_CONFIG_OK, "should parse");
+    CHECK(cfg.needle.shape.part_count == 1 && cfg.needle.shape.parts[0].radius == PX(9),
+          "last container wins");
+
+    /* An empty container leaves the built-in drawing in place. */
+    CHECK(parse_needle_shape("", &cfg) == GAUGE_CONFIG_OK && s->part_count == 0 &&
+              cfg.warning_count == 0, "empty shape");
 }
 
 /* ------------------------------------------------------------------------------------ */
@@ -323,6 +521,10 @@ int main(void)
         {"long_strings_truncate",    test_long_strings_truncate},
         {"builtin_default_is_valid", test_builtin_default_is_valid},
         {"peak",                     test_peak},
+        {"shapes_absent_by_default", test_shapes_absent_by_default},
+        {"shapes_parse",             test_shapes_parse},
+        {"shape_context",            test_shape_context},
+        {"shape_validation",         test_shape_validation},
     };
 
     for (size_t i = 0; i < sizeof(tests) / sizeof(tests[0]); i++) {

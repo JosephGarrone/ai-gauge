@@ -22,10 +22,20 @@ extern "C" {
 #define APP_SETTINGS_BRIGHTNESS_MIN 10 /**< Below this the AMOLED is unreadable in daylight. */
 #define APP_SETTINGS_BRIGHTNESS_MAX 100
 
+/** Whole-screen rotation, clockwise, so the gauge can be mounted at any angle. */
+typedef enum {
+    APP_SETTINGS_ROTATION_0 = 0,
+    APP_SETTINGS_ROTATION_90,
+    APP_SETTINGS_ROTATION_180,
+    APP_SETTINGS_ROTATION_270,
+    APP_SETTINGS_ROTATION_COUNT,
+} app_settings_rotation_t;
+
 typedef struct {
     uint8_t brightness;                          /**< Percent, clamped to the range above. */
     bool    show_fps;                            /**< FPS badge on the gauge screen. */
     bool    alert_sound;                         /**< Audible chime on alerts that request one. */
+    app_settings_rotation_t rotation;            /**< Screen rotation. */
     char    active_gauge[APP_SETTINGS_MAX_GAUGE_ID];
 } app_settings_t;
 
@@ -48,6 +58,9 @@ void app_settings_set_show_fps(bool show);
 
 /** @brief Update the alert sound preference in memory. */
 void app_settings_set_alert_sound(bool on);
+
+/** @brief Update the screen rotation in memory. Out-of-range values are ignored. */
+void app_settings_set_rotation(app_settings_rotation_t rotation);
 
 /** @brief Update the active gauge id in memory. */
 void app_settings_set_active_gauge(const char *id);

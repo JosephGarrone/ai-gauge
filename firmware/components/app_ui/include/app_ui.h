@@ -33,6 +33,8 @@ typedef enum {
 /**
  * @brief Build the screens and the gauge on the active display.
  *
+ * Also applies the stored screen rotation (app_settings), so app_settings_init() must have run.
+ *
  * @param cfg   Parsed gauge configuration.
  * @param board Panel geometry. Must outlive the UI.
  */
@@ -67,6 +69,16 @@ void app_ui_set_gauge_list(const char (*ids)[GAUGE_CONFIG_MAX_ID_LEN], int count
 typedef void (*app_ui_gauge_selected_cb_t)(const char *id);
 
 void app_ui_set_gauge_selected_cb(app_ui_gauge_selected_cb_t cb);
+
+/**
+ * @brief Called when the user confirms "Reset network" on the settings page.
+ *
+ * Runs on the LVGL task. The button asks for a second tap before calling this, so the handler
+ * can act straight away -- typically by forgetting the stored WiFi credentials.
+ */
+typedef void (*app_ui_network_reset_cb_t)(void);
+
+void app_ui_set_network_reset_cb(app_ui_network_reset_cb_t cb);
 
 /**
  * @brief Register a callback for alert transitions on the displayed gauge.

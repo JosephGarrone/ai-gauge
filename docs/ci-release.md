@@ -23,14 +23,33 @@ developed against a pipeline that does not exist.
 
 Artifacts are retained by GitHub for 90 days.
 
+Also on every push, a **face editor** job builds the C parser's JSON dump (`gauge_config_dump`) and
+runs the editor's tests, including the differential test that holds its parser port to the
+firmware's. See [config-app.md](config-app.md).
+
 ## `release.yml` — on a `v*` tag
 
 1. Same build.
 2. Attach every binary to a **GitHub Release**.
-3. Generate an **ESP Web Tools** manifest and publish a flashing page to **GitHub Pages**.
+3. Call `pages.yml` with the tag, so the flashing page serves the new firmware.
 
-The Pages site will eventually also host the gauge-config web app, so browser flashing and
-browser configuration share one place.
+## `pages.yml` — the GitHub Pages site
+
+A Pages deploy replaces the whole site, so this one workflow always assembles all of it:
+
+| Path | Content | Source |
+|---|---|---|
+| `/` | ESP Web Tools flashing page and manifest | `tools/web-installer`, with `ai-gauge-merged.bin` downloaded from a GitHub Release |
+| `/editor/` | Face editor | `tools/config-app` at the triggering commit |
+| `/editor/examples/` | Shipped faces, offered as starting points | `firmware/assets/gauges` |
+
+It runs when `release.yml` calls it (serving that tag), on pushes to `main` that touch the editor,
+installer or shipped faces (serving the latest release), and by hand. The flashing page only ever
+serves released firmware. With no release yet, `/` redirects to the editor. The editor's tests must
+pass before anything is published.
+
+Requires *Settings → Pages → Source: GitHub Actions*, and a `github-pages` environment whose
+deployment rules allow both `main` and `v*` tags.
 
 ## Browser flashing
 

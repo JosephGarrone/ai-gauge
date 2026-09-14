@@ -12,6 +12,7 @@
 #include <inttypes.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_err.h"
@@ -48,11 +49,14 @@ static const char *TAG = "app_main";
 #define SIM_TICK_MS 5
 
 /*
- * The configuration currently on screen. Held here rather than pointed at, because switching
- * gauges replaces it and anything holding a pointer to the old one (the simulator's range,
- * for instance) would keep using stale limits.
+ * The configuration currently on screen. A copy held here rather than a pointer into someone
+ * else's, because switching gauges replaces it and anything holding a pointer to the old one (the
+ * simulator's range, for instance) would keep using stale limits.
+ *
+ * Allocated in PSRAM at startup, not static: a gauge_config_t with custom shapes is over 2KB, and
+ * a static would sit in internal RAM, which WiFi needs (docs/performance.md).
  */
-static gauge_config_t s_active_cfg;
+static gauge_config_t *s_active_cfg;
 
 #if CONFIG_AI_GAUGE_SIMULATED_SOURCE
 
@@ -72,8 +76,8 @@ static void sim_timer_cb(lv_timer_t *t)
     float          phase     = (float)(elapsed_ms % period_ms) / (float)period_ms;
     float          tri       = (phase < 0.5f) ? (phase * 2.0f) : ((1.0f - phase) * 2.0f);
 
-    float min = s_active_cfg.source.min;
-    float max = s_active_cfg.source.max;
+    float min = s_active_cfg->source.min;
+    float max = s_active_cfg->source.max;
 
     gauge_render_set_value(app_ui_get_gauge(), min + tri * (max - min), true);
 }
@@ -113,7 +117,7 @@ static const char *load_initial_config(char *warning, size_t warning_len)
 
     const char *wanted = app_settings_get()->active_gauge;
     if (wanted[0] != '\0' &&
-        gauge_store_load(wanted, &s_active_cfg, err, sizeof(err)) == ESP_OK) {
+        gauge_store_load(wanted, s_active_cfg, err, sizeof(err)) == ESP_OK) {
         snprintf(loaded_id, sizeof(loaded_id), "%s", wanted);
         if (err[0] != '\0') {
             snprintf(warning, warning_len, "Gauge '%s': %s", wanted, err);
@@ -136,7 +140,7 @@ static const char *load_initial_config(char *warning, size_t warning_len)
         }
 
         char alt_err[GAUGE_STORE_ERR_LEN] = {0};
-        if (gauge_store_load(list.ids[i], &s_active_cfg, alt_err, sizeof(alt_err)) == ESP_OK) {
+        if (gauge_store_load(list.ids[i], s_active_cfg, alt_err, sizeof(alt_err)) == ESP_OK) {
             snprintf(loaded_id, sizeof(loaded_id), "%s", list.ids[i]);
             snprintf(warning, warning_len, "Gauge '%s' unavailable (%s); showing '%s'.",
                      wanted, err[0] ? err : "not found", list.ids[i]);
@@ -145,7 +149,7 @@ static const char *load_initial_config(char *warning, size_t warning_len)
     }
 
     /* Nothing usable on the filesystem. The built-in face is the last line of defence. */
-    s_active_cfg = *gauge_config_builtin_default();
+    gauge_config_builtin_default(s_active_cfg);
 
     if (!gauge_store_mounted()) {
         snprintf(warning, warning_len, "Storage unavailable; showing the built-in gauge.");
@@ -162,22 +166,31 @@ static const char *load_initial_config(char *warning, size_t warning_len)
 /* Runs on the LVGL task, from the settings-page picker. */
 static void on_gauge_selected(const char *id)
 {
-    gauge_config_t cfg;
-    char           err[GAUGE_STORE_ERR_LEN] = {0};
+    /* PSRAM, not the LVGL task's internal-RAM stack: a config is over 2KB. */
+    gauge_config_t *cfg = heap_caps_malloc(sizeof(*cfg), MALLOC_CAP_SPIRAM);
+    char            err[GAUGE_STORE_ERR_LEN] = {0};
 
-    esp_err_t load_err = gauge_store_load(id, &cfg, err, sizeof(err));
+    if (cfg == NULL) {
+        app_ui_set_warning("Out of memory; keeping the current gauge.");
+        return;
+    }
+
+    esp_err_t load_err = gauge_store_load(id, cfg, err, sizeof(err));
     if (load_err != ESP_OK) {
         ESP_LOGE(TAG, "could not switch to '%s': %s", id, err);
         app_ui_set_warning(err);
+        free(cfg);
         return;
     }
 
-    if (app_ui_set_config(&cfg) != ESP_OK) {
+    if (app_ui_set_config(cfg) != ESP_OK) {
         app_ui_set_warning("Could not build that gauge; keeping the current one.");
+        free(cfg);
         return;
     }
 
-    s_active_cfg = cfg;
+    *s_active_cfg = *cfg;
+    free(cfg);
 
     app_settings_set_active_gauge(id);
     app_settings_commit();
@@ -253,10 +266,10 @@ static void on_config_changed(const char *id, bool deleted)
 
     gauge_store_list_t list;
     gauge_store_list(&list);
-    app_ui_set_gauge_list(list.count > 0 ? list.ids : NULL, list.count, s_active_cfg.id);
+    app_ui_set_gauge_list(list.count > 0 ? list.ids : NULL, list.count, s_active_cfg->id);
 
     /* Reload live only when the gauge on screen is the one that changed. */
-    if (!deleted && strcmp(id, s_active_cfg.id) == 0) {
+    if (!deleted && strcmp(id, s_active_cfg->id) == 0) {
         /*
          * PSRAM, not the stack: this runs on the HTTP server task, whose stack is internal RAM
          * and which also has to rebuild the face from here (docs/performance.md).
@@ -266,7 +279,7 @@ static void on_config_changed(const char *id, bool deleted)
 
         if (cfg != NULL && gauge_store_load(id, cfg, err, sizeof(err)) == ESP_OK &&
             app_ui_set_config(cfg) == ESP_OK) {
-            s_active_cfg = *cfg;
+            *s_active_cfg = *cfg;
             app_ui_set_warning(err[0] != '\0' ? err : NULL);
             ESP_LOGI(TAG, "reloaded '%s' without rebooting", id);
         }
@@ -282,7 +295,7 @@ static void on_telemetry(const char *channel, float value)
      * A remote feed and a local sensor are interchangeable to the renderer, so this is the
      * same path a real sensor will use once sensor_hub exists.
      */
-    if (strcmp(channel, s_active_cfg.source.channel) != 0) {
+    if (strcmp(channel, s_active_cfg->source.channel) != 0) {
         return;
     }
 
@@ -320,6 +333,16 @@ static void network_status_timer_cb(lv_timer_t *t)
     }
 
     app_ui_set_network_status(net_svc_state_str(net.state), detail);
+}
+
+/* Runs on the LVGL task, from the settings page's confirmed "Reset network" button. */
+static void on_network_reset(void)
+{
+    esp_err_t err = net_svc_forget_credentials();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "network reset failed: %s", esp_err_to_name(err));
+    }
+    /* network_status_timer_cb shows the setup-network instructions within a second. */
 }
 
 /* Why the chip last reset. A brownout reports itself here, which makes power problems visible
@@ -393,6 +416,13 @@ void app_main(void)
     /* Non-fatal by design: the built-in face covers an unusable filesystem. */
     gauge_store_init();
 
+    s_active_cfg = heap_caps_calloc(1, sizeof(*s_active_cfg), MALLOC_CAP_SPIRAM);
+    if (s_active_cfg == NULL) {
+        /* No PSRAM means no face buffer either, so there is nothing useful to fall back to. */
+        ESP_LOGE(TAG, "no PSRAM for the active gauge config");
+        return;
+    }
+
     const board_profile_t *board = board_profile_get();
     ESP_LOGI(TAG, "board: %s (%" PRIu16 "x%" PRIu16 ", %" PRIu8 " Hz)",
              board->name, board->width_px, board->height_px, board->refresh_hz);
@@ -401,9 +431,9 @@ void app_main(void)
     const char *loaded_id    = load_initial_config(warning, sizeof(warning));
 
     ESP_LOGI(TAG, "config '%s' (%s): channel=%s range=%.1f..%.1f %s warnings=%" PRIu16,
-             s_active_cfg.id, loaded_id ? "storage" : "built-in", s_active_cfg.source.channel,
-             (double)s_active_cfg.source.min, (double)s_active_cfg.source.max,
-             s_active_cfg.source.unit, s_active_cfg.warning_count);
+             s_active_cfg->id, loaded_id ? "storage" : "built-in", s_active_cfg->source.channel,
+             (double)s_active_cfg->source.min, (double)s_active_cfg->source.max,
+             s_active_cfg->source.unit, s_active_cfg->warning_count);
 
     /* Brings up the CO5300 QSPI panel, CST9217 touch and the LVGL port. */
     bsp_display_start();
@@ -424,7 +454,7 @@ void app_main(void)
     retarget_draw_buffers(board);
 
     int64_t t0 = esp_timer_get_time();
-    err = app_ui_create(&s_active_cfg, board);
+    err = app_ui_create(s_active_cfg, board);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "app_ui_create failed: %s", esp_err_to_name(err));
         bsp_display_unlock();
@@ -437,6 +467,7 @@ void app_main(void)
     gauge_store_list(&list);
     app_ui_set_gauge_list(list.count > 0 ? list.ids : NULL, list.count, loaded_id);
     app_ui_set_gauge_selected_cb(on_gauge_selected);
+    app_ui_set_network_reset_cb(on_network_reset);
 
     if (warning[0] != '\0') {
         ESP_LOGW(TAG, "%s", warning);

@@ -312,8 +312,38 @@ the scarcest resource on the board, so anything that adds a task, a stack, or a 
 must be measured. The method above (a failed-allocation callback plus a periodic `vTaskList()`
 dump) is the quickest way to find where it went.
 
+### Custom shapes (ADR 0006): not yet measured
+
+Implemented 2026-09-14. **Built and host-tested only**: no board was attached, so nothing below
+has been verified on hardware.
+
+**Render path.**
+- A shaped needle is rasterised in software on the LVGL task whenever its tip moves by at least
+  1/8 px. The cost scales with each part's bounding-box area: about 17,000 px for a 176px
+  needle at 45°, plus the A8 blend. Invalidation is unchanged, still the old box plus the new
+  one.
+- Shaped ticks and hubs are rasterised once, when the face is built.
+
+**Memory.**
+- `gauge_config_t` grew from 924 to 2,308 bytes.
+- Every copy that sat in internal RAM now goes to PSRAM:
+  - the active config in `app_main` (a static, so internal `.bss`)
+  - the built-in default (also a static)
+  - the renderer struct that embeds a copy (a sub-4KB `calloc()`, so internal)
+  - the config loaded when switching gauges (on the LVGL task's stack)
+- By arithmetic, not measurement, internal RAM use should *fall* by about 3KB, plus 924 bytes
+  of transient LVGL-task stack.
+- A shaped needle also holds one worst-case A8 mask per part and a float scratch buffer, all in
+  PSRAM.
+
+**Owed on hardware:**
+- Scenario 2 with `boost_custom`: fps, dirty %, render ms
+- Internal free heap after startup with WiFi, compared with the 8.6KB recorded above
+- A live switch between `boost` and `boost_custom`
+
 ### Not yet measured
 - Scenarios 1, 3 and 6.
+- Scenario 2 with a custom needle shape (above).
 
 ## The gate
 
