@@ -125,7 +125,7 @@ when the code compiles.
 | M3 | Configuration from LittleFS, gauge switching | complete |
 | M4 | Networking: provisioning, HTTP API, telemetry, OTA | complete |
 | **M5** | **Sensors: ADS1115 + MCP9600 front-end** | **next, blocked on hardware** |
-| M6 | Alerts, chime, peak-hold, datalogging | |
+| M6 | Alerts, chime, peak-hold, datalogging | in progress |
 | M7 | Portability: a second board profile | |
 | M8 | Configuration web app | |
 

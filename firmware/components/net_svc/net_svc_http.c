@@ -51,7 +51,11 @@ static char *read_body(httpd_req_t *req, size_t *out_len)
         return NULL;
     }
 
-    char *buf = malloc(req->content_len + 1);
+    /*
+     * PSRAM explicitly. Internal memory is nearly exhausted once WiFi runs, and a body under
+     * the 4KB SPIRAM_MALLOC_ALWAYSINTERNAL threshold would otherwise be taken from it.
+     */
+    char *buf = heap_caps_malloc(req->content_len + 1, MALLOC_CAP_SPIRAM);
     if (buf == NULL) {
         return NULL;
     }
@@ -286,7 +290,8 @@ static esp_err_t ota_post(httpd_req_t *req)
         return send_json_error(req, "500 Internal Server Error", esp_err_to_name(err));
     }
 
-    char  *chunk    = malloc(OTA_CHUNK);
+    /* Exactly at the 4KB internal threshold, so plain malloc() would take internal memory. */
+    char  *chunk    = heap_caps_malloc(OTA_CHUNK, MALLOC_CAP_SPIRAM);
     size_t received = 0;
 
     if (chunk == NULL) {

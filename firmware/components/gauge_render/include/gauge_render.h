@@ -59,6 +59,20 @@ void gauge_render_set_value(gauge_render_t *g, float value, bool valid);
 /** @brief The value currently displayed, after damping. */
 float gauge_render_get_displayed(const gauge_render_t *g);
 
+/**
+ * @brief Called when the gauge enters or leaves an alert.
+ *
+ * Fires on the transition only, not on every update, and runs on the LVGL task.
+ *
+ * @param alert     The alert that fired (or that just cleared).
+ * @param active    True on entry, false when it clears.
+ * @param user_data As passed to gauge_render_set_alert_cb().
+ */
+typedef void (*gauge_render_alert_cb_t)(const gauge_alert_t *alert, bool active, void *user_data);
+
+/** @brief Register an alert transition callback, or NULL to remove it. */
+void gauge_render_set_alert_cb(gauge_render_t *g, gauge_render_alert_cb_t cb, void *user_data);
+
 #ifdef __cplusplus
 }
 #endif

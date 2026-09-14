@@ -4,6 +4,7 @@ idf_component_register(
     INCLUDE_DIRS
         "."
     REQUIRES
+        app_audio
         app_settings
         app_ui
         board_profile

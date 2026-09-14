@@ -49,6 +49,9 @@ static struct {
 
     app_ui_gauge_selected_cb_t on_gauge_selected;
 
+    gauge_render_alert_cb_t alert_cb;
+    void                   *alert_cb_user;
+
     const board_profile_t *board;
 } s;
 
@@ -131,6 +134,13 @@ static void gauge_selected_cb(lv_event_t *e)
     s.on_gauge_selected(s.gauge_ids[idx]);
 }
 
+static void alert_sound_changed_cb(lv_event_t *e)
+{
+    lv_obj_t *sw = lv_event_get_target(e);
+    app_settings_set_alert_sound(lv_obj_has_state(sw, LV_STATE_CHECKED));
+    app_settings_commit();
+}
+
 /* Refreshes the live numbers on the settings page and the optional badge on the dial. */
 static void status_timer_cb(lv_timer_t *t)
 {
@@ -211,6 +221,26 @@ static void build_settings_tile(lv_obj_t *tile, const gauge_config_t *cfg)
         lv_obj_add_state(sw, LV_STATE_CHECKED);
     }
     lv_obj_add_event_cb(sw, show_fps_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    /* --- alert sound toggle --- */
+    lv_obj_t *sound_row = lv_obj_create(col);
+    lv_obj_remove_style_all(sound_row);
+    lv_obj_set_width(sound_row, LV_PCT(100));
+    lv_obj_set_height(sound_row, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(sound_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(sound_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t *sound_caption = lv_label_create(sound_row);
+    lv_label_set_text(sound_caption, "Alert sound");
+    lv_obj_set_style_text_font(sound_caption, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(sound_caption, lv_color_hex(0x9e9e9e), LV_PART_MAIN);
+
+    lv_obj_t *sound_sw = lv_switch_create(sound_row);
+    if (set->alert_sound) {
+        lv_obj_add_state(sound_sw, LV_STATE_CHECKED);
+    }
+    lv_obj_add_event_cb(sound_sw, alert_sound_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
     /* --- network --- */
     lv_obj_t *net_row = add_row(col, "Network");
@@ -312,6 +342,7 @@ esp_err_t app_ui_create(const gauge_config_t *cfg, const board_profile_t *board)
 
     esp_err_t err = gauge_render_create(s.tile_gauge, cfg, board, &s.gauge);
     ESP_RETURN_ON_ERROR(err, TAG, "gauge_render_create failed");
+    gauge_render_set_alert_cb(s.gauge, s.alert_cb, s.alert_cb_user);
 
     /*
      * FPS badge. Created regardless so the toggle has something to act on, but hidden by
@@ -364,6 +395,7 @@ esp_err_t app_ui_set_config(const gauge_config_t *cfg)
     ESP_RETURN_ON_ERROR(err, TAG, "could not build the replacement gauge");
 
     s.gauge = replacement;
+    gauge_render_set_alert_cb(s.gauge, s.alert_cb, s.alert_cb_user);
 
     if (old_gauge != NULL) {
         gauge_render_destroy(old_gauge);
@@ -429,6 +461,15 @@ void app_ui_set_gauge_list(const char (*ids)[GAUGE_CONFIG_MAX_ID_LEN], int count
 void app_ui_set_gauge_selected_cb(app_ui_gauge_selected_cb_t cb)
 {
     s.on_gauge_selected = cb;
+}
+
+void app_ui_set_alert_cb(gauge_render_alert_cb_t cb, void *user_data)
+{
+    s.alert_cb      = cb;
+    s.alert_cb_user = user_data;
+    if (s.gauge != NULL) {
+        gauge_render_set_alert_cb(s.gauge, cb, user_data);
+    }
 }
 
 void app_ui_show_tile(app_ui_tile_t tile, bool animate)

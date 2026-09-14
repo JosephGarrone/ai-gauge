@@ -229,6 +229,22 @@ Consequences for the M6 chime:
   claims its share of internal memory — the same approach that made the flush buffers fit.
 - Generate the chime into PSRAM, never into a static internal array.
 
+**Result, measured on hardware.** `app_audio` creates a speaker-only channel with two 512-byte
+DMA buffers, drives the ES8311 directly, and synthesises an 11.8KB two-note chime into PSRAM,
+all before WiFi starts. The chime plays on every alert crossing, rate-limited to one per 3s,
+and the dial stayed at **66.6 fps**.
+
+It did not fit cleanly at first. With audio claimed, the HTTP server — started after WiFi
+init — could no longer find a contiguous ~6KB block for its task stack, and `httpd_start()`
+failed, leaving the gauge with no API and no OTA. Starting the server **before** WiFi
+initialises fixed it. The rule that emerges: **long-lived internal allocations first, WiFi last.**
+
+Headroom is now razor thin. Immediately after WiFi starts, internal free heap dips to ~650B with
+a largest free block of ~60B, then settles at ~5.3KB. It has proved stable, including a full OTA
+update during which it remained the running image, but anything that adds internal allocations
+must be measured. The HTTP request body and OTA buffers are now explicitly PSRAM, since both sat
+at or under the 4KB threshold below which plain `malloc()` still takes internal memory.
+
 ### Not yet measured
 - Internal heap behaviour during an OTA and during a config upload.
 - Scenarios 1, 3 and 6.
