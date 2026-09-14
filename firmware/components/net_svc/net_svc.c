@@ -341,6 +341,17 @@ esp_err_t net_svc_start(const net_svc_callbacks_t *callbacks)
         s.netif_ready = true;
     }
 
+    /*
+     * Start the HTTP server before WiFi. Its task stack needs one contiguous ~6KB block of
+     * internal memory, and WiFi initialisation fragments internal RAM badly. Started after
+     * WiFi, with the audio buffers also claimed, httpd_start() failed outright and left the
+     * device with no API and no way to update it over the network. The server listens on
+     * all interfaces, so it simply starts answering once the network comes up.
+     */
+    if (net_svc_http_start() != ESP_OK) {
+        ESP_LOGE(TAG, "HTTP server failed to start; config upload and OTA are unavailable");
+    }
+
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_RETURN_ON_ERROR(esp_wifi_init(&cfg), TAG, "wifi_init");
 
@@ -375,7 +386,6 @@ esp_err_t net_svc_start(const net_svc_callbacks_t *callbacks)
     }
 
     start_mdns();
-    net_svc_http_start();
     net_svc_telemetry_start();
 
     s.started = true;

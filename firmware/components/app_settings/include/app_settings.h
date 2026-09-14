@@ -25,6 +25,7 @@ extern "C" {
 typedef struct {
     uint8_t brightness;                          /**< Percent, clamped to the range above. */
     bool    show_fps;                            /**< FPS badge on the gauge screen. */
+    bool    alert_sound;                         /**< Audible chime on alerts that request one. */
     char    active_gauge[APP_SETTINGS_MAX_GAUGE_ID];
 } app_settings_t;
 
@@ -44,6 +45,9 @@ void app_settings_set_brightness(uint8_t percent);
 
 /** @brief Update the FPS badge preference in memory. */
 void app_settings_set_show_fps(bool show);
+
+/** @brief Update the alert sound preference in memory. */
+void app_settings_set_alert_sound(bool on);
 
 /** @brief Update the active gauge id in memory. */
 void app_settings_set_active_gauge(const char *id);

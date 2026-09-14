@@ -68,6 +68,14 @@ typedef void (*app_ui_gauge_selected_cb_t)(const char *id);
 
 void app_ui_set_gauge_selected_cb(app_ui_gauge_selected_cb_t cb);
 
+/**
+ * @brief Register a callback for alert transitions on the displayed gauge.
+ *
+ * Re-applied automatically whenever the gauge is rebuilt (for example on a config change), so
+ * the caller registers it once.
+ */
+void app_ui_set_alert_cb(gauge_render_alert_cb_t cb, void *user_data);
+
 /** @brief Navigate to a tile programmatically. */
 void app_ui_show_tile(app_ui_tile_t tile, bool animate);
 

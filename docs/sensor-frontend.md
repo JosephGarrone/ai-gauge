@@ -32,21 +32,30 @@ Both are address-strappable if they clash with something added later.
 
 ## Boost — 0–60 PSI MAP sensor via ADS1115
 
-**Sensor:** ratiometric 0–60 PSI pressure sensor with a 0.5–4.5V output on a 5V supply.
-Connectors are Just Race Parts, matching the existing gauges.
+**Sensor:** the **JRP 7-bar, 0-5V, 3-wire filtered MAP sensor** supplied with the
+[JRP GearX 52mm 0-60 PSI diesel boost gauge kit](https://www.justraceparts.com.au/digital-diesel-boost-gauge-kit-0-60-psi-52mm)
+(product code `GearX-52mm-Diesel-Boost-60`). Connectors are Just Race Parts, matching the existing
+gauges.
 
-> **Open item:** the exact part number, connector pinout and transfer function still need to
-> be confirmed against the physical sensor. The 0.5–4.5V ratiometric assumption below is the
-> industry norm for this class of sensor but **must be verified before wiring anything.**
+What the listing confirms: 0-5V output, three wires (5V supply, ground, signal), sold as a 7-bar
+sensor for a gauge that displays 0-60 PSI, and the JRP gauge offers a **boost sensor calibration**
+feature. A manual exists (`JRP-GearX-Oil-Pressure-Volts-Boost(30INHG-30PSI)-(0-30PSI)-(0-60PSI).pdf`,
+linked from the product page) but could not be machine-read here.
+
+> **Open items — verify before wiring anything:**
+> - Pinout and wire colours (in the manual).
+> - The transfer function. "0-5V" in a listing often means the 0.5-4.5V ratiometric convention;
+>   the scaling below assumes that, and it must be confirmed by measurement.
+> - Absolute versus gauge pressure: see below.
 
 **ADC:** ADS1115 — 16-bit, differential, programmable gain, internal reference, 250 SPS.
 
 ### The divider is mandatory
 
-The sensor swings to **4.5V**. ADS1115 inputs must not exceed `VDD + 0.3V`, and on a 3.3V
+The sensor output can reach **5V**. ADS1115 inputs must not exceed `VDD + 0.3V`, and on a 3.3V
 rail that is 3.6V. Connecting the sensor directly will damage the ADC.
 
-A 2:1 divider brings full scale to 2.25V, comfortably inside the ±4.096V PGA range:
+A 2:1 divider brings a 5V full scale to 2.5V, comfortably inside the ±4.096V PGA range:
 
 ```
 MAP out ──┬── R1 (10k, 1%) ──┬── ADS1115 AIN0
@@ -67,8 +76,12 @@ With `PGA = ±4.096V`, the ADS1115 gives `4.096V / 32768 = 125µV` per count.
 ```
 V_adc    = counts × 4.096 / 32768
 V_sensor = V_adc × (R1 + R2) / R2          = V_adc × 2.0
-PSI_abs  = (V_sensor - 0.5) / 4.0 × 60     # 0.5V = 0 PSI, 4.5V = 60 PSI
+PSI      = (V_sensor - 0.5) / 4.0 × 101.5  # assumed: 0.5V = 0, 4.5V = 7 bar (101.5 PSI)
 ```
+
+**The sensor spans 7 bar (101.5 PSI); 0-60 PSI is only the display range of the gauge face.**
+Scaling 4.5V to 60 PSI would read about 70% high. The 0.5-4.5V span itself is still an assumption
+until measured.
 
 Both the divider ratio and the sensor transfer function are **configuration, not constants** —
 they live in `sensor_hub` calibration settings so a different sensor is a settings change, not
@@ -84,8 +97,23 @@ PSI_gauge = PSI_abs - P_baro          # ~14.7 PSI at sea level
 ```
 
 Store `P_baro` as a calibration value, ideally captured at key-on with the engine off, so the
-gauge zeroes correctly at altitude. Confirm which type this sensor is when confirming the part
-number — getting it wrong offsets every reading by about 14.7 PSI.
+gauge zeroes correctly at altitude.
+
+**For this sensor the question is still open.** The owner reports the existing JRP gauge reads
+0 PSI at rest, which suggests gauge pressure. But "7-bar MAP" sensors are normally *absolute*,
+and the JRP gauge has a sensor calibration feature, which could simply be zeroing out
+atmospheric pressure. A gauge that reads 0 at rest therefore does not settle it.
+
+The decisive check is a voltmeter on the signal wire with the engine off, assuming the 0.5-4.5V
+convention over 7 bar:
+
+| Reading at rest | Meaning |
+|---|---|
+| about 0.5V | gauge pressure — no barometric subtraction |
+| about 1.1V | absolute (1 bar of 7 = one seventh of the 4V span, plus 0.5V) |
+
+Getting it wrong offsets every reading by about 14.7 PSI, so the firmware should support both
+and default to a calibrated zero captured at key-on, which is correct in either case.
 
 ### Sampling
 
@@ -154,7 +182,9 @@ implausible value on a gauge someone is relying on is worse than admitting the s
 
 Record measured results here as the hardware is built.
 
-- [ ] Confirm MAP sensor part number, connector pinout and transfer function
+- [x] Identify the sensor: JRP 7-bar, 0-5V, 3-wire MAP sensor (from the kit listing)
+- [ ] Confirm connector pinout and wire colours from the manual
+- [ ] Measure the output voltage at rest to establish the transfer function
 - [ ] Confirm whether the MAP sensor is absolute or gauge referenced
 - [ ] Measure the actual divider ratio with a DMM and store it as the calibration value
 - [ ] Verify ADS1115 → PSI against a known pressure reference at several points

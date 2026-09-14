@@ -66,6 +66,10 @@ struct gauge_render_t {
     bool  alert_phase;   /**< Flash state. */
 
     lv_timer_t *flash_timer;
+
+    int8_t                  active_alert_idx; /**< Index into cfg.alerts, or -1. */
+    gauge_render_alert_cb_t alert_cb;
+    void                   *alert_cb_user;
 };
 
 /* ------------------------------------------------------------------- helpers -------- */
@@ -319,6 +323,11 @@ static void needle_draw_cb(lv_event_t *e)
 
     lv_color_t color = to_lv(g->cfg.needle.color);
 
+    /* The needle flashes in the alert colour along with the readout. */
+    if (g->alert_active && g->alert_phase && g->active_alert_idx >= 0) {
+        color = to_lv(g->cfg.alerts[g->active_alert_idx].color);
+    }
+
     if (g->line_valid) {
         lv_draw_line_dsc_t dsc;
         lv_draw_line_dsc_init(&dsc);
@@ -529,6 +538,15 @@ static void update_readout(gauge_render_t *g)
 
 static void apply_alert_style(gauge_render_t *g)
 {
+    /*
+     * The needle's colour depends on the flash phase, but update_needle() only repaints when the
+     * needle moves. A steady value above a threshold would otherwise never show the flash, so
+     * repaint the needle's current footprint on every phase change.
+     */
+    if (g->needle != NULL && g->prev_valid) {
+        lv_obj_invalidate_area(g->needle, &g->prev_bbox);
+    }
+
     if (g->readout == NULL) {
         return;
     }
@@ -560,23 +578,31 @@ static void flash_timer_cb(lv_timer_t *t)
 
 static void evaluate_alerts(gauge_render_t *g)
 {
-    bool  active   = false;
+    int   idx      = -1;
     float flash_hz = 0.0f;
 
     for (uint8_t i = 0; i < g->cfg.alert_count; i++) {
         const gauge_alert_t *a = &g->cfg.alerts[i];
         if ((a->has_above && g->displayed > a->above) ||
             (a->has_below && g->displayed < a->below)) {
-            active   = true;
+            idx      = i;
             flash_hz = a->flash_hz;
             break;
         }
     }
 
+    bool active = (idx >= 0);
     if (active == g->alert_active) {
         return;
     }
     g->alert_active = active;
+
+    /* Report the alert that fired, or on clearing, the one that was active. */
+    int reported = active ? idx : g->active_alert_idx;
+    g->active_alert_idx = (int8_t)idx;
+    if (g->alert_cb != NULL && reported >= 0) {
+        g->alert_cb(&g->cfg.alerts[reported], active, g->alert_cb_user);
+    }
 
     if (g->flash_timer != NULL) {
         lv_timer_delete(g->flash_timer);
@@ -608,6 +634,7 @@ esp_err_t gauge_render_create(lv_obj_t *parent, const gauge_config_t *cfg,
     g->cfg    = *cfg;
     g->board  = board;
     g->parent = parent;
+    g->active_alert_idx = -1;
 
     int32_t w = board->width_px;
     int32_t h = board->height_px;
@@ -768,4 +795,13 @@ void gauge_render_set_value(gauge_render_t *g, float value, bool valid)
 float gauge_render_get_displayed(const gauge_render_t *g)
 {
     return (g != NULL) ? g->displayed : 0.0f;
+}
+
+void gauge_render_set_alert_cb(gauge_render_t *g, gauge_render_alert_cb_t cb, void *user_data)
+{
+    if (g == NULL) {
+        return;
+    }
+    g->alert_cb      = cb;
+    g->alert_cb_user = user_data;
 }

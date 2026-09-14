@@ -9,7 +9,9 @@
 | `gauge_store` | Owns the LittleFS `storage` partition: list, load, save and delete configs. Keeps filesystem concerns out of `gauge_config`. |
 | `gauge_render` | Build the LVGL dial from a `gauge_config_t`: pre-rendered face, needle sprite, readouts, alerts. |
 | `sensor_hub` | Own `I2C_NUM_1`; drive ADS1115 and MCP9600; scale, filter and publish readings. Also hosts the simulated and network sources. |
-| `app_settings` | NVS-backed user settings (active gauge, brightness, units, overlay toggle). |
+| `app_settings` | NVS-backed user settings (active gauge, brightness, FPS badge, alert sound). |
+| `app_ui` | Tileview screens: the dial and the swipe-up settings page. |
+| `app_audio` | Alert chime through the ES8311, on its own speaker-only I2S channel. Never uses the BSP audio setup. |
 | `net_svc` | WiFi provisioning, HTTP server, mDNS, telemetry ingest, OTA. |
 
 Dependency direction is strictly one-way:
@@ -17,6 +19,7 @@ Dependency direction is strictly one-way:
 ```
 main
  ├── app_ui       ──> gauge_render, gauge_store, gauge_perf, app_settings
+ ├── app_audio    ──> app_settings
  ├── gauge_render ──> gauge_config, board_profile
  ├── gauge_store  ──> gauge_config
  ├── sensor_hub   ──> (nothing above it)
@@ -106,7 +109,11 @@ thing the UI does — see the worst-case analysis in
    Whatever happened is surfaced on the settings page, not just in the serial log.
 5. `gauge_render` pre-renders the face and builds the screen.
 6. `sensor_hub` starts (real sources if the I2C front-end responds, simulated otherwise).
-7. `net_svc` starts last — nothing in the display path waits on the network.
+7. `app_audio` claims its I2S buffers.
+8. `net_svc` starts last — nothing in the display path waits on the network. Inside it, the HTTP
+   server starts before WiFi initialises, for the memory reason in [performance.md](performance.md).
+
+Allocation order is load-bearing on this board: long-lived internal allocations first, WiFi last.
 
 The ordering matters: **the gauge shows a needle before the network is touched.** A driver
 turning the ignition on should see the gauge immediately, regardless of WiFi state.

@@ -28,6 +28,7 @@
 #include "bsp/esp-bsp.h"
 #include "lvgl.h"
 
+#include "app_audio.h"
 #include "app_settings.h"
 #include "app_ui.h"
 #include "board_profile.h"
@@ -357,6 +358,17 @@ static void ota_confirm_timer_cb(void *arg)
     }
 }
 
+/* -------------------------------------------------------------------- alerts -------- */
+
+/* Runs on the LVGL task when the displayed gauge enters or leaves an alert. */
+static void on_alert(const gauge_alert_t *alert, bool active, void *user_data)
+{
+    (void)user_data;
+    if (active && alert->chime) {
+        app_audio_chime();
+    }
+}
+
 /* ------------------------------------------------------------------- startup -------- */
 
 void app_main(void)
@@ -441,9 +453,17 @@ void app_main(void)
     ESP_ERROR_CHECK(gauge_perf_start_reporting(5000, "needle sweep"));
 #endif
 
+    app_ui_set_alert_cb(on_alert, NULL);
+
     lv_timer_create(network_status_timer_cb, 1000, NULL);
 
     bsp_display_unlock();
+
+    /*
+     * Audio before WiFi: its I2S DMA buffers must be claimed while internal memory is still
+     * available. Failure only costs the chime; alerts stay visual.
+     */
+    app_audio_init();
 
     /*
      * Networking starts last and never blocks the display. By this point the gauge is

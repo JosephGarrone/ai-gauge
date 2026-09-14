@@ -1,0 +1,12 @@
+idf_component_register(
+    SRCS
+        "app_audio.c"
+    INCLUDE_DIRS
+        "include"
+    PRIV_REQUIRES
+        app_settings
+        esp_driver_i2s
+        esp_timer
+        waveshare__esp32_s3_touch_amoled_1_75
+        espressif__esp_codec_dev
+)

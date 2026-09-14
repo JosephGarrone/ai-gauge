@@ -131,7 +131,7 @@ verified against ambient and boiling water, and readings stable with the engine 
 **Prerequisite that is not code:** confirm whether the MAP sensor reads absolute or gauge
 pressure. Getting it wrong offsets every reading by about 14.7 PSI.
 
-## M6 — Alerts and refinement
+## M6 — Alerts and refinement 🚧 in progress
 
 - Audible over-boost / over-EGT chime through the ES8311 codec, wiring up
   `<alert chime="true">` ([ADR 0004](adr/0004-retain-sd-and-audio.md)). The BSP's own audio
@@ -140,6 +140,15 @@ pressure. Getting it wrong offsets every reading by about 14.7 PSI.
 - Recolour the needle on alert, not just the readout
 - Peak-hold and min/max recall — conventional on boost and EGT gauges
 - Optional datalogging to the microSD slot
+
+**Progress:**
+
+| Item | State |
+|---|---|
+| Audible chime on `<alert chime="true">` | **verified on hardware:** speaker-only channel, fits alongside WiFi, rate-limited, user toggle in settings |
+| Needle takes the alert colour while flashing | built; flashing repaints the needle even when it is not moving |
+| Peak-hold and min/max recall | not started; needs a schema addition first |
+| SD datalogging | not started; SD mounting has its own internal-memory cost to measure |
 
 ## M7 — Portability
 

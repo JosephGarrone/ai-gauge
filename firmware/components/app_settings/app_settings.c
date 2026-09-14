@@ -19,11 +19,13 @@ static const char *NAMESPACE = "ai_gauge";
 
 static const char *KEY_BRIGHTNESS = "bright";
 static const char *KEY_SHOW_FPS   = "showfps";
+static const char *KEY_SOUND      = "sound";
 static const char *KEY_GAUGE      = "gauge";
 
 static app_settings_t s_settings = {
     .brightness   = 80,
     .show_fps     = false,
+    .alert_sound  = true,
     .active_gauge = "boost",
 };
 
@@ -57,6 +59,9 @@ esp_err_t app_settings_init(void)
     }
     if (nvs_get_u8(h, KEY_SHOW_FPS, &u8) == ESP_OK) {
         s_settings.show_fps = (u8 != 0);
+    }
+    if (nvs_get_u8(h, KEY_SOUND, &u8) == ESP_OK) {
+        s_settings.alert_sound = (u8 != 0);
     }
 
     size_t len = sizeof(s_settings.active_gauge);
@@ -94,6 +99,14 @@ void app_settings_set_show_fps(bool show)
     }
 }
 
+void app_settings_set_alert_sound(bool on)
+{
+    if (on != s_settings.alert_sound) {
+        s_settings.alert_sound = on;
+        s_dirty                = true;
+    }
+}
+
 void app_settings_set_active_gauge(const char *id)
 {
     if (id == NULL || id[0] == '\0') {
@@ -121,6 +134,9 @@ esp_err_t app_settings_commit(void)
     err = nvs_set_u8(h, KEY_BRIGHTNESS, s_settings.brightness);
     if (err == ESP_OK) {
         err = nvs_set_u8(h, KEY_SHOW_FPS, s_settings.show_fps ? 1 : 0);
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_u8(h, KEY_SOUND, s_settings.alert_sound ? 1 : 0);
     }
     if (err == ESP_OK) {
         err = nvs_set_str(h, KEY_GAUGE, s_settings.active_gauge);
