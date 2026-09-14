@@ -22,6 +22,47 @@ CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
 CONFIG_SPIRAM_RODATA=y
 CONFIG_SPIRAM_XIP_FROM_PSRAM=y
 
+# PERF/CORRECTNESS: push WiFi and lwIP buffers into PSRAM.
+#
+# Without this the display breaks outright when WiFi starts: the radio exhausts internal
+# DMA-capable memory and every QSPI transfer fails with ESP_ERR_NO_MEM
+# ("spi transmit (queue) color failed"). This is not a tuning preference -- the panel and the
+# radio are both competing for the same scarce internal heap. See docs/performance.md.
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
+# WiFi buffer budget. Static RX buffers must live in internal DMA-capable memory -- PSRAM
+# cannot hold them -- and enabling the option above raises their default to 16, which this
+# board cannot afford alongside the LVGL flush buffers in internal RAM. Six is enough for the light
+# traffic this device sees (config uploads and a telemetry stream), and everything that can
+# be dynamic is, so it comes from PSRAM instead.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_TX_BUFFER_TYPE=1
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=8
+# The block-ack window cannot exceed twice the static RX buffer count; the build enforces it.
+CONFIG_ESP_WIFI_RX_BA_WIN=6
+
+# lwIP defaults are sized for throughput this device will never need. Trimmed so the HTTP
+# server has internal memory left for its task stack -- it could not start otherwise.
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=2880
+CONFIG_LWIP_TCP_WND_DEFAULT=2880
+CONFIG_LWIP_MAX_SOCKETS=8
+
+# Internal RAM is the scarce resource on this board: the LVGL flush buffers must live there
+# (see the note in app_main.c), and what is left has to cover WiFi, lwIP, the HTTP server and
+# mDNS. Push everything that can tolerate PSRAM into PSRAM, and trim the stacks that cannot.
+#
+# SPIRAM_USE_MALLOC lets plain malloc() draw on PSRAM, which is what keeps LVGL's own
+# allocations out of internal RAM. ALWAYSINTERNAL is the size below which an allocation still
+# comes from internal memory (small, frequently-touched objects); RESERVE_INTERNAL keeps a
+# floor of internal heap that malloc() will never consume, so DMA and ISR allocations always
+# have somewhere to go.
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
+CONFIG_MDNS_MEMORY_ALLOC_SPIRAM=y
+CONFIG_MDNS_TASK_STACK_SIZE=3072
+
 # --- CPU and cache --------------------------------------------------------------------
 # PERF: full clock, larger data cache with 64-byte lines for DMA-friendly access.
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
@@ -62,9 +103,13 @@ CONFIG_LV_FONT_MONTSERRAT_24=y
 CONFIG_LV_FONT_MONTSERRAT_26=y
 CONFIG_LV_FONT_MONTSERRAT_48=y
 
-# Performance overlay, toggled from the settings screen.
+# LVGL's built-in FPS overlay is deliberately OFF. It is pinned to a screen corner, and on a
+# round panel the corners are physically absent, so it renders outside the visible area. The
+# app draws its own badge instead (app_ui), positioned inside the round safe area, toggleable
+# from the settings page, and fed by gauge_perf -- which measures the areas actually flushed
+# to the panel rather than LVGL's internal view of its own work. See docs/performance.md.
 CONFIG_LV_USE_SYSMON=y
-CONFIG_LV_USE_PERF_MONITOR=y
+# CONFIG_LV_USE_PERF_MONITOR is not set
 
 # --- Misc -----------------------------------------------------------------------------
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y

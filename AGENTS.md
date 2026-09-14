@@ -123,7 +123,7 @@ when the code compiles.
 | M1 | Foundation: docs, build, parser, CI, display bring-up | complete |
 | M2 | Renderer and screens; 60fps gate | complete |
 | M3 | Configuration from LittleFS, gauge switching | complete |
-| **M4** | **Networking: provisioning, HTTP API, telemetry, OTA** | **next** |
+| **M4** | **Networking: provisioning, HTTP API, telemetry, OTA** | **in progress** |
 | M5 | Sensors: ADS1115 + MCP9600 front-end | blocked on hardware |
 | M6 | Alerts, chime, peak-hold, datalogging | |
 | M7 | Portability: a second board profile | |
@@ -136,6 +136,10 @@ documented and accepted trade. Numbers and the two designs that failed first are
 
 Faces load from `/storage/gauges/*.xml` on LittleFS, falling back to the next available
 config and then to the compiled-in face. All three paths are verified on hardware.
+
+**M4 so far:** the network stack starts on hardware and the display holds 66.6 fps with the radio up. No HTTP endpoint, provisioning, telemetry or OTA path has been exercised from a client yet.
+
+**Internal RAM is the binding constraint, not CPU.** After WiFi starts, only ~3KB of internal heap remains. The LVGL flush buffers are deliberately in internal DMA memory (`retarget_draw_buffers()` in `app_main.c`) because the BSP's PSRAM buffers forced a bounce copy on every flush and broke the display once WiFi ran. `DRAW_BUF_LINES` and the memory settings in `sdkconfig.defaults` are load-bearing: change them only with a hardware measurement. See [docs/performance.md](docs/performance.md).
 
 **The value source is simulated** (`CONFIG_AI_GAUGE_SIMULATED_SOURCE`). **No sensor is being
 read**, and no sensor hardware exists yet.

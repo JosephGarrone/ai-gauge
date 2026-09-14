@@ -11,6 +11,8 @@ idf_component_register(
         gauge_perf
         gauge_render
         gauge_store
+        net_svc
         nvs_flash
         esp_timer
+        app_update
 )

@@ -3,105 +3,126 @@
 WiFi exists to serve the gauge, never to delay it. `net_svc` starts **last** and runs on core
 0; nothing in the display path waits on it. See [architecture.md](architecture.md).
 
+> **Verification status:** the network stack starts on hardware (setup network, mDNS, HTTP
+> server, telemetry listener) and the display holds 66.6 fps with the radio active. The HTTP
+> endpoints, provisioning flow, telemetry ingest and OTA have **not yet been exercised end to
+> end** from a client. See the M4 exit criteria in [roadmap.md](roadmap.md).
+
 ## Provisioning
 
-1. On boot, credentials are read from NVS.
-2. If present, connect as a station. Retry with backoff, indefinitely, in the background.
-3. If absent — or if the user requests it from the settings screen — start a SoftAP named
-   **`ai-gauge-setup`** with a captive portal for entering network credentials.
-4. Credentials are stored in NVS on a successful connection.
+1. On boot, credentials are read from NVS (namespace `net_svc`).
+2. If present, connect as a station. Retry with exponential backoff (2s up to 30s),
+   indefinitely, in the background.
+3. If absent, start an **open** SoftAP named **`ai-gauge-setup`**. Join it and browse to
+   **`http://192.168.4.1`** for a form that takes the network name and password.
+4. New credentials are saved to NVS **only after they connect**. If they fail, the setup
+   network comes back and any previously working credentials are left untouched, so a typo
+   cannot lock the device out.
 
-The settings screen always shows the current state (connected SSID and IP, connecting, AP
-mode, or disabled) so the network state is never a mystery.
+This is a plain setup page at a fixed address, not a captive portal: phones will not pop it up
+automatically. A DNS-redirecting captive portal is an open item.
 
-WiFi can be disabled entirely from the settings screen. In a vehicle, most of the time it is
-not needed, and disabling it saves power and removes a source of RF noise near an analogue
-front-end.
+The settings page shows the current state: connected network and address, setup mode with
+instructions, or connecting.
 
-## mDNS
+## Hostname and mDNS
 
-The device advertises as **`ai-gauge.local`**, so it is reachable without hunting for a DHCP
-lease. The hostname is configurable in settings for installations with more than one gauge.
+The device advertises as **`ai-gauge-XXXX.local`**, where `XXXX` is the last four hex digits
+of its WiFi MAC. The suffix means two gauges on one network cannot collide. The exact name
+is shown on the settings page and in `GET /api/status`. An `_http._tcp` service record is
+advertised on port 80.
 
 ## HTTP API
 
-Served on port 80.
+Served on port 80, at most four concurrent connections.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/` | Built-in management page |
-| `GET` | `/api/status` | Firmware version, uptime, WiFi state, channel values, config warnings |
-| `GET` | `/api/gauges` | List available gauge configs |
-| `GET` | `/api/config/<id>` | Fetch a gauge XML file |
-| `PUT` | `/api/config/<id>` | Upload a gauge XML file |
+| `GET` | `/` | Management page, or the setup form while in setup mode |
+| `GET` | `/api/status` | Firmware and IDF version, uptime, WiFi state, free heap, storage state |
+| `GET` | `/api/gauges` | `{"gauges":["boost","egt"]}` |
+| `GET` | `/api/config/<id>` | Parses the stored config and returns a summary: channel, unit, range, warning count |
+| `PUT` | `/api/config/<id>` | Upload gauge XML (body is the XML, max 16KB) |
 | `DELETE` | `/api/config/<id>` | Remove a gauge config |
-| `POST` | `/api/ota` | Upload a firmware image |
+| `POST` | `/api/wifi` | Form-encoded `ssid` and `password`; used by the setup page |
+| `POST` | `/api/ota` | Raw application image as the body |
+
+`GET /api/config/<id>` returns a parsed summary rather than the raw XML. Downloading the raw
+file for editing is an open item for the web app.
 
 ### Config upload
 
-`PUT /api/config/<id>` is the path the future web app will use.
+`PUT /api/config/<id>`, handled by `gauge_store_save()`:
 
-1. Body is written to a temporary file on LittleFS.
-2. It is parsed and validated **before** anything is replaced.
-3. On success it is moved into place and, if it is the active gauge, the face is re-rendered
-   live — **no reboot**.
-4. On failure the existing config is untouched and the response carries the parse errors.
+1. The body is **parsed and validated before anything is written**. A file that does not parse
+   is rejected with a `400` naming the reason, and the existing config is untouched.
+2. It is written to `<id>.xml.tmp` and renamed into place, so an interrupted write cannot
+   truncate the config already on the device.
+3. If it is the gauge currently on screen, the face is rebuilt live, **without a reboot**.
 
-Validating before replacing is what stops a bad upload from leaving a vehicle with a blank
-gauge.
+Ids are restricted to letters, digits, `_` and `-`, so a request cannot escape the gauges
+directory.
 
 ### Security
 
-Currently **unauthenticated on the local network**, which is acceptable for a device on a
-private network but is not a considered security posture. Recorded honestly rather than
-overstated:
+**Unauthenticated and unencrypted.** Acceptable on a private network; not a considered security
+posture. Stated plainly:
 
-- No TLS — the HTTP server is plain.
-- No authentication on config or OTA endpoints.
-- Anyone on the same network can reflash the device.
+- No TLS.
+- No authentication on config, WiFi or OTA endpoints.
+- Anyone on the same network can replace configs or reflash the device.
+- The setup network is **open** while the device is unprovisioned. Anyone in range during
+  that window can join it and submit credentials.
 
-Before this is used on an untrusted network it needs, at minimum, a shared secret on the
-mutating endpoints and signature verification on OTA images. Tracked as an open item.
+Before exposure to any untrusted network this needs, at minimum, a shared secret on the
+mutating endpoints and signature verification on OTA images.
 
 ## Telemetry ingest
 
-A UDP listener accepts channel values pushed from other devices — an ECU interface, a
-datalogger, a phone. These feed the **same snapshot mechanism** as physical sensors, so a
-remote channel and a local sensor are indistinguishable to the renderer
-([architecture.md](architecture.md)).
+A UDP listener on **port 5005** accepts channel values pushed from other devices. A value whose
+channel matches the gauge on screen drives the needle through the same path a physical sensor
+will use.
 
-Default port **5005**. Frame format (JSON, one datagram per update):
+Frame format, one JSON object per datagram:
 
 ```json
-{"ch": "boost", "v": 12.4, "t": 1234567890}
+{"ch": "boost", "v": 12.4}
 ```
 
 | Field | Meaning |
 |---|---|
-| `ch` | Channel name, matching a `<source channel="...">` |
+| `ch` | Channel name, matching the gauge's `<source channel="...">` |
 | `v` | Value in the channel's native unit |
-| `t` | Optional sender timestamp (ms); omitted means "now" |
 
-UDP is deliberate: telemetry is a continuous stream of perishable values, so dropping a
-datagram is strictly better than delaying the stream to retransmit one. A late value on a
-gauge is worse than a missing one.
+Malformed datagrams are dropped silently. UDP is deliberate: telemetry is a stream of perishable
+values, so dropping a datagram is strictly better than delaying the stream to retransmit one.
 
-Values inherit the same staleness rule as sensor channels — if a feed stops, the channel
-becomes invalid rather than freezing at its last value.
+**Not yet implemented:** the staleness rule. If a feed stops, the needle currently holds its
+last value rather than going invalid. That belongs with the channel snapshot in `sensor_hub`
+(M5), and until then the simulated source also keeps driving the needle alongside any feed.
 
 ## OTA
 
-- Dual `ota_0` / `ota_1` app partitions (4MB each; see `firmware/partitions.csv`).
-- `POST /api/ota` writes to the inactive slot, then marks it for boot.
-- `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` — a new image must confirm itself healthy or the
-  bootloader rolls back to the previous one.
-- The image is validated before the boot partition is switched.
+- Dual `ota_0` / `ota_1` app partitions, 4MB each ([../firmware/partitions.csv](../firmware/partitions.csv)).
+- `POST /api/ota` streams the body into the inactive slot. `esp_ota_end()` validates the image
+  before the boot partition is switched, so a corrupt upload is rejected rather than booted.
+- `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` is on. A newly installed image confirms itself with
+  `esp_ota_mark_app_valid_cancel_rollback()` only **after its UI has been built**. An image
+  that crashes before reaching that point is rolled back on the next boot.
 
-The gauge must survive a failed update in a vehicle, which is why rollback is enabled rather
-than assumed unnecessary.
+## Memory constraints
+
+Bringing WiFi up on this board is primarily a **memory** problem, not a CPU one. Internal SRAM
+must hold the LVGL flush buffers, WiFi's static RX buffers, lwIP, and every task stack. The
+configuration in `firmware/sdkconfig.defaults` that makes it fit, and what breaks without it,
+is recorded in [performance.md](performance.md) and [display-pipeline.md](display-pipeline.md).
 
 ## Open items
 
-- Authentication and TLS for the mutating endpoints (see *Security* above).
-- Signed OTA images.
-- Whether to add an mDNS-advertised service record for automatic discovery by the web app.
+- End-to-end verification of every endpoint, provisioning, telemetry and OTA (M4 exit criteria).
+- Captive-portal DNS redirect for the setup network.
+- Settings-page controls to disable WiFi and to forget credentials (`net_svc_forget_credentials()`
+  exists but is not wired to the UI).
+- Raw XML download for `GET /api/config/<id>`.
+- Telemetry staleness.
+- Authentication, TLS and signed OTA images.

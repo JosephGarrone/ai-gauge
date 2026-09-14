@@ -75,6 +75,14 @@ void app_ui_show_tile(app_ui_tile_t tile, bool animate);
 app_ui_tile_t app_ui_get_tile(void);
 
 /**
+ * @brief Update the WiFi status line on the settings page.
+ *
+ * @param state Short state word, e.g. "connected".
+ * @param detail Address or network name; may be NULL.
+ */
+void app_ui_set_network_status(const char *state, const char *detail);
+
+/**
  * @brief Show a warning on the settings page.
  *
  * Used for problems the user can act on but which must not stop the gauge -- a config that
