@@ -1,0 +1,10 @@
+{
+  "name": "ai-gauge-face-editor",
+  "private": true,
+  "description": "Browser editor for AI-Gauge dial faces. No dependencies and no build step; see docs/config-app.md.",
+  "type": "module",
+  "scripts": {
+    "start": "node dev-server.mjs",
+    "test": "node --test \"test/*.test.mjs\""
+  }
+}

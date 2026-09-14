@@ -10,7 +10,8 @@ restyled without rebuilding firmware.
 ## Goals
 
 - **60fps+**, always. A laggy needle is worse than the analogue gauge it replaces.
-- **XML-defined faces** — restyle over WiFi, no rebuild. Eventually authored in a web app.
+- **XML-defined faces** — restyle over WiFi, no rebuild, including your own tick, needle and hub
+  shapes, designed in the browser with the face editor.
 - **Portable** to square and other round panels via a board profile.
 - **Swipe up** from the dial for settings.
 - **WiFi** for config upload, OTA, and telemetry feeds pushed from other devices.
@@ -28,6 +29,10 @@ Full instructions: [docs/build-and-flash.md](docs/build-and-flash.md).
 Not developing the firmware? Every tagged release publishes a browser-based installer — flash
 from Chrome or Edge with no toolchain. See [docs/ci-release.md](docs/ci-release.md).
 
+To design a face, open the **face editor** at `/editor/` on the same GitHub Pages site: watch it move,
+check exactly what the gauge will make of it, and download the XML. See
+[docs/config-app.md](docs/config-app.md).
+
 ## Documentation
 
 Start with **[AGENTS.md](AGENTS.md)** for the design decisions and the conventions this
@@ -38,8 +43,12 @@ project follows, then [docs/](docs/) for detail:
 | [architecture.md](docs/architecture.md) | Components, task model, data flow |
 | [display-pipeline.md](docs/display-pipeline.md) | Frame budget and how 60fps is achieved |
 | [gauge-config-schema.md](docs/gauge-config-schema.md) | The gauge XML format |
+| [gauge-xml-interface.md](docs/gauge-xml-interface.md) | Authoring guide for tools that write gauge XML |
+| [config-app.md](docs/config-app.md) | The face editor web app |
 | [hardware-reference.md](docs/hardware-reference.md) | GPIO map, I2C addresses, warnings |
 | [sensor-frontend.md](docs/sensor-frontend.md) | Boost and EGT signal conditioning |
+| [rear-pcb.md](docs/rear-pcb.md) | Planned rear PCB: power, daisy chain, sensors, speaker |
+| [rear-pcb-parts.md](docs/rear-pcb-parts.md) | Rear PCB parts list, pinouts and wiring diagrams |
 | [networking.md](docs/networking.md) | Provisioning, HTTP API, telemetry, OTA |
 | [performance.md](docs/performance.md) | Measurement method and results |
 | [roadmap.md](docs/roadmap.md) | Milestones and what is planned next |
@@ -53,8 +62,9 @@ the sensor board does not exist.
 **Working today:** the dial renders from an XML configuration held on flash, with colour
 bands, ticks, labels and a damped needle. Crossing an alert threshold flashes the needle in the
 alert colour. A peak-hold marker records the highest reading on the dial; tap the dial to reset
-it. Swipe up for settings — pick a different gauge, adjust brightness, toggle an FPS badge or the
-alert sound, and read live frame statistics and firmware information. Choices persist across
+it. Swipe up for settings — pick a different gauge, adjust brightness, rotate the screen in 90°
+steps to suit how the gauge is mounted, toggle an FPS badge or the alert sound, and read live
+frame statistics and firmware information. Choices persist across
 reboots.
 
 The alert chime is implemented and plays through the audio codec without errors, but nothing is
@@ -101,11 +111,14 @@ Detail and exit criteria in [docs/roadmap.md](docs/roadmap.md).
 | M4 | WiFi: provisioning, config upload, telemetry feeds, OTA | ✅ |
 | M5 | Sensors: boost via ADS1115, EGT via MCP9600 | blocked on hardware |
 | **M6** | **Alerts, peak-hold, min/max recall, datalogging** | **🚧 in progress** |
-| M7 | Portability: square and other round panels | |
-| M8 | Web app for designing gauge faces | |
+| **M7** | **Web app for designing gauge faces** | **🚧 in progress** |
+| M8 | Portability: square and other round panels | |
 
 M6 so far: needle alert flash and peak-hold are verified on hardware; the chime is done but
 silent (no speaker). Min/max recall is next, and SD datalogging waits for a card.
+
+M7 so far: the face editor is built and tested and awaits its first Pages deploy; uploading faces
+from it waits on firmware support for browser access.
 
 Software comes before sensors deliberately. The sensor board still has to be built, and the
 firmware treats a simulated source, a network feed and a real sensor identically — so the

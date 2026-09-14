@@ -1,0 +1,171 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1400 880" width="1400" height="880" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1400" height="880" fill="#ffffff"/>
+  <defs>
+    <g id="R"><path d="M0 0H10M40 0H50" stroke="#1f2937" stroke-width="1.6" fill="none"/><rect x="10" y="-5" width="30" height="10" fill="#ffffff" stroke="#1f2937" stroke-width="1.6"/></g>
+    <g id="C" stroke="#1f2937" fill="none"><path d="M0 0H21M29 0H50" stroke-width="1.6"/><path d="M21 -10V10M29 -10V10" stroke-width="2.4"/></g>
+    <g id="D" stroke="#1f2937" stroke-width="1.6"><path d="M0 0H15M35 0H50M35 -9V9" fill="none"/><path d="M15 -9L35 0L15 9Z" fill="#ffffff"/></g>
+    <g id="GND" stroke="#1f2937" stroke-width="1.6" fill="none"><path d="M0 0V8M-10 8H10M-6 12H6M-2 16H2"/></g>
+    <g id="NC" stroke="#b91c1c" stroke-width="1.8"><path d="M-5 -5L5 5M-5 5L5 -5"/></g>
+  </defs>
+
+  <text x="20" y="32" font-size="20" font-weight="bold" fill="#111827">Rear PCB · Sheet 2 of 4 — Boost sensor supply, input protection, ADS1115</text>
+  <text x="20" y="54" font-size="13" fill="#4b5563">Planning diagram: not built or verified. Pin numbers from TI datasheets (ADS1115 SBAS444E, TPS2553 SLVS841F) and Diodes Inc. BAT54S (DS11005).</text>
+
+  <g stroke-width="1.6">
+    <rect x="40" y="230" width="120" height="110" fill="#e0e7ff" stroke="#3730a3"/>
+    <rect x="320" y="100" width="170" height="110" fill="#fef9c3" stroke="#854d0e"/>
+    <rect x="1000" y="380" width="210" height="420" fill="#fef9c3" stroke="#854d0e"/>
+  </g>
+
+  <g stroke="#1f2937" stroke-width="1.6" fill="none">
+    <path d="M250 120H320"/>
+    <path d="M320 150H295V120"/>
+    <path d="M320 190H300"/>
+    <path d="M490 120H660V315"/>
+    <path d="M490 150H510"/>
+    <path d="M540 190H560"/>
+    <path d="M160 255H190"/>
+    <path d="M160 285H360V420H400"/>
+    <path d="M160 315H660"/>
+    <path d="M340 315V580H400"/>
+    <path d="M300 740H400"/>
+    <!-- chain AIN0 -->
+    <path d="M450 420H490M540 420H1000M620 370V360"/>
+    <!-- chain AIN1 -->
+    <path d="M450 580H490M540 580H1000M620 530V520"/>
+    <!-- chain AIN2 -->
+    <path d="M450 740H490M540 740H1000M620 690V680"/>
+    <path d="M1000 780H975"/>
+    <path d="M1210 420H1300M1210 500H1320M1210 540H1320M1210 580H1320M1210 660H1240M1210 740H1240"/>
+  </g>
+
+  <use href="#C" xlink:href="#C" transform="translate(270,120) rotate(90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(270,170)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(300,190)"/>
+  <use href="#C" xlink:href="#C" transform="translate(620,120) rotate(90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(620,170)"/>
+  <use href="#NC" xlink:href="#NC" transform="translate(510,150)"/>
+  <use href="#R" xlink:href="#R" transform="translate(490,190)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(560,190)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(190,255)"/>
+
+  <!-- chain AIN0 (y=420) -->
+  <use href="#R" xlink:href="#R" transform="translate(400,420)"/>
+  <use href="#R" xlink:href="#R" transform="translate(470,420) rotate(90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(470,470)"/>
+  <use href="#R" xlink:href="#R" transform="translate(490,420)"/>
+  <use href="#C" xlink:href="#C" transform="translate(570,420) rotate(90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(570,470)"/>
+  <use href="#D" xlink:href="#D" transform="translate(620,420) rotate(-90)"/>
+  <use href="#D" xlink:href="#D" transform="translate(620,470) rotate(-90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(620,470)"/>
+  <!-- chain AIN1 (y=580) -->
+  <use href="#R" xlink:href="#R" transform="translate(400,580)"/>
+  <use href="#R" xlink:href="#R" transform="translate(470,580) rotate(90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(470,630)"/>
+  <use href="#R" xlink:href="#R" transform="translate(490,580)"/>
+  <use href="#C" xlink:href="#C" transform="translate(570,580) rotate(90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(570,630)"/>
+  <use href="#D" xlink:href="#D" transform="translate(620,580) rotate(-90)"/>
+  <use href="#D" xlink:href="#D" transform="translate(620,630) rotate(-90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(620,630)"/>
+  <!-- chain AIN2 (y=740) -->
+  <use href="#R" xlink:href="#R" transform="translate(400,740)"/>
+  <use href="#R" xlink:href="#R" transform="translate(470,740) rotate(90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(470,790)"/>
+  <use href="#R" xlink:href="#R" transform="translate(490,740)"/>
+  <use href="#C" xlink:href="#C" transform="translate(570,740) rotate(90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(570,790)"/>
+  <use href="#D" xlink:href="#D" transform="translate(620,740) rotate(-90)"/>
+  <use href="#D" xlink:href="#D" transform="translate(620,790) rotate(-90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(620,790)"/>
+
+  <use href="#GND" xlink:href="#GND" transform="translate(975,780)"/>
+  <use href="#C" xlink:href="#C" transform="translate(1260,420) rotate(90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(1260,470)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(1240,660)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(1240,740)"/>
+
+  <g fill="#1f2937">
+    <circle cx="270" cy="120" r="3.2"/><circle cx="295" cy="120" r="3.2"/><circle cx="620" cy="120" r="3.2"/>
+    <circle cx="340" cy="315" r="3.2"/>
+    <circle cx="470" cy="420" r="3.2"/><circle cx="570" cy="420" r="3.2"/><circle cx="620" cy="420" r="3.2"/>
+    <circle cx="470" cy="580" r="3.2"/><circle cx="570" cy="580" r="3.2"/><circle cx="620" cy="580" r="3.2"/>
+    <circle cx="470" cy="740" r="3.2"/><circle cx="570" cy="740" r="3.2"/><circle cx="620" cy="740" r="3.2"/>
+    <circle cx="1260" cy="420" r="3.2"/>
+  </g>
+
+  <g font-size="12" fill="#111827">
+    <text x="246" y="124" text-anchor="end" fill="#1d4ed8" font-weight="bold">+5V (Sheet 1)</text>
+    <text x="258" y="202" text-anchor="end">C9 0.1µF</text>
+    <text x="320" y="92" font-weight="bold">U3  TPS2553DBVR  (SOT-23-6)</text>
+    <text x="328" y="124">1 IN</text><text x="328" y="154">3 EN</text><text x="328" y="194">2 GND</text>
+    <text x="482" y="124" text-anchor="end">OUT 6</text><text x="482" y="154" text-anchor="end">FAULT 4</text>
+    <text x="482" y="194" text-anchor="end">ILIM 5</text>
+    <text x="518" y="154" fill="#b91c1c">NC</text>
+    <text x="515" y="180" text-anchor="middle">R4 232k</text>
+    <text x="620" y="204" text-anchor="middle">C10 1µF</text>
+    <text x="668" y="240" fill="#1d4ed8" font-weight="bold">+5V_SNS</text>
+
+    <text x="40" y="222" font-weight="bold">J3  JST B3B-PH-K-S  (MAP sensor)</text>
+    <text x="48" y="259">1 GND (black)</text><text x="48" y="289">2 SIG (white)</text><text x="48" y="319">3 +5V (red)</text>
+    <text x="200" y="279" fill="#1d4ed8" font-weight="bold">MAP_SIG</text>
+
+    <!-- AIN0 labels -->
+    <text x="425" y="408" text-anchor="middle">R5 10k</text>
+    <text x="462" y="452" text-anchor="end">R6 10k</text>
+    <text x="515" y="408" text-anchor="middle">R7 1k</text>
+    <text x="558" y="504" text-anchor="end">C11 10nF</text>
+    <text x="628" y="364" fill="#1d4ed8" font-weight="bold">3V3</text>
+    <text x="632" y="446">D3 BAT54S</text>
+    <text x="632" y="460" font-size="10.5" fill="#4b5563">3 = node · 2 = 3V3 · 1 = GND</text>
+    <text x="930" y="412" fill="#1d4ed8" font-weight="bold">AIN0</text>
+    <!-- AIN1 labels -->
+    <text x="425" y="568" text-anchor="middle">R8 10k</text>
+    <text x="462" y="612" text-anchor="end">R9 10k</text>
+    <text x="515" y="568" text-anchor="middle">R10 1k</text>
+    <text x="558" y="664" text-anchor="end">C12 10nF</text>
+    <text x="628" y="524" fill="#1d4ed8" font-weight="bold">3V3</text>
+    <text x="632" y="606">D4 BAT54S</text>
+    <text x="632" y="620" font-size="10.5" fill="#4b5563">3 = node · 2 = 3V3 · 1 = GND</text>
+    <text x="930" y="572" fill="#1d4ed8" font-weight="bold">AIN1</text>
+    <!-- AIN2 labels -->
+    <text x="296" y="744" text-anchor="end" fill="#1d4ed8" font-weight="bold">IGN_F (Sheet 1)</text>
+    <text x="425" y="728" text-anchor="middle">R11 100k</text>
+    <text x="462" y="772" text-anchor="end">R12 20k</text>
+    <text x="515" y="728" text-anchor="middle">R13 1k</text>
+    <text x="558" y="824" text-anchor="end">C13 10nF</text>
+    <text x="628" y="684" fill="#1d4ed8" font-weight="bold">3V3</text>
+    <text x="632" y="766">D5 BAT54S</text>
+    <text x="632" y="780" font-size="10.5" fill="#4b5563">3 = node · 2 = 3V3 · 1 = GND</text>
+    <text x="930" y="732" fill="#1d4ed8" font-weight="bold">AIN2</text>
+
+    <text x="1000" y="372" font-weight="bold">U4  ADS1115IDGSR  (VSSOP-10) · I²C 0x48</text>
+    <text x="1008" y="424">4 AIN0</text><text x="1008" y="584">5 AIN1</text>
+    <text x="1008" y="744">6 AIN2</text><text x="1008" y="784">7 AIN3</text>
+    <text x="1202" y="424" text-anchor="end">VDD 8</text><text x="1202" y="504" text-anchor="end">SDA 9</text>
+    <text x="1202" y="544" text-anchor="end">SCL 10</text><text x="1202" y="584" text-anchor="end">ALERT/RDY 2</text>
+    <text x="1202" y="664" text-anchor="end">ADDR 1</text><text x="1202" y="744" text-anchor="end">GND 3</text>
+    <text x="1306" y="424" fill="#1d4ed8" font-weight="bold">3V3</text>
+    <text x="1276" y="456">C14 0.1µF</text>
+    <text x="1326" y="504" fill="#1d4ed8" font-weight="bold">SDA</text>
+    <text x="1326" y="544" fill="#1d4ed8" font-weight="bold">SCL</text>
+    <text x="1326" y="584" fill="#1d4ed8" font-weight="bold">ALERT</text>
+    <text x="1248" y="652">0x48</text>
+  </g>
+
+  <g font-size="12" fill="#111827">
+    <text x="720" y="110" font-weight="bold" font-size="13">Channel map (firmware)</text>
+    <text x="720" y="130">AIN0 = MAP_SIG ÷ 2   (R5/R6 10k/10k)</text>
+    <text x="720" y="148">AIN1 = +5V_SNS ÷ 2   (R8/R9 10k/10k) — sensor supply monitor</text>
+    <text x="720" y="166">AIN2 = IGN_F ÷ 6   (R11/R12 100k/20k) — ignition voltage, reads to ≈19.8 V</text>
+    <text x="720" y="184">AIN3 = GND (unused; TI allows GND or floating)</text>
+    <text x="720" y="202">MAP ratio = AIN0 / AIN1 → cancels 5 V supply error (ratiometric sensor)</text>
+    <text x="720" y="228" font-weight="bold" font-size="13">Limits and values</text>
+    <text x="720" y="248">ADS1115 inputs: GND − 0.3 V to VDD + 0.3 V (3.6 V at 3V3). R7/R10/R13 + BAT54S clamp faults.</text>
+    <text x="720" y="266">MAP_SIG shorted to 12 V → 6 V at the divider → ≈0.4 mA into the clamp.</text>
+    <text x="720" y="284">U3 current limit with R4 = 232k: 100 / 117 / 137 mA (min / nom / max, TI equations).</text>
+    <text x="720" y="302">R: 1 %, 0603 · C11–C13 10 nF C0G · C9, C14 100 nF X7R · C10 1 µF X7R</text>
+    <text x="720" y="320">U3 EN is active-high on TPS2553 (tied to IN). FAULT is open-drain; unused.</text>
+  </g>
+</svg>

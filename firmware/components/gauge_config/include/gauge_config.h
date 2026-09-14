@@ -58,6 +58,49 @@ typedef enum {
     GAUGE_NEEDLE_ARROW,
 } gauge_needle_style_t;
 
+/*
+ * Custom shapes -- see "Shapes" in docs/gauge-config-schema.md and
+ * docs/adr/0006-custom-shapes-as-polygons.md.
+ *
+ * Coordinates are stored in 1/16 px, so anti-aliased edges keep their sub-pixel position without
+ * floats in a struct that gets copied around. The polygon parts of a shape share one point pool.
+ */
+#define GAUGE_SHAPE_MAX_PARTS         6
+#define GAUGE_SHAPE_MAX_POINTS        64
+#define GAUGE_SHAPE_COORD_SCALE       16     /**< Stored units per pixel. */
+#define GAUGE_SHAPE_COORD_LIMIT_PX    2047   /**< Coordinates and radii clamp to +/- this. */
+
+/** A shape vertex, in 1/GAUGE_SHAPE_COORD_SCALE px. */
+typedef struct {
+    int16_t x, y;
+} gauge_point_t;
+
+typedef enum {
+    GAUGE_SHAPE_PART_POLYGON,
+    GAUGE_SHAPE_PART_CIRCLE,
+} gauge_shape_part_kind_t;
+
+/** One filled region of a shape. */
+typedef struct {
+    uint8_t       kind;       /**< gauge_shape_part_kind_t */
+    bool          has_color;  /**< False: inherit the shape's colour, then the element's. */
+    gauge_color_t color;
+    uint8_t       first;      /**< Polygon: index of its first point in gauge_shape_t.points. */
+    uint8_t       count;      /**< Polygon: number of points. */
+    gauge_point_t center;     /**< Circle: centre. */
+    int16_t       radius;     /**< Circle: radius, in 1/GAUGE_SHAPE_COORD_SCALE px. */
+} gauge_shape_part_t;
+
+/** A user-drawn replacement for a built-in tick, needle or hub. */
+typedef struct {
+    uint8_t            part_count;   /**< 0 = not specified; the built-in drawing is used. */
+    uint8_t            point_count;
+    bool               has_color;    /**< False: parts inherit the element's colour. */
+    gauge_color_t      color;
+    gauge_shape_part_t parts[GAUGE_SHAPE_MAX_PARTS];
+    gauge_point_t      points[GAUGE_SHAPE_MAX_POINTS];
+} gauge_shape_t;
+
 /** A coloured arc segment marking a value range. */
 typedef struct {
     float         from;
@@ -127,6 +170,8 @@ typedef struct {
             uint16_t      major_width_px;
             uint16_t      minor_width_px;
             gauge_color_t color;
+            gauge_shape_t major_shape;   /**< When set, replaces major_len/width. */
+            gauge_shape_t minor_shape;   /**< When set, replaces minor_len/width. */
         } ticks;
 
         struct {
@@ -147,6 +192,8 @@ typedef struct {
         gauge_color_t        color;
         uint16_t             pivot_radius_px; /**< 0 disables the centre hub. */
         uint16_t             tail_px;
+        gauge_shape_t        shape;           /**< When set, replaces style/length/width/tail. */
+        gauge_shape_t        hub_shape;       /**< When set, replaces the pivot-radius circle. */
     } needle;
 
     /* --- <title> --- */
@@ -217,12 +264,16 @@ gauge_config_err_t gauge_config_parse(const char *xml, size_t len, gauge_config_
 const char *gauge_config_err_str(gauge_config_err_t err);
 
 /**
- * @brief The compiled-in fallback face.
+ * @brief Load the compiled-in fallback face into @p out.
  *
  * Used when LittleFS is unmountable or the stored config is unparseable, so the gauge always
- * has something to display. Never NULL.
+ * has something to display.
+ *
+ * Fills a caller-provided config rather than returning a pointer to a static one. A
+ * gauge_config_t is over 2KB; a static copy would sit in internal RAM, which WiFi needs, whereas
+ * the caller can put this one in PSRAM.
  */
-const gauge_config_t *gauge_config_builtin_default(void);
+void gauge_config_builtin_default(gauge_config_t *out);
 
 #ifdef __cplusplus
 }

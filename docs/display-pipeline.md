@@ -42,6 +42,11 @@ invalidates a ~354×354 square — essentially the whole dial. That measured 28.
 held only 45 fps. The sprite was small; its rotation envelope was not.
 See [performance.md](performance.md).
 
+A **custom needle shape** ([ADR 0006](adr/0006-custom-shapes-as-polygons.md)) keeps the same
+model. It is rasterised into A8 coverage masks sized to its current bounding box, then blended
+untransformed, so the same two tight rectangles are all that is invalidated. The extra cost is
+the rasterisation itself, which is not yet measured.
+
 ### 3. Readouts are separate objects
 
 Digital readouts are their own small labels with their own background, so a changing number

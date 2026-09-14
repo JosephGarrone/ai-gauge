@@ -83,7 +83,12 @@ void net_svc_get_status(net_svc_status_t *out);
  */
 esp_err_t net_svc_set_credentials(const char *ssid, const char *password);
 
-/** @brief Drop stored credentials and return to provisioning mode. */
+/**
+ * @brief Drop stored credentials and return to provisioning mode.
+ *
+ * Disconnects and brings the setup network up immediately, without a reboot. Blocks briefly
+ * while the radio restarts.
+ */
 esp_err_t net_svc_forget_credentials(void);
 
 /** @brief Whether credentials are stored. */

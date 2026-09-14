@@ -1,0 +1,100 @@
+# Publish the GitHub Pages site: the face editor at /editor/, and the browser flashing page at / with
+# a released firmware image. Deploys whenever either changes on main, and after every release.
+# See docs/ci-release.md and docs/config-app.md.
+#
+# A Pages deploy replaces the whole site, so every deploy assembles both halves: the editor from this
+# commit, and the flashing page with the firmware from a release (never an unreleased build).
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/config-app/**'
+      - 'tools/web-installer/**'
+      - 'firmware/assets/gauges/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag whose firmware the flashing page serves. Defaults to the latest release.
+        type: string
+        required: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    name: assemble site
+    runs-on: ubuntu-latest
+    # One deploy at a time; a newer pending deploy supersedes an older pending one.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Never publish an editor that fails its own tests. The firmware differential test runs in
+      # build.yml, where the C parser is built.
+      - name: Test the editor
+        working-directory: tools/config-app
+        run: npm test
+
+      - name: Assemble site
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p site/editor/examples
+          cp -r tools/config-app/index.html tools/config-app/css tools/config-app/js site/editor/
+          cp firmware/assets/gauges/*.xml site/editor/examples/
+
+          # The requested release, else the latest one.
+          fetch() { gh release download "$1" --repo "$GITHUB_REPOSITORY" --pattern ai-gauge-merged.bin --dir site --clobber; }
+          served=""
+          if [ -n "${TAG}" ] && fetch "${TAG}"; then
+            served="${TAG}"
+          else
+            latest="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null || true)"
+            if [ -n "${latest}" ] && fetch "${latest}"; then
+              served="${latest}"
+            fi
+          fi
+
+          if [ -n "${served}" ]; then
+            cp tools/web-installer/index.html site/
+            sed "s/__VERSION__/${served#v}/" tools/web-installer/manifest.json > site/manifest.json
+            echo "Flashing page serves firmware ${served}." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::No release with ai-gauge-merged.bin was found, so the site has the editor but no flashing page."
+            printf '%s\n' '<!doctype html><meta charset="utf-8"><title>AI-Gauge</title><meta http-equiv="refresh" content="0; url=editor/"><a href="editor/">AI-Gauge face editor</a>' > site/index.html
+          fi
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: deploy
+    needs: build
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

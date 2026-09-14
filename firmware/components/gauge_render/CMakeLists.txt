@@ -6,5 +6,6 @@ idf_component_register(
     REQUIRES
         lvgl
         gauge_config
+        gauge_shape
         board_profile
 )

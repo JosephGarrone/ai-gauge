@@ -585,6 +585,224 @@ static void parse_needle(const xml_tag_t *tag, gauge_config_t *cfg)
     attr_color(tag, "color", &cfg->needle.color, &cfg->warning_count);
 }
 
+/* ------------------------------------------------------------------- shapes --------- */
+
+static bool is_digit(char c)
+{
+    return c >= '0' && c <= '9';
+}
+
+/*
+ * Read one number from an SVG-style list. Bounded by `end` because attribute values are not
+ * NUL-terminated, which rules out strtod(). Accepts what drawing tools emit: an optional sign,
+ * digits, a decimal point and an exponent -- including SVG's "1-2" and ".5.5" run-togethers.
+ */
+static bool scan_number(const char **pp, const char *end, float *out)
+{
+    const char *p      = *pp;
+    double      sign   = 1.0;
+    double      mant   = 0.0;
+    bool        digits = false;
+
+    if (p < end && (*p == '+' || *p == '-')) {
+        sign = (*p == '-') ? -1.0 : 1.0;
+        p++;
+    }
+    while (p < end && is_digit(*p)) {
+        mant   = mant * 10.0 + (*p - '0');
+        digits = true;
+        p++;
+    }
+    if (p < end && *p == '.') {
+        double scale = 0.1;
+        p++;
+        while (p < end && is_digit(*p)) {
+            mant  += (*p - '0') * scale;
+            scale *= 0.1;
+            digits = true;
+            p++;
+        }
+    }
+    if (!digits) {
+        return false;
+    }
+
+    if (p < end && (*p == 'e' || *p == 'E')) {
+        const char *q     = p + 1;
+        int         esign = 1;
+        int         exp   = 0;
+        bool        edig  = false;
+        if (q < end && (*q == '+' || *q == '-')) {
+            esign = (*q == '-') ? -1 : 1;
+            q++;
+        }
+        while (q < end && is_digit(*q)) {
+            if (exp < 1000) {
+                exp = exp * 10 + (*q - '0');
+            }
+            edig = true;
+            q++;
+        }
+        /* A bare 'e' is not part of the number; leave it for the caller to reject. */
+        if (edig) {
+            mant *= pow(10.0, esign * exp);
+            p     = q;
+        }
+    }
+
+    double v = sign * mant;
+    if (!isfinite(v)) {
+        return false;
+    }
+
+    *out = (float)v;
+    *pp  = p;
+    return true;
+}
+
+static bool is_list_sep(char c)
+{
+    return is_space(c) || c == ',';
+}
+
+/* Pixels to stored 1/16 px, clamping to what an int16 can hold. */
+static int16_t to_shape_units(float px, uint16_t *warnings)
+{
+    float lim = (float)GAUGE_SHAPE_COORD_LIMIT_PX;
+    return (int16_t)lroundf(clampf(px, -lim, lim, warnings) * GAUGE_SHAPE_COORD_SCALE);
+}
+
+/* An optional colour: sets *has only when present and well-formed; malformed counts a warning. */
+static void attr_opt_color(const xml_tag_t *tag, bool *has, gauge_color_t *color,
+                           uint16_t *warnings)
+{
+    const char *val;
+    size_t      len;
+    if (!attr_find(tag, "color", &val, &len)) {
+        return;
+    }
+    if (parse_color(val, len, color)) {
+        *has = true;
+    } else {
+        (*warnings)++;
+    }
+}
+
+/*
+ * Start a shape container. A repeated container replaces the earlier one rather than merging
+ * with it, so a file cannot quietly accumulate parts from two definitions.
+ *
+ * Returns the shape that subsequent <polygon> and <circle> elements add to, or NULL for a
+ * self-closing (empty) container.
+ */
+static gauge_shape_t *open_shape(const xml_tag_t *tag, gauge_shape_t *shape, uint16_t *warnings)
+{
+    memset(shape, 0, sizeof(*shape));
+    attr_opt_color(tag, &shape->has_color, &shape->color, warnings);
+    return tag->self_closing ? NULL : shape;
+}
+
+static void parse_polygon(const xml_tag_t *tag, gauge_shape_t *shape, uint16_t *warnings)
+{
+    const char *p;
+    size_t      len;
+    uint16_t    clamp_warnings = 0;
+    int         count          = 0;
+    int64_t     twice_area     = 0;
+
+    if (shape->part_count >= GAUGE_SHAPE_MAX_PARTS || !attr_find(tag, "points", &p, &len)) {
+        goto reject;
+    }
+
+    const char        *end  = p + len;
+    gauge_shape_part_t part = {
+        .kind  = GAUGE_SHAPE_PART_POLYGON,
+        .first = shape->point_count,
+    };
+
+    /* Points are written straight into the pool and only committed once the whole list is good. */
+    for (;;) {
+        float x, y;
+
+        while (p < end && is_list_sep(*p)) {
+            p++;
+        }
+        if (p >= end) {
+            break;
+        }
+        if (!scan_number(&p, end, &x)) {
+            goto reject;
+        }
+        while (p < end && is_list_sep(*p)) {
+            p++;
+        }
+        if (!scan_number(&p, end, &y)) {
+            goto reject; /* malformed, or an odd number of coordinates */
+        }
+        if (shape->point_count + count >= GAUGE_SHAPE_MAX_POINTS) {
+            goto reject; /* over the shape's point budget */
+        }
+
+        shape->points[part.first + count] = (gauge_point_t){
+            .x = to_shape_units(x, &clamp_warnings),
+            .y = to_shape_units(y, &clamp_warnings),
+        };
+        count++;
+    }
+
+    if (count < 3) {
+        goto reject;
+    }
+
+    /* Shoelace area. A polygon with (almost) none would draw nothing, which is surely a mistake. */
+    for (int i = 0; i < count; i++) {
+        const gauge_point_t *a = &shape->points[part.first + i];
+        const gauge_point_t *b = &shape->points[part.first + (i + 1) % count];
+        twice_area += (int64_t)a->x * b->y - (int64_t)b->x * a->y;
+    }
+    if (llabs(twice_area) < (int64_t)GAUGE_SHAPE_COORD_SCALE * GAUGE_SHAPE_COORD_SCALE / 2) {
+        goto reject; /* under a quarter of a square pixel */
+    }
+
+    part.count = (uint8_t)count;
+    attr_opt_color(tag, &part.has_color, &part.color, warnings);
+
+    shape->point_count += (uint8_t)count;
+    shape->parts[shape->part_count++] = part;
+    *warnings += clamp_warnings;
+    return;
+
+reject:
+    (*warnings)++;
+}
+
+static void parse_circle(const xml_tag_t *tag, gauge_shape_t *shape, uint16_t *warnings)
+{
+    float r;
+    float cx = 0.0f;
+    float cy = 0.0f;
+
+    if (shape->part_count >= GAUGE_SHAPE_MAX_PARTS || !attr_float(tag, "r", &r) || !(r > 0.0f)) {
+        (*warnings)++;
+        return;
+    }
+    attr_float(tag, "cx", &cx);
+    attr_float(tag, "cy", &cy);
+
+    gauge_shape_part_t part = {
+        .kind   = GAUGE_SHAPE_PART_CIRCLE,
+        .center = {to_shape_units(cx, warnings), to_shape_units(cy, warnings)},
+        .radius = to_shape_units(r, warnings),
+    };
+    if (part.radius <= 0) {
+        (*warnings)++; /* rounds to nothing at 1/16 px */
+        return;
+    }
+    attr_opt_color(tag, &part.has_color, &part.color, warnings);
+
+    shape->parts[shape->part_count++] = part;
+}
+
 static void parse_title(const xml_tag_t *tag, gauge_config_t *cfg)
 {
     if (cfg->title_count >= GAUGE_CONFIG_MAX_TITLES) {
@@ -724,10 +942,25 @@ gauge_config_err_t gauge_config_parse(const char *xml, size_t len, gauge_config_
      */
     bool have_source = false;
 
+    /*
+     * Shape elements mean something only inside their parent, so track which of <ticks> or
+     * <needle> is open, and which shape container within it. Outside that context they are
+     * ignored, like any other unknown element.
+     */
+    enum { CTX_NONE, CTX_TICKS, CTX_NEEDLE } ctx = CTX_NONE;
+    gauge_shape_t *shape = NULL;
+
     while (next_tag(&p, end, &tag)) {
         if (tag.is_close) {
             if (tag_is(&tag, "gauge")) {
                 break;
+            }
+            if (tag_is(&tag, "ticks") || tag_is(&tag, "needle")) {
+                ctx   = CTX_NONE;
+                shape = NULL;
+            } else if (tag_is(&tag, "major-shape") || tag_is(&tag, "minor-shape") ||
+                       tag_is(&tag, "shape") || tag_is(&tag, "hub")) {
+                shape = NULL;
             }
             continue;
         }
@@ -746,10 +979,26 @@ gauge_config_err_t gauge_config_parse(const char *xml, size_t len, gauge_config_
             parse_band(&tag, cfg);
         } else if (tag_is(&tag, "ticks")) {
             parse_ticks(&tag, cfg);
+            ctx   = tag.self_closing ? CTX_NONE : CTX_TICKS;
+            shape = NULL;
         } else if (tag_is(&tag, "labels")) {
             parse_labels(&tag, cfg);
         } else if (tag_is(&tag, "needle")) {
             parse_needle(&tag, cfg);
+            ctx   = tag.self_closing ? CTX_NONE : CTX_NEEDLE;
+            shape = NULL;
+        } else if (ctx == CTX_TICKS && tag_is(&tag, "major-shape")) {
+            shape = open_shape(&tag, &cfg->face.ticks.major_shape, &cfg->warning_count);
+        } else if (ctx == CTX_TICKS && tag_is(&tag, "minor-shape")) {
+            shape = open_shape(&tag, &cfg->face.ticks.minor_shape, &cfg->warning_count);
+        } else if (ctx == CTX_NEEDLE && tag_is(&tag, "shape")) {
+            shape = open_shape(&tag, &cfg->needle.shape, &cfg->warning_count);
+        } else if (ctx == CTX_NEEDLE && tag_is(&tag, "hub")) {
+            shape = open_shape(&tag, &cfg->needle.hub_shape, &cfg->warning_count);
+        } else if (shape != NULL && tag_is(&tag, "polygon")) {
+            parse_polygon(&tag, shape, &cfg->warning_count);
+        } else if (shape != NULL && tag_is(&tag, "circle")) {
+            parse_circle(&tag, shape, &cfg->warning_count);
         } else if (tag_is(&tag, "title")) {
             parse_title(&tag, cfg);
         } else if (tag_is(&tag, "readout")) {

@@ -5,7 +5,7 @@
  * gauge always has something to display -- a driver turning the ignition on should never be
  * met with a blank screen because a config file went bad.
  *
- * Deliberately expressed as XML and parsed at startup, rather than hand-written as a struct:
+ * Deliberately expressed as XML and parsed on demand, rather than hand-written as a struct:
  * that way the fallback exercises the same parser as every other config, so a parser
  * regression cannot hide behind a path that bypasses it.
  */
@@ -35,22 +35,17 @@ static const char s_default_xml[] =
     "  <alert above=\"25\" flash-hz=\"2\" color=\"#d50000\"/>"
     "</gauge>";
 
-const gauge_config_t *gauge_config_builtin_default(void)
+void gauge_config_builtin_default(gauge_config_t *out)
 {
-    static gauge_config_t s_cfg;
-    static bool           s_ready = false;
-
-    if (!s_ready) {
-        if (gauge_config_parse(s_default_xml, sizeof(s_default_xml) - 1, &s_cfg)
-            != GAUGE_CONFIG_OK) {
-            /*
-             * Unreachable unless the built-in XML above is wrong -- which the host tests
-             * check for. Fall back to bare defaults so this can never return garbage.
-             */
-            gauge_config_set_defaults(&s_cfg);
-        }
-        s_ready = true;
+    if (out == NULL) {
+        return;
     }
 
-    return &s_cfg;
+    if (gauge_config_parse(s_default_xml, sizeof(s_default_xml) - 1, out) != GAUGE_CONFIG_OK) {
+        /*
+         * Unreachable unless the built-in XML above is wrong -- which the host tests check
+         * for. Fall back to bare defaults so this can never leave garbage behind.
+         */
+        gauge_config_set_defaults(out);
+    }
 }

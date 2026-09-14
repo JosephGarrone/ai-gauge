@@ -1,5 +1,6 @@
-# On a v* tag: attach binaries to a GitHub Release and publish the ESP Web Tools
-# flashing page to GitHub Pages. See docs/ci-release.md.
+# On a v* tag: attach binaries to a GitHub Release, then republish the GitHub Pages site so the
+# flashing page serves the new firmware. The site itself is assembled by pages.yml, which also
+# carries the face editor. See docs/ci-release.md.
 name: release
 
 on:
@@ -38,15 +39,6 @@ jobs:
             cd build &&
             esptool.py --chip esp32s3 merge_bin -o ai-gauge-merged.bin @flash_args
 
-      # The manifest points ESP Web Tools at the single merged image at offset 0.
-      - name: Assemble Pages site
-        run: |
-          mkdir -p site
-          cp tools/web-installer/index.html site/
-          cp firmware/build/ai-gauge-merged.bin site/
-          sed "s/__VERSION__/${{ steps.version.outputs.value }}/" \
-            tools/web-installer/manifest.json > site/manifest.json
-
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
@@ -59,18 +51,10 @@ jobs:
             firmware/build/partition_table/partition-table.bin
             firmware/build/storage.bin
 
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-
+  # The flashing page downloads ai-gauge-merged.bin from the release just published.
   pages:
-    name: deploy flashing page
+    name: publish Pages site
     needs: release
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - id: deploy
-        uses: actions/deploy-pages@v4
+    uses: ./.github/workflows/pages.yml
+    with:
+      tag: ${{ github.ref_name }}

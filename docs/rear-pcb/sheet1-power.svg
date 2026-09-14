@@ -1,0 +1,149 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1400 720" width="1400" height="720" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1400" height="720" fill="#ffffff"/>
+  <defs>
+    <g id="R"><path d="M0 0H10M40 0H50" stroke="#1f2937" stroke-width="1.6" fill="none"/><rect x="10" y="-5" width="30" height="10" fill="#ffffff" stroke="#1f2937" stroke-width="1.6"/></g>
+    <g id="C" stroke="#1f2937" fill="none"><path d="M0 0H21M29 0H50" stroke-width="1.6"/><path d="M21 -10V10M29 -10V10" stroke-width="2.4"/></g>
+    <g id="D" stroke="#1f2937" stroke-width="1.6"><path d="M0 0H15M35 0H50M35 -9V9" fill="none"/><path d="M15 -9L35 0L15 9Z" fill="#ffffff"/></g>
+    <g id="TVS" stroke="#1f2937" stroke-width="1.6"><path d="M0 0H10M40 0H50M25 -9V9M25 -9L21 -13M25 9L29 13" fill="none"/><path d="M10 -9L25 0L10 9Z" fill="#ffffff"/><path d="M40 -9L25 0L40 9Z" fill="#ffffff"/></g>
+    <g id="PTC" stroke="#1f2937" stroke-width="1.6"><path d="M0 0H10M40 0H50" fill="none"/><rect x="10" y="-6" width="30" height="12" fill="#ffffff"/><path d="M12 11L36 -11H42" fill="none"/></g>
+    <g id="L" stroke="#1f2937" stroke-width="1.6" fill="none"><path d="M0 0H8a5.5 5.5 0 0 1 11 0a5.5 5.5 0 0 1 11 0a5.5 5.5 0 0 1 11 0H50"/></g>
+    <g id="GND" stroke="#1f2937" stroke-width="1.6" fill="none"><path d="M0 0V8M-10 8H10M-6 12H6M-2 16H2"/></g>
+    <g id="NC" stroke="#b91c1c" stroke-width="1.8"><path d="M-5 -5L5 5M-5 5L5 -5"/></g>
+  </defs>
+
+  <text x="20" y="32" font-size="20" font-weight="bold" fill="#111827">Rear PCB · Sheet 1 of 4 — 12 V input, daisy chain, 5 V supply</text>
+  <text x="20" y="54" font-size="13" fill="#4b5563">Planning diagram: not built or verified. Pin numbers from manufacturer datasheets. U1 values from TI LMR38020 datasheet Table 9-1 (400 kHz, 5 V out).</text>
+
+  <!-- component bodies -->
+  <g stroke-width="1.6">
+    <rect x="40" y="210" width="110" height="125" fill="#e0e7ff" stroke="#3730a3"/>
+    <rect x="330" y="210" width="110" height="125" fill="#e0e7ff" stroke="#3730a3"/>
+    <rect x="700" y="80" width="200" height="200" fill="#fef9c3" stroke="#854d0e"/>
+    <rect x="940" y="420" width="180" height="140" fill="#fef9c3" stroke="#854d0e"/>
+  </g>
+
+  <!-- wires -->
+  <g stroke="#1f2937" stroke-width="1.6" fill="none">
+    <path d="M150 230H330M150 255H330M150 280H330M150 305H330"/>
+    <path d="M240 305V322"/>
+    <path d="M280 255V110H330M380 110H500M470 110V78M550 110H700"/>
+    <path d="M700 150H670V110"/>
+    <path d="M700 200H660"/>
+    <path d="M700 250H685V262"/>
+    <path d="M900 110H940M990 110H1260V380H900V450H940"/>
+    <path d="M900 160H920"/>
+    <path d="M1160 160V210"/>
+    <path d="M900 210H1160"/>
+    <path d="M900 250H925"/>
+    <path d="M940 490H880"/>
+    <path d="M940 530H915V590H1160V450"/>
+    <path d="M1120 450H1290"/>
+    <path d="M1120 490H1140V530M1120 530H1140"/>
+  </g>
+
+  <!-- symbols -->
+  <use href="#GND" xlink:href="#GND" transform="translate(240,322)"/>
+  <use href="#PTC" xlink:href="#PTC" transform="translate(330,110)"/>
+  <use href="#TVS" xlink:href="#TVS" transform="translate(430,110) rotate(90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(430,160)"/>
+  <use href="#D" xlink:href="#D" transform="translate(500,110)"/>
+  <use href="#C" xlink:href="#C" transform="translate(590,110) rotate(90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(590,160)"/>
+  <use href="#C" xlink:href="#C" transform="translate(630,110) rotate(90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(630,160)"/>
+  <use href="#R" xlink:href="#R" transform="translate(660,200) rotate(90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(660,250)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(685,262)"/>
+  <use href="#L" xlink:href="#L" transform="translate(940,110)"/>
+  <use href="#C" xlink:href="#C" transform="translate(920,160) rotate(-90)"/>
+  <use href="#C" xlink:href="#C" transform="translate(1030,110) rotate(90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(1030,160)"/>
+  <use href="#C" xlink:href="#C" transform="translate(1070,110) rotate(90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(1070,160)"/>
+  <use href="#C" xlink:href="#C" transform="translate(1110,110) rotate(90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(1110,160)"/>
+  <use href="#R" xlink:href="#R" transform="translate(1160,110) rotate(90)"/>
+  <use href="#R" xlink:href="#R" transform="translate(1160,210) rotate(90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(1160,260)"/>
+  <use href="#NC" xlink:href="#NC" transform="translate(925,250)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(880,490)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(1140,530)"/>
+  <use href="#C" xlink:href="#C" transform="translate(1220,450) rotate(90)"/>
+  <use href="#GND" xlink:href="#GND" transform="translate(1220,500)"/>
+
+  <!-- junctions -->
+  <g fill="#1f2937">
+    <circle cx="240" cy="305" r="3.2"/><circle cx="280" cy="255" r="3.2"/><circle cx="430" cy="110" r="3.2"/>
+    <circle cx="470" cy="110" r="3.2"/><circle cx="590" cy="110" r="3.2"/><circle cx="630" cy="110" r="3.2"/>
+    <circle cx="670" cy="110" r="3.2"/><circle cx="920" cy="110" r="3.2"/><circle cx="1030" cy="110" r="3.2"/>
+    <circle cx="1070" cy="110" r="3.2"/><circle cx="1110" cy="110" r="3.2"/><circle cx="1160" cy="110" r="3.2"/>
+    <circle cx="1160" cy="210" r="3.2"/><circle cx="1160" cy="450" r="3.2"/><circle cx="1220" cy="450" r="3.2"/>
+    <circle cx="1140" cy="530" r="3.2"/>
+  </g>
+
+  <!-- labels -->
+  <g font-size="12" fill="#111827">
+    <text x="40" y="202" font-weight="bold">J1  JST B4B-PH-K-S</text>
+    <text x="48" y="234">1 BATT (red)</text><text x="48" y="259">2 IGN (white)</text>
+    <text x="48" y="284">3 AUX (yellow)</text><text x="48" y="309">4 GND (black)</text>
+    <text x="40" y="352" fill="#4b5563">JRP 4-wire lead</text>
+    <text x="330" y="202" font-weight="bold">J2  JST B4B-PH-K-S</text>
+    <text x="338" y="234">1 BATT (red)</text><text x="338" y="259">2 IGN (white)</text>
+    <text x="338" y="284">3 AUX (yellow)</text><text x="338" y="309">4 GND (black)</text>
+    <text x="330" y="352" fill="#4b5563">to next gauge</text>
+    <text x="40" y="372" fill="#4b5563">J1 and J2 are wired pin-for-pin. BATT and AUX pass straight through and are not used on this board.</text>
+
+    <text x="312" y="134">F1 0.75 A PTC</text>
+    <text x="442" y="142">D1 SMBJ24CA</text>
+    <text x="478" y="82" fill="#1d4ed8" font-weight="bold">IGN_F → Sheet 2 (R11)</text>
+    <text x="392" y="100" fill="#1d4ed8" font-weight="bold">IGN_F</text>
+    <text x="286" y="200" fill="#1d4ed8" font-weight="bold">IGN</text>
+    <text x="505" y="98">D2 SS26</text>
+    <text x="646" y="100" fill="#1d4ed8" font-weight="bold">VIN_P</text>
+    <text x="582" y="198" text-anchor="end">C1 4.7µF</text>
+    <text x="582" y="214" text-anchor="end">C2 0.1µF</text>
+    <text x="652" y="230" text-anchor="end">R1 64.9k</text>
+
+    <text x="700" y="72" font-weight="bold">U1  LMR38020SDDAR  (HSOIC-8 + EP)</text>
+    <text x="708" y="114">3 VIN</text><text x="708" y="154">2 EN</text>
+    <text x="708" y="204">4 RT/SYNC</text><text x="708" y="254">1 GND</text>
+    <text x="892" y="114" text-anchor="end">SW 8</text><text x="892" y="164" text-anchor="end">BOOT 7</text>
+    <text x="892" y="214" text-anchor="end">FB 5</text><text x="892" y="254" text-anchor="end">PG 6</text>
+    <text x="800" y="272" text-anchor="middle" font-size="11" fill="#854d0e">EP (thermal pad) → GND</text>
+    <text x="933" y="254" fill="#b91c1c">NC</text>
+
+    <text x="965" y="96">L1 15µH</text>
+    <text x="934" y="142">C3 0.1µF</text>
+    <text x="1030" y="196">C4–C6 3 × 22µF</text>
+    <text x="1168" y="140">R2 100k</text>
+    <text x="1168" y="240">R3 24.9k</text>
+    <text x="1195" y="100" fill="#1d4ed8" font-weight="bold">+5V</text>
+    <text x="1270" y="372" fill="#1d4ed8" font-weight="bold">+5V → Sheet 2</text>
+
+    <text x="940" y="412" font-weight="bold">U2  LM66100DCKR  (SC-70-6)</text>
+    <text x="948" y="454">1 VIN</text><text x="948" y="494">2 GND</text><text x="948" y="534">3 /CE</text>
+    <text x="1112" y="454" text-anchor="end">VOUT 6</text><text x="1112" y="494" text-anchor="end">ST 5</text>
+    <text x="1112" y="534" text-anchor="end">NC 4</text>
+    <text x="1230" y="442" fill="#1d4ed8" font-weight="bold">VBUS_OUT → J6.1</text>
+    <text x="1238" y="486">C7 1µF</text>
+    <text x="940" y="608" fill="#4b5563">/CE tied to VOUT: the switch opens when VBUS_OUT is above +5V,</text>
+    <text x="940" y="624" fill="#4b5563">so USB power on the display cannot flow back into U1 (TI datasheet).</text>
+  </g>
+
+  <!-- notes -->
+  <g font-size="12" fill="#111827" transform="translate(0,20)">
+    <text x="40" y="380" font-weight="bold" font-size="13">Parts on this sheet</text>
+    <text x="40" y="402">F1   Bourns MF-MSMF075/33X · PTC, 1812 · 33 V max · Ihold 0.75 A · Itrip 1.5 A</text>
+    <text x="40" y="422">D1   SMBJ24CA · bidirectional TVS, SMB · VWM 24 V · VBR 26.7–29.5 V · VC 38.9 V at 15.4 A</text>
+    <text x="40" y="442">D2   Vishay SS26 · Schottky, SMB · 60 V, 2 A · blocks reverse polarity (KiCad D: pin 1 K, pin 2 A)</text>
+    <text x="40" y="462">C1   4.7 µF X7R, 1210, ≥50 V (100 V preferred) · C2 100 nF X7R, 0603, 100 V (TI: 100–220 nF at VIN)</text>
+    <text x="40" y="482">U1   TI LMR38020SDDAR · 4.2–80 V in (85 V abs max) · 2 A · non-FPWM, spread spectrum</text>
+    <text x="40" y="502">R1   64.9 kΩ 1% → 400 kHz (RT/SYNC must not float or be grounded) · C3 100 nF X7R ≥16 V (BOOT to SW)</text>
+    <text x="40" y="522">L1   Bourns SRP7028A-150M · 15 µH · Irms 3.0 A · Isat 4.0 A · 7.3 × 6.6 mm</text>
+    <text x="40" y="542">R2/R3  100 kΩ / 24.9 kΩ 1% → 5 V · C4–C6 3 × 22 µF X7R, 1206, ≥16 V (TI minimum 2 × 22 µF)</text>
+    <text x="40" y="562">U2   TI LM66100DCKR · ideal diode · 1.5–5.5 V · 1.5 A continuous · C7 1 µF X7R 0603</text>
+    <text x="40" y="582">EN tied to VIN (datasheet permits). PG unused (datasheet: may be left open).</text>
+    <text x="40" y="614" fill="#4b5563">Order of protection: fuse → TVS (clamps both polarities, protects D2 too) → reverse-polarity diode → buck.</text>
+    <text x="40" y="634" fill="#4b5563">IGN_F is taken before D2 so the ignition reading is not offset by the diode drop.</text>
+  </g>
+</svg>

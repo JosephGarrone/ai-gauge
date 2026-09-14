@@ -91,8 +91,19 @@ without re-measuring — see [performance.md](performance.md).
 
 ## Host-side tests
 
-`gauge_config` has no ESP-IDF or LVGL dependency, so its parser tests build and run on the
-development machine with no board attached. CI runs them on every push.
+`gauge_config` (the XML parser) and `gauge_shape` (the custom-shape rasteriser) have no ESP-IDF
+or LVGL dependency, so their tests build and run on the development machine with no board
+attached. CI runs them on every push.
+
+Without CMake on the path, any C11 compiler will do, for example `zig cc`:
+
+```bash
+zig cc -std=c11 -Wall -Wextra -Werror -Ifirmware/components/gauge_config/include \
+  tools/host-tests/test_gauge_config.c firmware/components/gauge_config/gauge_config*.c -o tgc
+zig cc -std=c11 -Wall -Wextra -Werror -Ifirmware/components/gauge_shape/include \
+  -Ifirmware/components/gauge_config/include \
+  tools/host-tests/test_gauge_shape.c firmware/components/gauge_shape/gauge_shape.c -o tgs
+```
 
 ```bash
 cmake -S tools/host-tests -B build/host-tests

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Boost gauge, 0-30 PSI, with custom tick, needle and hub shapes.
+  Exercises every shape feature so it doubles as the hardware test face for them.
+  Schema: docs/gauge-config-schema.md ("Shapes"); authoring guide: docs/gauge-xml-interface.md
+-->
+<gauge version="1" id="boost_custom">
+  <panel shape="round" width="466" height="466"/>
+  <source channel="boost" unit="psi" min="0" max="30" damping="0.15"/>
+
+  <face start-angle="225" sweep="270" background="#000000">
+    <band from="0"  to="18" color="#00c853" width="10"/>
+    <band from="18" to="25" color="#ffab00" width="10"/>
+    <band from="25" to="30" color="#d50000" width="10"/>
+    <ticks major-every="5" minor-every="1" color="#ffffff">
+      <!-- Origin on the tick circle, y increasing towards the dial centre. -->
+      <major-shape>
+        <polygon points="-4,0 4,0 1.5,28 -1.5,28"/>
+      </major-shape>
+      <minor-shape color="#9e9e9e">
+        <circle cy="5" r="2.5"/>
+      </minor-shape>
+    </ticks>
+    <labels every="5" font="montserrat_24" color="#ffffff" radius="150"/>
+  </face>
+
+  <needle color="#ff1744">
+    <!-- Origin at the pivot, tip towards negative y. -->
+    <shape>
+      <polygon points="0,-176 3,-150 7,-20 9,0 6,38 -6,38 -9,0 -7,-20 -3,-150"/>
+      <polygon points="-1,-150 1,-150 1.5,-30 -1.5,-30" color="#ffffff"/>
+    </shape>
+    <hub color="#303030">
+      <circle r="22"/>
+      <circle r="8" color="#ff1744"/>
+    </hub>
+  </needle>
+
+  <title text="BOOST" y="150" font="montserrat_20" color="#9e9e9e"/>
+  <readout y="320" font="montserrat_48" format="%.1f" suffix=" psi" color="#ffffff"/>
+
+  <peak color="#ffab00" length="28" width="5"/>
+  <alert above="25" flash-hz="2" color="#d50000" chime="true"/>
+</gauge>

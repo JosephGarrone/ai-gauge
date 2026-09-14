@@ -7,9 +7,10 @@
 | `board_profile` | Panel geometry (shape, resolution, safe area) and which peripherals exist. The portability seam. |
 | `gauge_config` | Parse gauge XML into `gauge_config_t`; validate; supply defaults. No LVGL, no I/O — pure data, so it is testable on the host. |
 | `gauge_store` | Owns the LittleFS `storage` partition: list, load, save and delete configs. Keeps filesystem concerns out of `gauge_config`. |
+| `gauge_shape` | Geometry and anti-aliased rasterisation of custom tick, needle and hub shapes ([ADR 0006](adr/0006-custom-shapes-as-polygons.md)). No LVGL, no I/O — tested on the host. |
 | `gauge_render` | Build the LVGL dial from a `gauge_config_t`: pre-rendered face, needle sprite, readouts, alerts. |
 | `sensor_hub` | Own `I2C_NUM_1`; drive ADS1115 and MCP9600; scale, filter and publish readings. Also hosts the simulated and network sources. |
-| `app_settings` | NVS-backed user settings (active gauge, brightness, FPS badge, alert sound). |
+| `app_settings` | NVS-backed user settings (active gauge, brightness, rotation, FPS badge, alert sound). |
 | `app_ui` | Tileview screens: the dial and the swipe-up settings page. |
 | `app_audio` | Alert chime through the ES8311, on its own speaker-only I2S channel. Never uses the BSP audio setup. |
 | `net_svc` | WiFi provisioning, HTTP server, mDNS, telemetry ingest, OTA. |
@@ -20,14 +21,14 @@ Dependency direction is strictly one-way:
 main
  ├── app_ui       ──> gauge_render, gauge_store, gauge_perf, app_settings
  ├── app_audio    ──> app_settings
- ├── gauge_render ──> gauge_config, board_profile
+ ├── gauge_render ──> gauge_config, gauge_shape, board_profile
  ├── gauge_store  ──> gauge_config
  ├── sensor_hub   ──> (nothing above it)
  ├── net_svc      ──> gauge_store, app_settings
  └── app_settings
 ```
 
-`gauge_config` and `board_profile` are leaves and depend on neither LVGL nor ESP-IDF drivers.
+`gauge_config`, `gauge_shape` and `board_profile` depend on neither LVGL nor ESP-IDF drivers.
 That is deliberate: it keeps the schema work unit-testable on a host machine, with no board
 attached.
 
@@ -92,8 +93,14 @@ a bolt-on.
 An `lv_tileview` with two vertically stacked tiles:
 
 - **Tile 0 — dial.** The gauge. Optimised per [display-pipeline.md](display-pipeline.md).
-- **Tile 1 — settings.** WiFi status and provisioning, gauge selection, brightness, units,
-  FPS overlay toggle, firmware version, and any config-load warnings.
+- **Tile 1 — settings.** WiFi status and provisioning, gauge selection, brightness, screen
+  rotation, units, FPS overlay toggle, firmware version, and any config-load warnings. Sized for
+  a finger on a 1.75" panel: 26px text or larger, and controls at least 54px tall.
+
+Rotation is applied by the panel itself (MADCTL), not by LVGL: the adapter never rotates frames
+for this QSPI panel, and a hardware rotation costs nothing per frame. Because the panel is
+square, LVGL's resolution is unchanged; `lv_display_set_rotation()` is used only so LVGL maps
+touch input to match.
 
 `lv_tileview` gives momentum-tracked swipe-up for free. The transition is the most expensive
 thing the UI does — see the worst-case analysis in

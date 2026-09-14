@@ -14,6 +14,11 @@
  * per frame and held only 45fps. Drawing the rotated triangle ourselves lets the object be
  * the needle's exact bounding box instead. See docs/performance.md.
  *
+ * Custom shapes (docs/adr/0006-custom-shapes-as-polygons.md) keep that property. A shaped
+ * needle is rasterised by gauge_shape into A8 coverage masks sized to its current bounding box,
+ * and blended untransformed, so the dirty region is still exactly where the needle was and is.
+ * Shaped ticks are blended straight into the face canvas, and a shaped hub is rasterised once.
+ *
  * Angle convention: the schema uses degrees clockwise from 12 o'clock (see
  * docs/gauge-config-schema.md). LVGL arc drawing puts 0 at 3 o'clock, hence the -90
  * conversion in arc_deg().
@@ -31,9 +36,24 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 
+#include "gauge_shape.h"
+
 static const char *TAG = "gauge_render";
 
 #define DEG2RAD(d) ((float)(d) * 3.14159265358979f / 180.0f)
+
+/*
+ * One part of a custom needle or hub: an A8 coverage mask blended in a single colour. The
+ * buffer is sized once for the part's worst-case bounds; the image header tracks the bounds of
+ * the current rasterisation.
+ */
+typedef struct {
+    lv_image_dsc_t img;
+    uint8_t       *cov;           /**< PSRAM. Owned. NULL for an unused part. */
+    lv_area_t      area;          /**< Where img lands, relative to the parent. */
+    lv_color_t     color;
+    bool           follows_alert; /**< Inherits the needle colour, so flashes with alerts. */
+} shape_sprite_t;
 
 struct gauge_render_t {
     gauge_config_t         cfg;
@@ -59,6 +79,15 @@ struct gauge_render_t {
     int32_t            line_w;
     lv_area_t          prev_bbox;   /**< Area to repaint where the needle used to be. */
     bool               prev_valid;
+
+    /* Custom needle and hub. Unused unless cfg.needle.shape / hub_shape is set. */
+    shape_sprite_t    needle_parts[GAUGE_SHAPE_MAX_PARTS];
+    shape_sprite_t    hub_parts[GAUGE_SHAPE_MAX_PARTS];
+    float            *raster_acc;   /**< PSRAM scratch, sized for the largest part. Owned. */
+    gauge_shape_vec_t outline[GAUGE_SHAPE_MAX_OUTLINE]; /**< Here, not on a task stack. */
+    float             needle_extent;
+    float             shape_deg;    /**< Angle the needle parts were last rasterised at. */
+    bool              shape_valid;
 
     float displayed;     /**< Current damped value. */
     bool  valid;
@@ -190,6 +219,218 @@ static void draw_text(lv_layer_t *layer, const char *text, const lv_font_t *font
     lv_draw_label(layer, &dsc, &a);
 }
 
+/* --------------------------------------------------------------- custom shapes ------ */
+
+/*
+ * Allocate a sprite per part, each sized for that part's worst case at any angle, and resolve
+ * its colour. Reports the largest mask in *need so one scratch buffer serves every part.
+ */
+static bool init_sprites(shape_sprite_t *sprites, const gauge_shape_t *shape,
+                         gauge_color_t inherited, size_t *need)
+{
+    for (uint8_t i = 0; i < shape->part_count; i++) {
+        shape_sprite_t *sp = &sprites[i];
+        int32_t         w, h;
+
+        gauge_shape_max_size(shape, i, &w, &h);
+        size_t bytes = (size_t)w * (size_t)h;
+
+        sp->cov = heap_caps_malloc(bytes > 0 ? bytes : 1, MALLOC_CAP_SPIRAM);
+        if (sp->cov == NULL) {
+            return false;
+        }
+
+        memset(&sp->img, 0, sizeof(sp->img));
+        sp->img.header.magic = LV_IMAGE_HEADER_MAGIC;
+        sp->img.header.cf    = LV_COLOR_FORMAT_A8;
+        sp->img.data         = sp->cov;
+        sp->color            = to_lv(gauge_shape_part_color(shape, i, inherited,
+                                                            &sp->follows_alert));
+
+        if (bytes > *need) {
+            *need = bytes;
+        }
+    }
+    return true;
+}
+
+static void free_sprites(shape_sprite_t *sprites)
+{
+    for (int i = 0; i < GAUGE_SHAPE_MAX_PARTS; i++) {
+        free(sprites[i].cov);
+        sprites[i].cov = NULL;
+    }
+}
+
+/* Rasterise one part into its sprite, with the shape's origin at (ox, oy) in parent space. */
+static void raster_sprite(gauge_render_t *g, shape_sprite_t *sp, const gauge_shape_t *shape,
+                          uint8_t part, float deg, float ox, float oy)
+{
+    gauge_shape_rect_t r;
+    size_t             n = gauge_shape_outline(shape, part, deg, ox, oy, g->outline);
+
+    gauge_shape_bounds(g->outline, n, &r);
+    gauge_shape_rasterize(g->outline, n, &r, g->raster_acc, sp->cov);
+
+    int32_t w = gauge_shape_rect_w(&r);
+    int32_t h = gauge_shape_rect_h(&r);
+    sp->img.header.w      = (uint32_t)w;
+    sp->img.header.h      = (uint32_t)h;
+    sp->img.header.stride = (uint32_t)w;
+    sp->img.data_size     = (uint32_t)(w * h);
+    sp->area              = (lv_area_t){.x1 = r.x1, .y1 = r.y1, .x2 = r.x2, .y2 = r.y2};
+}
+
+/* Draw sprites whose areas are parent-relative. @p alert recolours parts that follow it. */
+static void draw_sprites(gauge_render_t *g, lv_layer_t *layer, const shape_sprite_t *sprites,
+                         uint8_t count, const lv_color_t *alert)
+{
+    lv_area_t pa;
+    lv_obj_get_coords(g->parent, &pa);
+
+    for (uint8_t i = 0; i < count; i++) {
+        const shape_sprite_t *sp = &sprites[i];
+
+        lv_draw_image_dsc_t dsc;
+        lv_draw_image_dsc_init(&dsc);
+        dsc.src         = &sp->img;
+        dsc.recolor     = (alert != NULL && sp->follows_alert) ? *alert : sp->color;
+        dsc.recolor_opa = LV_OPA_COVER;
+
+        lv_area_t a = sp->area;
+        lv_area_move(&a, pa.x1, pa.y1);
+        lv_draw_image(layer, &dsc, &a);
+    }
+}
+
+/*
+ * Get the custom needle and hub ready: buffers, colours, and the one-off hub rasterisation.
+ * If PSRAM runs out, fall back to the built-in drawing -- a plainer needle beats no gauge.
+ */
+static void prepare_shapes(gauge_render_t *g)
+{
+    gauge_config_t *c    = &g->cfg;
+    bool            ok   = true;
+    size_t          need = 0;
+
+    if (gauge_shape_is_set(&c->needle.shape)) {
+        ok = init_sprites(g->needle_parts, &c->needle.shape, c->needle.color, &need);
+        g->needle_extent = gauge_shape_extent(&c->needle.shape);
+    }
+    if (ok && gauge_shape_is_set(&c->needle.hub_shape)) {
+        ok = init_sprites(g->hub_parts, &c->needle.hub_shape, c->needle.color, &need);
+    }
+    if (ok && need > 0) {
+        g->raster_acc = heap_caps_malloc(need * sizeof(float), MALLOC_CAP_SPIRAM);
+        ok            = (g->raster_acc != NULL);
+    }
+
+    if (!ok) {
+        ESP_LOGW(TAG, "no PSRAM for the custom needle; using the built-in one");
+        free_sprites(g->needle_parts);
+        free_sprites(g->hub_parts);
+        free(g->raster_acc);
+        g->raster_acc                 = NULL;
+        c->needle.shape.part_count     = 0;
+        c->needle.hub_shape.part_count = 0;
+        return;
+    }
+
+    for (uint8_t i = 0; i < c->needle.hub_shape.part_count; i++) {
+        raster_sprite(g, &g->hub_parts[i], &c->needle.hub_shape, i, 0.0f, (float)g->cx,
+                      (float)g->cy);
+    }
+}
+
+/*
+ * Blend a coverage mask straight into the RGB565 face buffer. The face is drawn once, so this
+ * favours simplicity over speed. It is needed because LVGL has no seam-free polygon fill, and
+ * because queuing images on the canvas layer would defer the draw past the reuse of the mask.
+ */
+static void blend_mask(lv_draw_buf_t *dst, const gauge_shape_rect_t *r, const uint8_t *cov,
+                       lv_color_t color)
+{
+    int32_t  dw     = (int32_t)dst->header.w;
+    int32_t  dh     = (int32_t)dst->header.h;
+    size_t   stride = dst->header.stride;
+    int32_t  mw     = gauge_shape_rect_w(r);
+    uint16_t fg     = lv_color_to_u16(color);
+    uint32_t fr = fg >> 11, fgr = (fg >> 5) & 0x3f, fb = fg & 0x1f;
+
+    for (int32_t y = LV_MAX(r->y1, 0); y <= LV_MIN(r->y2, dh - 1); y++) {
+        uint8_t       *row  = dst->data + (size_t)y * stride;
+        const uint8_t *mask = cov + (size_t)(y - r->y1) * (size_t)mw;
+
+        for (int32_t x = LV_MAX(r->x1, 0); x <= LV_MIN(r->x2, dw - 1); x++) {
+            uint32_t a = mask[x - r->x1];
+            if (a == 0) {
+                continue;
+            }
+
+            uint16_t px;
+            memcpy(&px, row + (size_t)x * 2, sizeof(px));
+            if (a == 255) {
+                px = fg;
+            } else {
+                uint32_t ia = 255 - a;
+                uint32_t br = px >> 11, bgr = (px >> 5) & 0x3f, bb = px & 0x1f;
+                px = (uint16_t)((((fr * a + br * ia + 127) / 255) << 11) |
+                                (((fgr * a + bgr * ia + 127) / 255) << 5) |
+                                ((fb * a + bb * ia + 127) / 255));
+            }
+            memcpy(row + (size_t)x * 2, &px, sizeof(px));
+        }
+    }
+}
+
+/* Ticks from a custom shape, each with its origin on the tick circle and pointing outwards. */
+static void draw_shaped_ticks(gauge_render_t *g, const gauge_shape_t *shape, float step,
+                              int32_t count, int32_t tick_outer)
+{
+    const gauge_config_t *c    = &g->cfg;
+    size_t                need = 0;
+
+    for (uint8_t i = 0; i < shape->part_count; i++) {
+        int32_t w, h;
+        gauge_shape_max_size(shape, i, &w, &h);
+        if ((size_t)w * (size_t)h > need) {
+            need = (size_t)w * (size_t)h;
+        }
+    }
+
+    /* One mask and scratch pair, reused for every tick. Freed once the face is drawn. */
+    float   *acc = heap_caps_malloc(need * sizeof(float), MALLOC_CAP_SPIRAM);
+    uint8_t *cov = heap_caps_malloc(need, MALLOC_CAP_SPIRAM);
+    if (acc == NULL || cov == NULL) {
+        ESP_LOGW(TAG, "no PSRAM to draw custom ticks; skipping them");
+        free(acc);
+        free(cov);
+        return;
+    }
+
+    lv_draw_buf_t *dst = lv_canvas_get_draw_buf(g->face);
+
+    for (int32_t t = 0; t <= count; t++) {
+        float deg = value_to_deg(g, c->source.min + (float)t * step);
+        float rad = DEG2RAD(deg);
+        float ox  = (float)g->cx + (float)tick_outer * sinf(rad);
+        float oy  = (float)g->cy - (float)tick_outer * cosf(rad);
+
+        for (uint8_t i = 0; i < shape->part_count; i++) {
+            gauge_shape_rect_t r;
+            size_t             n = gauge_shape_outline(shape, i, deg, ox, oy, g->outline);
+
+            gauge_shape_bounds(g->outline, n, &r);
+            gauge_shape_rasterize(g->outline, n, &r, acc, cov);
+            blend_mask(dst, &r, cov,
+                       to_lv(gauge_shape_part_color(shape, i, c->face.ticks.color, NULL)));
+        }
+    }
+
+    free(acc);
+    free(cov);
+}
+
 /* ------------------------------------------------------------- face pre-render ------ */
 
 static void render_face(gauge_render_t *g)
@@ -227,6 +468,12 @@ static void render_face(gauge_render_t *g)
         }
     }
 
+    /*
+     * Finish the bands before any ticks. Shaped ticks are blended straight into the canvas
+     * buffer, so everything that must sit beneath them has to be on the canvas already.
+     */
+    lv_canvas_finish_layer(cv, &layer);
+
     /* Ticks and labels sit inside the band ring so they never collide with it. */
     int32_t tick_outer = g->radius - widest_band - (widest_band ? 6 : 0);
 
@@ -243,6 +490,8 @@ static void render_face(gauge_render_t *g)
                 continue;
             }
 
+            const gauge_shape_t *shape = (pass == 0) ? &c->face.ticks.minor_shape
+                                                     : &c->face.ticks.major_shape;
             int32_t len   = (pass == 0) ? c->face.ticks.minor_len_px
                                         : c->face.ticks.major_len_px;
             int32_t width = (pass == 0) ? c->face.ticks.minor_width_px
@@ -256,6 +505,12 @@ static void render_face(gauge_render_t *g)
                 continue;
             }
 
+            if (gauge_shape_is_set(shape)) {
+                draw_shaped_ticks(g, shape, step, count, tick_outer);
+                continue;
+            }
+
+            lv_canvas_init_layer(cv, &layer);
             for (int32_t i = 0; i <= count; i++) {
                 float v   = min + (float)i * step;
                 float deg = value_to_deg(g, v);
@@ -275,8 +530,11 @@ static void render_face(gauge_render_t *g)
                 dsc.p2.y  = y2;
                 lv_draw_line(&layer, &dsc);
             }
+            lv_canvas_finish_layer(cv, &layer);
         }
     }
+
+    lv_canvas_init_layer(cv, &layer);
 
     /* --- numeric labels --- */
     if (c->face.labels.present) {
@@ -287,7 +545,11 @@ static void render_face(gauge_render_t *g)
 
             int32_t r = c->face.labels.radius_px;
             if (r <= 0) {
-                r = tick_outer - c->face.ticks.major_len_px - lv_font_get_line_height(font);
+                /* A shaped major tick reaches as far inward as its largest y. */
+                int32_t major_reach = gauge_shape_is_set(&c->face.ticks.major_shape)
+                    ? (int32_t)ceilf(gauge_shape_max_y(&c->face.ticks.major_shape))
+                    : c->face.ticks.major_len_px;
+                r = tick_outer - major_reach - lv_font_get_line_height(font);
             }
 
             int32_t count = (int32_t)((c->source.max - c->source.min) / step);
@@ -330,11 +592,20 @@ static void needle_draw_cb(lv_event_t *e)
         return;
     }
 
-    lv_color_t color = to_lv(g->cfg.needle.color);
+    lv_color_t color    = to_lv(g->cfg.needle.color);
+    bool       flashing = g->alert_active && g->alert_phase && g->active_alert_idx >= 0;
 
     /* The needle flashes in the alert colour along with the readout. */
-    if (g->alert_active && g->alert_phase && g->active_alert_idx >= 0) {
+    if (flashing) {
         color = to_lv(g->cfg.alerts[g->active_alert_idx].color);
+    }
+
+    if (gauge_shape_is_set(&g->cfg.needle.shape)) {
+        if (g->shape_valid) {
+            draw_sprites(g, layer, g->needle_parts, g->cfg.needle.shape.part_count,
+                         flashing ? &color : NULL);
+        }
+        return;
     }
 
     if (g->line_valid) {
@@ -362,6 +633,65 @@ static void needle_draw_cb(lv_event_t *e)
     }
 }
 
+static void hub_draw_cb(lv_event_t *e)
+{
+    gauge_render_t *g     = lv_event_get_user_data(e);
+    lv_layer_t     *layer = lv_event_get_layer(e);
+
+    if (layer != NULL) {
+        draw_sprites(g, layer, g->hub_parts, g->cfg.needle.hub_shape.part_count, NULL);
+    }
+}
+
+/*
+ * Custom-shape counterpart of update_needle(): rasterise every part at the new angle and
+ * invalidate the union of their bounds, plus where they were before.
+ */
+static void update_needle_shape(gauge_render_t *g)
+{
+    const gauge_shape_t *shape = &g->cfg.needle.shape;
+    float                deg   = value_to_deg(g, g->displayed);
+
+    /*
+     * Skip a change that moves the tip by under an eighth of a pixel. It is measured against
+     * the angle last drawn, not the previous update, so a slow creep still adds up to a redraw.
+     * This is the shaped needle's equivalent of the same-pixels check in update_needle().
+     */
+    if (g->shape_valid && fabsf(deg - g->shape_deg) * DEG2RAD(1.0f) * g->needle_extent < 0.125f) {
+        return;
+    }
+
+    lv_area_t bbox = {0};
+    for (uint8_t i = 0; i < shape->part_count; i++) {
+        shape_sprite_t *sp = &g->needle_parts[i];
+        raster_sprite(g, sp, shape, i, deg, (float)g->cx, (float)g->cy);
+
+        if (i == 0) {
+            bbox = sp->area;
+        } else {
+            bbox.x1 = LV_MIN(bbox.x1, sp->area.x1);
+            bbox.y1 = LV_MIN(bbox.y1, sp->area.y1);
+            bbox.x2 = LV_MAX(bbox.x2, sp->area.x2);
+            bbox.y2 = LV_MAX(bbox.y2, sp->area.y2);
+        }
+    }
+    g->shape_deg   = deg;
+    g->shape_valid = true;
+
+    /* Sprite areas are parent-relative; invalidation wants screen coordinates. */
+    lv_area_t pa;
+    lv_obj_get_coords(g->parent, &pa);
+    lv_area_move(&bbox, pa.x1, pa.y1);
+
+    if (g->prev_valid) {
+        lv_obj_invalidate_area(g->needle, &g->prev_bbox);
+    }
+    lv_obj_invalidate_area(g->needle, &bbox);
+
+    g->prev_bbox  = bbox;
+    g->prev_valid = true;
+}
+
 /*
  * Recompute the needle polygon for the current angle and resize the object to its exact
  * bounding box. Keeping the object tight is what keeps the dirty region small: LVGL
@@ -370,6 +700,11 @@ static void needle_draw_cb(lv_event_t *e)
 static void update_needle(gauge_render_t *g)
 {
     const gauge_config_t *c = &g->cfg;
+
+    if (gauge_shape_is_set(&c->needle.shape)) {
+        update_needle_shape(g);
+        return;
+    }
 
     /* Snapshot the current geometry so an update that lands on the same pixels can be skipped. */
     bool               old_tri_valid  = g->tri_valid;
@@ -748,7 +1083,11 @@ esp_err_t gauge_render_create(lv_obj_t *parent, const gauge_config_t *cfg,
 {
     ESP_RETURN_ON_FALSE(parent && cfg && board && out, ESP_ERR_INVALID_ARG, TAG, "bad args");
 
-    gauge_render_t *g = calloc(1, sizeof(gauge_render_t));
+    /*
+     * PSRAM, explicitly. With its embedded config this struct is a few KB, and plain calloc()
+     * places anything under 4KB in internal RAM, which WiFi needs (docs/performance.md).
+     */
+    gauge_render_t *g = heap_caps_calloc(1, sizeof(gauge_render_t), MALLOC_CAP_SPIRAM);
     ESP_RETURN_ON_FALSE(g != NULL, ESP_ERR_NO_MEM, TAG, "no memory for gauge");
 
     g->cfg    = *cfg;
@@ -765,6 +1104,9 @@ esp_err_t gauge_render_create(lv_obj_t *parent, const gauge_config_t *cfg,
                                           : board_profile_max_radius(board);
 
     esp_err_t ret = ESP_OK; /* ESP_GOTO_ON_FALSE assigns to a variable named `ret` */
+
+    /* May clear the custom needle and hub from g->cfg if PSRAM runs short; read g->cfg below. */
+    prepare_shapes(g);
 
     /* --- face canvas, full panel, in PSRAM --- */
     uint32_t face_stride = lv_draw_buf_width_to_stride(w, LV_COLOR_FORMAT_RGB565);
@@ -809,13 +1151,34 @@ esp_err_t gauge_render_create(lv_obj_t *parent, const gauge_config_t *cfg,
      * whatever we invalidate, so a large object costs nothing -- see update_needle().
      */
     {
-        int32_t reach = g->needle_len + cfg->needle.tail_px + cfg->needle.width_px + 8;
+        int32_t reach = gauge_shape_is_set(&g->cfg.needle.shape)
+            ? (int32_t)ceilf(g->needle_extent) + 8
+            : g->needle_len + cfg->needle.tail_px + cfg->needle.width_px + 8;
         lv_obj_set_size(g->needle, reach * 2, reach * 2);
         lv_obj_set_pos(g->needle, g->cx - reach, g->cy - reach);
     }
 
     /* --- centre hub, above the needle --- */
-    if (cfg->needle.pivot_radius_px > 0) {
+    if (gauge_shape_is_set(&g->cfg.needle.hub_shape)) {
+        g->hub = lv_obj_create(parent);
+        if (g->hub != NULL) {
+            lv_obj_remove_style_all(g->hub);
+            lv_obj_remove_flag(g->hub, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_remove_flag(g->hub, LV_OBJ_FLAG_CLICKABLE);
+
+            /* Static: cover the union of the parts, rasterised once in prepare_shapes(). */
+            lv_area_t box = g->hub_parts[0].area;
+            for (uint8_t i = 1; i < g->cfg.needle.hub_shape.part_count; i++) {
+                box.x1 = LV_MIN(box.x1, g->hub_parts[i].area.x1);
+                box.y1 = LV_MIN(box.y1, g->hub_parts[i].area.y1);
+                box.x2 = LV_MAX(box.x2, g->hub_parts[i].area.x2);
+                box.y2 = LV_MAX(box.y2, g->hub_parts[i].area.y2);
+            }
+            lv_obj_set_pos(g->hub, box.x1, box.y1);
+            lv_obj_set_size(g->hub, lv_area_get_width(&box), lv_area_get_height(&box));
+            lv_obj_add_event_cb(g->hub, hub_draw_cb, LV_EVENT_DRAW_MAIN, g);
+        }
+    } else if (cfg->needle.pivot_radius_px > 0) {
         int32_t r = cfg->needle.pivot_radius_px;
         g->hub    = lv_obj_create(parent);
         if (g->hub != NULL) {
@@ -873,8 +1236,9 @@ esp_err_t gauge_render_create(lv_obj_t *parent, const gauge_config_t *cfg,
     update_needle(g);
     set_peak_label(g);
 
-    ESP_LOGI(TAG, "gauge '%s' ready: r=%" PRId32 " needle_len=%" PRId32 " face=%uKB",
-             cfg->id, g->radius, g->needle_len, (unsigned)(face_size / 1024));
+    ESP_LOGI(TAG, "gauge '%s' ready: r=%" PRId32 " needle_len=%" PRId32 " face=%uKB%s",
+             cfg->id, g->radius, g->needle_len, (unsigned)(face_size / 1024),
+             gauge_shape_is_set(&g->cfg.needle.shape) ? " (custom needle)" : "");
 
     *out = g;
     return ESP_OK;
@@ -894,7 +1258,7 @@ void gauge_render_destroy(gauge_render_t *g)
         lv_timer_delete(g->flash_timer);
     }
 
-    /* Delete the objects before the buffer they point into. */
+    /* Delete the objects before the buffers they point into. */
     if (g->readout != NULL) {
         lv_obj_delete(g->readout);
     }
@@ -914,6 +1278,9 @@ void gauge_render_destroy(gauge_render_t *g)
         lv_obj_delete(g->face);
     }
 
+    free_sprites(g->needle_parts);
+    free_sprites(g->hub_parts);
+    free(g->raster_acc);
     free(g->face_buf);
     free(g);
 }

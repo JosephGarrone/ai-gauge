@@ -124,6 +124,8 @@ bool net_svc_has_credentials(void)
     return load_credentials(ssid, sizeof(ssid), pass, sizeof(pass));
 }
 
+static void start_ap_mode(void);
+
 esp_err_t net_svc_forget_credentials(void)
 {
     nvs_handle_t h;
@@ -134,16 +136,32 @@ esp_err_t net_svc_forget_credentials(void)
     nvs_close(h);
 
     ESP_LOGI(TAG, "credentials cleared");
-    return err;
+    if (err != ESP_OK || !s.started) {
+        return err;
+    }
+
+    /*
+     * Drop the live connection as well, or the device would stay on the old network until the
+     * next reboot. Same stop-and-restart as net_svc_set_credentials().
+     */
+    s.have_pending   = false;
+    s.retry_delay_ms = 0;
+    esp_timer_stop(s.retry_timer);
+    esp_wifi_disconnect();
+    esp_wifi_stop();
+    start_ap_mode();
+
+    return ESP_OK;
 }
 
 /* ------------------------------------------------------------------ connection ----- */
 
-static void start_ap_mode(void);
-
 static void retry_timer_cb(void *arg)
 {
     (void)arg;
+    if (s.status.state == NET_SVC_AP_MODE) {
+        return; /* armed just before a reset put the radio into setup mode */
+    }
     ESP_LOGI(TAG, "retrying connection");
     esp_wifi_connect();
 }
@@ -177,6 +195,12 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
 
         case WIFI_EVENT_STA_DISCONNECTED: {
             wifi_event_sta_disconnected_t *d = data;
+
+            /* The disconnect a network reset causes arrives after setup mode is already up. */
+            if (s.status.state == NET_SVC_AP_MODE) {
+                break;
+            }
+
             ESP_LOGW(TAG, "disconnected from '%s' (reason %d)", s.status.ssid, d->reason);
 
             s.status.ip[0] = '\0';

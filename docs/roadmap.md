@@ -153,19 +153,34 @@ zero at key-on with the engine off, as the JRP gauge does. See
 | Min/max recall | not started — next |
 | SD datalogging | not started; SD mounting has its own internal-memory cost to measure |
 
-## M7 — Portability
+## M7 — Configuration web app 🚧 in progress
+
+- A face editor published to GitHub Pages alongside the existing browser installer
+- Emits schema-conformant XML and uploads it over the M4 HTTP API
+- Live preview, so a face can be designed without flashing anything
+
+**Exit criteria:** the editor is live on GitHub Pages; a face designed in it, including custom
+shapes, is uploaded to a gauge and renders as previewed with 0 warnings; a shaped needle's frame
+cost is measured and still holds the frame budget.
+
+**Progress:**
+
+| Item | State |
+|---|---|
+| Custom major/minor tick, needle and hub shapes in the schema ([ADR 0006](adr/0006-custom-shapes-as-polygons.md)) | parser, rasteriser and renderer done; 192 host checks pass; firmware builds. **Not yet run on hardware**; frame cost of a shaped needle owed ([performance.md](performance.md)) |
+| Authoring interface document for the web app | done: [gauge-xml-interface.md](gauge-xml-interface.md) |
+| Face editor ([config-app.md](config-app.md), [ADR 0007](adr/0007-face-editor-static-app-with-parser-port.md)) | **built**: every schema element, shape editor with SVG path import, live preview with damping/alerts/peak, validation, import/export, browser library. 47 tests; the parser port matches the firmware parser on all 480 corpus documents. Checked by rendering in headless Chrome, **not yet used by a person on a real browser session, and not yet deployed** |
+| GitHub Pages publishing | `pages.yml` written: editor at `/editor/`, flashing page at `/` with release firmware; `release.yml` now calls it. **Not yet run**: needs a push to `main`, and the `github-pages` environment must allow `main` |
+| Upload from the editor | client written against §7, **blocked** by the firmware gaps below; never run against a gauge |
+| Browser access to the device (CORS, HTTPS/mixed content, raw XML download) | open firmware gaps, no decision yet; see [gauge-xml-interface.md §8](gauge-xml-interface.md#8-known-gaps-for-a-browser-app). Serving the editor from the gauge itself is one option, recorded in ADR 0007 |
+
+## M8 — Portability
 
 Prove the `board_profile` seam is real rather than theoretical.
 
 - A second profile for a square or differently-sized panel
 - Proportional scaling when a face's authored `<panel>` does not match the running panel
 - Re-measure scenario 2 on the second panel
-
-## M8 — Configuration web app
-
-- A face editor published to GitHub Pages alongside the existing browser installer
-- Emits schema-conformant XML and uploads it over the M4 HTTP API
-- Live preview, so a face can be designed without flashing anything
 
 ---
 
