@@ -23,14 +23,28 @@
 #include "esp_timer.h"
 
 #include "gauge_store.h"
+#include "net_svc_editor_files.h"
 
 static const char *TAG = "net_svc_http";
 
 /* Bounds the per-request buffer. Comfortably above the schema's needs. */
 #define MAX_BODY_BYTES GAUGE_STORE_MAX_FILE_BYTES
+#define XML_SUFFIX     ".xml"
+#define ORIGIN_LEN     64
 #define OTA_CHUNK      4096
 
 static httpd_handle_t s_server;
+
+/* Set by the app, read by the HTTP task. */
+static char         s_active_gauge[GAUGE_CONFIG_MAX_ID_LEN];
+static portMUX_TYPE s_active_lock = portMUX_INITIALIZER_UNLOCKED;
+
+void net_svc_set_active_gauge(const char *id)
+{
+    taskENTER_CRITICAL(&s_active_lock);
+    strlcpy(s_active_gauge, (id != NULL) ? id : "", sizeof(s_active_gauge));
+    taskEXIT_CRITICAL(&s_active_lock);
+}
 
 /* ---------------------------------------------------------------------- helpers ---- */
 
@@ -82,6 +96,39 @@ static const char *last_segment(const char *uri)
     return (slash != NULL) ? slash + 1 : uri;
 }
 
+static bool origin_is_loopback(const char *origin)
+{
+    static const char *const allowed[] = {"http://localhost", "http://127.0.0.1", "http://[::1]"};
+
+    for (size_t i = 0; i < sizeof(allowed) / sizeof(allowed[0]); i++) {
+        size_t n = strlen(allowed[i]);
+        if (strncmp(origin, allowed[i], n) == 0 && (origin[n] == '\0' || origin[n] == ':')) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
+ * CORS for one case only: the face editor running from its local dev server. A loopback origin
+ * is echoed back; any other origin gets no CORS headers, so a page on some other site still cannot
+ * read replies, or pass the preflight a PUT or DELETE needs to replace faces (ADR 0008). The
+ * editor normally needs none of this, because the gauge serves it at /editor/.
+ *
+ * httpd_resp_set_hdr() keeps the pointer, not a copy, so @p origin must outlive the response:
+ * callers pass a buffer on their own stack.
+ */
+static bool allow_loopback_origin(httpd_req_t *req, char *origin, size_t origin_len)
+{
+    if (httpd_req_get_hdr_value_str(req, "Origin", origin, origin_len) != ESP_OK ||
+        !origin_is_loopback(origin)) {
+        return false;
+    }
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", origin);
+    httpd_resp_set_hdr(req, "Vary", "Origin");
+    return true;
+}
+
 /*
  * Minimal form-field extraction. The provisioning page posts
  * application/x-www-form-urlencoded, and pulling in a full parser for two fields is not
@@ -129,18 +176,35 @@ static esp_err_t status_get(httpd_req_t *req)
 
     const esp_app_desc_t *app = esp_app_get_description();
 
+    char origin[ORIGIN_LEN];
+    allow_loopback_origin(req, origin, sizeof(origin));
+
+    char active[GAUGE_CONFIG_MAX_ID_LEN];
+    taskENTER_CRITICAL(&s_active_lock);
+    memcpy(active, s_active_gauge, sizeof(active));
+    taskEXIT_CRITICAL(&s_active_lock);
+
+    /*
+     * The minimums are what future measurements need without a serial cable: internal RAM is the
+     * board's binding constraint, and this handler runs on the HTTP server task, so its own stack
+     * high-water mark is the server's (docs/performance.md).
+     */
     char body[512];
     snprintf(body, sizeof(body),
              "{\"version\":\"%s\",\"idf\":\"%s\",\"uptime_s\":%lld,"
              "\"wifi\":{\"state\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\",\"rssi\":%d,"
              "\"hostname\":\"%s\"},"
-             "\"heap\":{\"internal\":%u,\"psram\":%u},"
+             "\"heap\":{\"internal\":%u,\"internal_min\":%u,\"psram\":%u},"
+             "\"httpd_stack_min\":%u,"
+             "\"active_gauge\":\"%s\","
              "\"storage_mounted\":%s}",
              app ? app->version : "unknown", app ? app->idf_ver : "unknown",
              esp_timer_get_time() / 1000000,
              net_svc_state_str(net.state), net.ssid, net.ip, net.rssi, net.hostname,
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+             (unsigned)uxTaskGetStackHighWaterMark(NULL), active,
              gauge_store_mounted() ? "true" : "false");
 
     httpd_resp_set_type(req, "application/json");
@@ -149,6 +213,9 @@ static esp_err_t status_get(httpd_req_t *req)
 
 static esp_err_t gauges_get(httpd_req_t *req)
 {
+    char origin[ORIGIN_LEN];
+    allow_loopback_origin(req, origin, sizeof(origin));
+
     gauge_store_list_t list;
     gauge_store_list(&list);
 
@@ -159,15 +226,47 @@ static esp_err_t gauges_get(httpd_req_t *req)
         used += (size_t)snprintf(body + used, sizeof(body) - used, "%s\"%s\"",
                                  (i == 0) ? "" : ",", list.ids[i]);
     }
-    snprintf(body + used, sizeof(body) - used, "]}");
+    snprintf(body + used, sizeof(body) - used, "],\"max\":%d}", GAUGE_STORE_MAX_GAUGES);
 
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, body);
 }
 
+/* The stored file itself, so the editor can load a face back from the gauge. */
+static esp_err_t config_get_xml(httpd_req_t *req, const char *id)
+{
+    char   err[GAUGE_STORE_ERR_LEN] = {0};
+    size_t len                      = 0;
+    char  *xml                      = gauge_store_read_xml(id, &len, err, sizeof(err));
+    if (xml == NULL) {
+        return send_json_error(req, "404 Not Found", err[0] ? err : "not found");
+    }
+
+    httpd_resp_set_type(req, "application/xml");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    esp_err_t ret = httpd_resp_send(req, xml, (ssize_t)len);
+    free(xml);
+    return ret;
+}
+
 static esp_err_t config_get(httpd_req_t *req)
 {
-    const char *id = last_segment(req->uri);
+    char origin[ORIGIN_LEN];
+    allow_loopback_origin(req, origin, sizeof(origin));
+
+    /* "/api/config/<id>.xml" is the raw file; "/api/config/<id>" the parsed summary. */
+    const char  *id         = last_segment(req->uri);
+    const size_t id_len     = strlen(id);
+    const size_t suffix_len = strlen(XML_SUFFIX);
+    if (id_len > suffix_len && strcmp(id + id_len - suffix_len, XML_SUFFIX) == 0) {
+        char stem[GAUGE_CONFIG_MAX_ID_LEN];
+        if (id_len - suffix_len >= sizeof(stem)) {
+            return send_json_error(req, "404 Not Found", "invalid gauge name");
+        }
+        memcpy(stem, id, id_len - suffix_len);
+        stem[id_len - suffix_len] = '\0';
+        return config_get_xml(req, stem);
+    }
 
     /* PSRAM, not this task's internal-RAM stack -- see gauge_store.c. */
     gauge_config_t *cfg = heap_caps_malloc(sizeof(*cfg), MALLOC_CAP_SPIRAM);
@@ -199,6 +298,9 @@ static esp_err_t config_get(httpd_req_t *req)
 
 static esp_err_t config_put(httpd_req_t *req)
 {
+    char origin[ORIGIN_LEN];
+    allow_loopback_origin(req, origin, sizeof(origin));
+
     const char *id = last_segment(req->uri);
 
     size_t len = 0;
@@ -228,6 +330,9 @@ static esp_err_t config_put(httpd_req_t *req)
 
 static esp_err_t config_delete(httpd_req_t *req)
 {
+    char origin[ORIGIN_LEN];
+    allow_loopback_origin(req, origin, sizeof(origin));
+
     const char *id = last_segment(req->uri);
 
     if (gauge_store_delete(id) != ESP_OK) {
@@ -386,6 +491,7 @@ static esp_err_t root_get(httpd_req_t *req)
              "h1{color:#ff1744}li{margin:.4rem 0}</style>"
              "<h1>AI-Gauge</h1>"
              "<p>Firmware %s &middot; connected to <b>%s</b> as <code>%s</code></p>"
+             "<p><a href=/editor/ style='color:#ff1744'>Open the face editor</a></p>"
              "<h3>API</h3><ul>"
              "<li><code>GET /api/status</code></li>"
              "<li><code>GET /api/gauges</code></li>"
@@ -400,6 +506,90 @@ static esp_err_t root_get(httpd_req_t *req)
     return httpd_resp_sendstr(req, body);
 }
 
+/* PUT and DELETE are preflighted; only a loopback origin passes (see allow_loopback_origin). */
+static esp_err_t config_options(httpd_req_t *req)
+{
+    char origin[ORIGIN_LEN];
+    if (!allow_loopback_origin(req, origin, sizeof(origin))) {
+        httpd_resp_set_status(req, "403 Forbidden");
+        return httpd_resp_send(req, NULL, 0);
+    }
+
+    httpd_resp_set_status(req, "204 No Content");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, PUT, DELETE");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+    httpd_resp_set_hdr(req, "Access-Control-Max-Age", "600");
+    return httpd_resp_send(req, NULL, 0);
+}
+
+/* ----------------------------------------------------------------- face editor ----- */
+
+static const char *content_type_for(const char *path)
+{
+    static const struct {
+        const char *ext;
+        const char *type;
+    } types[] = {
+        {".html", "text/html; charset=utf-8"},
+        {".js", "text/javascript; charset=utf-8"},
+        {".css", "text/css; charset=utf-8"},
+        {".xml", "application/xml; charset=utf-8"},
+    };
+
+    const char *dot = strrchr(path, '.');
+    for (size_t i = 0; dot != NULL && i < sizeof(types) / sizeof(types[0]); i++) {
+        if (strcmp(dot, types[i].ext) == 0) {
+            return types[i].type;
+        }
+    }
+    return "application/octet-stream";
+}
+
+/*
+ * The face editor, from the table built into the image (net_svc_editor_files.h). Served from here
+ * the editor shares the API's origin, so the browser needs no CORS and there is no HTTPS page
+ * calling a plain-HTTP device (ADR 0008). Files are looked up by exact name, so no request can
+ * reach anything else, and they go out straight from flash-mapped memory with no buffer.
+ */
+static esp_err_t editor_get(httpd_req_t *req)
+{
+    /* Everything after "/editor", less any query string: the editor links ?example=<file>. */
+    const char *rest     = req->uri + strlen("/editor");
+    size_t      rest_len = strcspn(rest, "?");
+
+    if (rest_len == 0) {
+        /* The editor's relative stylesheet and module paths only resolve under the slash. */
+        httpd_resp_set_status(req, "301 Moved Permanently");
+        httpd_resp_set_hdr(req, "Location", "/editor/");
+        return httpd_resp_send(req, NULL, 0);
+    }
+    if (rest[0] != '/') {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Not found");
+    }
+
+    const char *path     = rest + 1;
+    size_t      path_len = rest_len - 1;
+    if (path_len == 0) {
+        path     = "index.html";
+        path_len = strlen(path);
+    }
+
+    for (size_t i = 0; i < net_svc_editor_file_count; i++) {
+        const net_svc_editor_file_t *f = &net_svc_editor_files[i];
+        if (strlen(f->path) != path_len || strncmp(f->path, path, path_len) != 0) {
+            continue;
+        }
+
+        httpd_resp_set_type(req, content_type_for(f->path));
+        httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+        /* Revalidate every time, so the editor updates with the firmware after an OTA. */
+        httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+        return httpd_resp_send(req, (const char *)f->gz, (ssize_t)f->len);
+    }
+
+    return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Not found");
+}
+
 /* -------------------------------------------------------------------- lifecycle ---- */
 
 esp_err_t net_svc_http_start(void)
@@ -410,7 +600,7 @@ esp_err_t net_svc_http_start(void)
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.uri_match_fn   = httpd_uri_match_wildcard; /* wildcard config routes */
-    cfg.max_uri_handlers = 10;
+    cfg.max_uri_handlers = 12;
     /*
      * The server reserves 3 of lwIP's sockets for itself, so this must stay well under
      * CONFIG_LWIP_MAX_SOCKETS or httpd_start() refuses to run. Four concurrent connections
@@ -430,6 +620,8 @@ esp_err_t net_svc_http_start(void)
         {.uri = "/api/config/*",     .method = HTTP_GET,    .handler = config_get},
         {.uri = "/api/config/*",     .method = HTTP_PUT,    .handler = config_put},
         {.uri = "/api/config/*",     .method = HTTP_DELETE, .handler = config_delete},
+        {.uri = "/api/config/*",     .method = HTTP_OPTIONS, .handler = config_options},
+        {.uri = "/editor*",          .method = HTTP_GET,    .handler = editor_get},
         {.uri = "/api/wifi",         .method = HTTP_POST,   .handler = wifi_post},
         {.uri = "/api/ota",          .method = HTTP_POST,   .handler = ota_post},
     };

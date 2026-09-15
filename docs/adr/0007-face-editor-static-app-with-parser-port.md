@@ -1,7 +1,7 @@
 # ADR 0007 — Face editor: a static web app carrying a port of the firmware parser
 
-**Status:** Accepted (2026-09-14). Built and tested; not yet deployed to Pages, and upload to a
-gauge is blocked on firmware (see [../config-app.md](../config-app.md)).
+**Status:** Accepted (2026-09-14). Built and tested; not yet deployed to Pages. Upload to a gauge
+is solved by the gauge serving the editor, [ADR 0008](0008-gauge-serves-face-editor.md).
 
 ## Context
 
@@ -49,10 +49,9 @@ JavaScript. The firmware only counts warnings, while the editor needs to say wha
 the C would need changing too. The differential test gives the same confidence for far less
 machinery. If the port starts drifting in ways the corpus misses, revisit this.
 
-**Serve the editor from the gauge itself.** Not decided, and not rejected: a same-origin page would
-sidestep CORS and mixed content entirely. It costs flash and, more importantly, HTTP server stack
-and internal RAM, which are the board's binding constraint ([../performance.md](../performance.md)).
-It belongs with the other open browser-access options in [../networking.md](../networking.md).
+**Serve the editor from the gauge itself.** Left open here, then adopted in addition to Pages by
+[ADR 0008](0008-gauge-serves-face-editor.md). Its internal RAM and HTTP server stack cost was
+measured there and found small ([../performance.md](../performance.md)).
 
 **Separate Pages deploys for the editor and the flashing page.** Not possible: a deployment
 replaces the whole site. Hence one workflow that always assembles both.

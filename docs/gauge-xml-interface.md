@@ -553,17 +553,19 @@ its IP address. The full networking document is [networking.md](networking.md).
 
 | Method | Path | Request | Success response |
 |---|---|---|---|
-| `GET` | `/api/gauges` | — | `200 {"gauges":["boost","egt"]}` |
+| `GET` | `/api/gauges` | — | `200 {"gauges":["boost","egt"],"max":12}` |
 | `GET` | `/api/config/<id>` | — | `200 {"id":"boost","channel":"boost","unit":"psi","min":0.000,"max":30.000,"warnings":0}` |
+| `GET` | `/api/config/<id>.xml` | — | `200` the stored XML, `application/xml` |
 | `PUT` | `/api/config/<id>` | Body: the raw XML, at most 16,384 bytes | `200 {"ok":true}` |
 | `DELETE` | `/api/config/<id>` | — | `200 {"ok":true}` |
-| `GET` | `/api/status` | — | Firmware version, uptime, WiFi, heap and storage state |
+| `GET` | `/api/status` | — | Firmware version, uptime, WiFi (including `hostname`), heap and storage state, and `active_gauge`: the face on screen, `""` for the built-in face |
+| `GET` | `/editor/` | — | The face editor, served by the gauge |
 
 Errors are JSON of the form `{"error":"<reason>"}`:
 
 | Status | When | Example reasons |
 |---|---|---|
-| `400` | Upload rejected; **the existing face is untouched** | `missing or oversized body`, `invalid gauge name`, `too large (limit 16384 bytes)`, `storage not mounted`, or any of the parser errors in [§6](#6-validation) |
+| `400` | Upload rejected; **the existing face is untouched** | `missing or oversized body`, `invalid gauge name`, `too large (limit 16384 bytes)`, `the face's id is 'boost', not 'boost2'`, `gauge is full (12 faces); delete one first`, `storage not mounted`, or any of the parser errors in [§6](#6-validation) |
 | `404` | Config get or delete for an unknown id | `not found`, or the parse error of a stored file |
 | `500` | Device out of memory | `out of memory` |
 
@@ -572,31 +574,37 @@ Behaviour worth knowing:
 - **An upload is validated before it is written**, then replaces the old file atomically. If the
   uploaded id is the face currently on screen, the device re-renders it live, without
   rebooting.
+- **The URL id must equal the file's `<gauge id>`**, and a gauge holds at most `max` faces (12).
+  Uploading an id already stored replaces that face, even when the gauge is full.
+- **Deleting the face on screen** makes the gauge show the first remaining face that loads, or its
+  built-in face; `active_gauge` reports which.
 - **`PUT` does not report warnings.** After a successful upload, call `GET /api/config/<id>` and
   check `warnings`. Anything other than 0 means the device corrected or dropped something.
-- **`GET /api/config/<id>` returns a summary, not the XML.** There is no way to download a
-  stored face yet, so the editor must keep its own copy of every face it authors.
+- **`GET /api/config/<id>` returns a summary; `GET /api/config/<id>.xml` returns the file.** The
+  file comes back exactly as stored, even if it no longer parses.
+- **Cross-origin calls are accepted from loopback origins only** (`http://localhost`,
+  `127.0.0.1`, `[::1]`, any port), with an `OPTIONS` preflight on `/api/config/<id>`. Any other
+  page must be served by the gauge itself; see §8.
 
 ---
 
 ## 8. Known gaps for a browser app
 
-These are **firmware limitations, not yet resolved**. None has a decided fix, so they are
-recorded here and in [networking.md](networking.md). Do not work around them silently in the web
-app; raise them.
+**A browser page can reach a gauge only if the gauge served it, or if it is served from
+`http://localhost`.** The gauge serves the face editor at `/editor/` for this reason
+([ADR 0008](adr/0008-gauge-serves-face-editor.md)). Recorded here and in
+[networking.md](networking.md):
 
-| Gap | Effect on a browser app |
-|---|---|
-| **No CORS headers**, and no `OPTIONS` handler | A page served from any other origin (GitHub Pages, localhost) cannot read responses. A `PUT` with an XML content type triggers a preflight, which fails |
-| **HTTP only** | An `https://` page, including GitHub Pages, is blocked from calling an `http://` device by mixed-content rules |
-| **Private network access** | Chromium browsers increasingly restrict public sites from calling private-network addresses |
-| **`.local` names** | mDNS resolution depends on the OS and browser; an IP address may be needed |
-| **No raw XML download** | Existing faces cannot be loaded back into the editor from the device |
-| **No authentication** | Anyone on the network can replace faces |
+| Limitation | Effect on a browser app | State |
+|---|---|---|
+| **HTTP only** | An `https://` page, including GitHub Pages, is blocked from calling an `http://` device by mixed-content rules | Permanent: no trusted certificate is possible for a `.local` name. Serve the app from the gauge |
+| **CORS for loopback origins only** | A page from any other origin cannot read replies or pass a `PUT`/`DELETE` preflight | Deliberate: a wildcard would let any site replace faces on an unauthenticated API |
+| **Private network access** | Chromium browsers increasingly restrict public sites from calling private-network addresses | Does not affect a page served by the gauge |
+| **`.local` names** | mDNS resolution depends on the OS and browser; an IP address may be needed | Open |
+| **No authentication** | Anyone on the network can replace faces | Open |
 
-The web app should therefore work fully **offline**: design, preview, validate, and import or
-export `.xml` files. Treat direct upload to the device as a feature that depends on a firmware
-change.
+A web app hosted anywhere else should therefore work fully **offline**: design, preview, validate,
+and import or export `.xml` files, then hand over to the gauge's copy for upload.
 
 ---
 

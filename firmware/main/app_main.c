@@ -58,6 +58,19 @@ static const char *TAG = "app_main";
  */
 static gauge_config_t *s_active_cfg;
 
+/*
+ * The stored id of the face on screen, or "" for the built-in face. The file name is what the
+ * picker, the HTTP API and the active-gauge setting all use, so this is what changes are matched
+ * against.
+ */
+static char s_active_id[GAUGE_CONFIG_MAX_ID_LEN];
+
+static void set_active_id(const char *id)
+{
+    strlcpy(s_active_id, id, sizeof(s_active_id));
+    net_svc_set_active_gauge(s_active_id);
+}
+
 #if CONFIG_AI_GAUGE_SIMULATED_SOURCE
 
 /*
@@ -191,6 +204,7 @@ static void on_gauge_selected(const char *id)
 
     *s_active_cfg = *cfg;
     free(cfg);
+    set_active_id(id);
 
     app_settings_set_active_gauge(id);
     app_settings_commit();
@@ -256,6 +270,60 @@ static void retarget_draw_buffers(const board_profile_t *board)
  * in the display lock (docs/architecture.md).
  */
 
+/*
+ * The face on screen was deleted over HTTP. Switch to the first remaining face that loads, else
+ * the built-in one, as startup would, rather than leave a face on screen that the picker no longer
+ * lists. Runs on the HTTP task with the display lock held.
+ */
+static void show_fallback_after_delete(const char *deleted_id)
+{
+    /* PSRAM, not the HTTP task's internal-RAM stack, which also rebuilds the face from here. */
+    gauge_config_t     *cfg  = heap_caps_malloc(sizeof(*cfg), MALLOC_CAP_SPIRAM);
+    gauge_store_list_t *list = heap_caps_malloc(sizeof(*list), MALLOC_CAP_SPIRAM);
+    if (cfg == NULL || list == NULL) {
+        free(cfg);
+        free(list);
+        app_ui_set_warning("Out of memory; the deleted gauge stays on screen until restart.");
+        return;
+    }
+
+    char chosen[GAUGE_CONFIG_MAX_ID_LEN] = "";
+    gauge_store_list(list);
+    for (int i = 0; i < list->count && chosen[0] == '\0'; i++) {
+        char err[GAUGE_STORE_ERR_LEN] = {0};
+        if (gauge_store_load(list->ids[i], cfg, err, sizeof(err)) == ESP_OK &&
+            app_ui_set_config(cfg) == ESP_OK) {
+            strlcpy(chosen, list->ids[i], sizeof(chosen));
+        }
+    }
+    free(list);
+
+    if (chosen[0] == '\0') {
+        gauge_config_builtin_default(cfg);
+        if (app_ui_set_config(cfg) != ESP_OK) {
+            free(cfg);
+            app_ui_set_warning("Could not build a replacement; the deleted gauge stays on screen.");
+            return;
+        }
+    }
+
+    *s_active_cfg = *cfg;
+    free(cfg);
+    set_active_id(chosen);
+    app_settings_set_active_gauge(chosen);
+    app_settings_commit();
+
+    char warning[128];
+    if (chosen[0] != '\0') {
+        snprintf(warning, sizeof(warning), "Gauge '%s' was deleted; showing '%s'.", deleted_id, chosen);
+    } else {
+        snprintf(warning, sizeof(warning), "Gauge '%s' was deleted; showing the built-in gauge.",
+                 deleted_id);
+    }
+    app_ui_set_warning(warning);
+    ESP_LOGW(TAG, "%s", warning);
+}
+
 static void on_config_changed(const char *id, bool deleted)
 {
     ESP_LOGI(TAG, "config '%s' %s over HTTP", id, deleted ? "deleted" : "uploaded");
@@ -264,12 +332,19 @@ static void on_config_changed(const char *id, bool deleted)
         return;
     }
 
+    bool on_screen = (strcmp(id, s_active_id) == 0);
+
+    if (deleted && on_screen) {
+        show_fallback_after_delete(id);
+    }
+
+    /* After any switch, so the picker selects what is now on screen. */
     gauge_store_list_t list;
     gauge_store_list(&list);
-    app_ui_set_gauge_list(list.count > 0 ? list.ids : NULL, list.count, s_active_cfg->id);
+    app_ui_set_gauge_list(list.count > 0 ? list.ids : NULL, list.count, s_active_id);
 
     /* Reload live only when the gauge on screen is the one that changed. */
-    if (!deleted && strcmp(id, s_active_cfg->id) == 0) {
+    if (!deleted && on_screen) {
         /*
          * PSRAM, not the stack: this runs on the HTTP server task, whose stack is internal RAM
          * and which also has to rebuild the face from here (docs/performance.md).
@@ -429,6 +504,7 @@ void app_main(void)
 
     char        warning[128] = {0};
     const char *loaded_id    = load_initial_config(warning, sizeof(warning));
+    set_active_id(loaded_id != NULL ? loaded_id : "");
 
     ESP_LOGI(TAG, "config '%s' (%s): channel=%s range=%.1f..%.1f %s warnings=%" PRIu16,
              s_active_cfg->id, loaded_id ? "storage" : "built-in", s_active_cfg->source.channel,
