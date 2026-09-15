@@ -91,8 +91,9 @@ MCLK **must** be GPIO42.
 from **VCC3V3**, with a **bridged** output on a 2-pin **MX1.25** connector (H3) — upstream
 schematic and `HARDWARE_REFERENCE.md`. On the unit used for development nothing was audible even
 at full volume, with the codec reporting no errors, so no speaker is fitted. A speaker plugged
-into H3 needs no extra amplifier. Never ground either speaker terminal. See
-[rear-pcb.md](rear-pcb.md#speaker).
+into H3 needs no extra amplifier. Never ground either speaker terminal. Prefer 8Ω: the
+amplifier shares the 3.3V rail with the ESP32 and the AMOLED, and 4Ω doubles its peak current.
+The speaker is not part of the rear PCB.
 
 ## 8-pin expansion header — the only solder-free I/O
 
@@ -103,14 +104,14 @@ into H3 needs no extra amplifier. Never ground either speaker terminal. See
 | 3 | 3V3 | Board rail |
 | 4 | GPIO44 / U0RXD | UART0 RX |
 | 5 | GPIO43 / U0TXD | UART0 TX |
-| 6 | **GPIO17** | Free (LC76G RX on `-G`) |
-| 7 | **GPIO18** | Free (LC76G TX on `-G`) |
-| 8 | **GPIO16** | Free |
+| 6 | **GPIO16** | Free. ESP32-S3R8 pin 22 (XTAL_32K_N pad, routed as a GPIO on this board) |
+| 7 | **GPIO17** | Free. ESP32-S3R8 pin 23 (LC76G RX on `-G`) |
+| 8 | **GPIO18** | Free. ESP32-S3R8 pin 24 (LC76G TX on `-G`) |
 
-> **Upstream sources disagree on pins 4–8.** The table above follows upstream
-> `HARDWARE_REFERENCE.md`. The upstream schematic's header symbol (H2) reads pin 4 U0TXD,
-> 5 U0RXD, 6 GPIO16, 7 GPIO17, 8 GPIO18. Confirm on the board with a meter before wiring
-> anything to pins 6–8 — see [rear-pcb.md](rear-pcb.md#the-header--source-conflict-resolve-before-layout).
+> **Pins 6–8 confirmed:** GPIO16, GPIO17, GPIO18 in that order (project owner, 2026-09-14). This
+> matches the upstream schematic's header symbol (H2) and **corrects** upstream
+> `HARDWARE_REFERENCE.md`, which lists 17, 18, 16. The schematic names pin 4 U0TXD and pin 5 U0RXD;
+> those two are not used by this project and have not been checked.
 > Header VBUS is the same net as USB-C VBUS with no diode between them, so an external 5V
 > supply on pin 1 must block reverse current.
 
@@ -118,9 +119,9 @@ This project's allocation — see [sensor-frontend.md](sensor-frontend.md):
 
 | GPIO | Use |
 |---|---|
-| 17 | `I2C_NUM_1` SDA (sensor bus) |
-| 18 | `I2C_NUM_1` SCL (sensor bus) |
-| 16 | Shared open-drain ALERT / DRDY input |
+| 16 | `I2C_NUM_1` SDA (sensor bus), header pin 6 |
+| 17 | `I2C_NUM_1` SCL (sensor bus), header pin 7 |
+| 18 | Open-drain ALERT / DRDY input (ADS1115), header pin 8 |
 
 ## Critical warnings
 

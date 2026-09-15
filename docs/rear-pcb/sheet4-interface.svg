@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1100 440" width="1100" height="440" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1100" height="440" fill="#ffffff"/>
+  <defs>
+    <g id="R"><path d="M0 0H10M40 0H50" stroke="#1f2937" stroke-width="1.6" fill="none"/><rect x="10" y="-5" width="30" height="10" fill="#ffffff" stroke="#1f2937" stroke-width="1.6"/></g>
+    <g id="NC" stroke="#b91c1c" stroke-width="1.8"><path d="M-5 -5L5 5M-5 5L5 -5"/></g>
+  </defs>
+
+  <text x="20" y="32" font-size="20" font-weight="bold" fill="#111827">Rear PCB · Sheet 4 of 4 — Display header and I²C pull-ups</text>
+  <text x="20" y="54" font-size="13" fill="#4b5563">Planning diagram: not built or verified. Header pinout from the Waveshare schematic, pins 6–8 confirmed by the project owner.</text>
+
+  <g stroke-width="1.6">
+    <rect x="60" y="100" width="170" height="260" fill="#e0e7ff" stroke="#3730a3"/>
+  </g>
+
+  <g stroke="#1f2937" stroke-width="1.6" fill="none">
+    <path d="M230 120H300M230 150H300M230 180H300"/>
+    <path d="M230 210H250M230 240H250"/>
+    <path d="M230 270H300M230 300H300M230 330H300"/>
+    <path d="M675 140H690M740 140H760M675 190H690M740 190H760M675 240H690M740 240H760"/>
+  </g>
+
+  <use href="#NC" xlink:href="#NC" transform="translate(250,210)"/>
+  <use href="#NC" xlink:href="#NC" transform="translate(250,240)"/>
+  <use href="#R" xlink:href="#R" transform="translate(690,140)"/>
+  <use href="#R" xlink:href="#R" transform="translate(690,190)"/>
+  <use href="#R" xlink:href="#R" transform="translate(690,240)"/>
+
+  <g font-size="12" fill="#111827">
+    <text x="60" y="92" font-weight="bold">J6  1×8, 2.54 mm → display expansion header</text>
+    <text x="68" y="124">1 VBUS</text><text x="68" y="154">2 GND</text><text x="68" y="184">3 3V3</text>
+    <text x="68" y="214">4 UART0</text><text x="68" y="244">5 UART0</text>
+    <text x="68" y="274">6 SDA · GPIO16</text><text x="68" y="304">7 SCL · GPIO17</text><text x="68" y="334">8 ALERT · GPIO18</text>
+    <text x="306" y="124" fill="#1d4ed8" font-weight="bold">VBUS_OUT (U2 pin 6, Sheet 1)</text>
+    <text x="306" y="154" fill="#1d4ed8" font-weight="bold">GND</text>
+    <text x="306" y="184" fill="#1d4ed8" font-weight="bold">3V3</text>
+    <text x="356" y="184" fill="#4b5563">supply for U4, U5 and pull-ups</text>
+    <text x="262" y="228" fill="#b91c1c">NC — UART0 stays free for recovery</text>
+    <text x="306" y="274" fill="#1d4ed8" font-weight="bold">SDA</text>
+    <text x="306" y="304" fill="#1d4ed8" font-weight="bold">SCL</text>
+    <text x="306" y="334" fill="#1d4ed8" font-weight="bold">ALERT</text>
+    <text x="60" y="382" fill="#4b5563">Pins 6/7/8 = GPIO16/17/18 = ESP32-S3R8 pins 22/23/24 (confirmed; matches the upstream schematic, not its HARDWARE_REFERENCE.md).</text>
+    <text x="60" y="398" fill="#4b5563">Socket or pin header, and the header's position, are set by the owner's own measurement of the display board.</text>
+
+    <text x="640" y="110" font-weight="bold" font-size="13">I²C pull-ups</text>
+    <text x="670" y="144" text-anchor="end" fill="#1d4ed8" font-weight="bold">3V3</text>
+    <text x="670" y="194" text-anchor="end" fill="#1d4ed8" font-weight="bold">3V3</text>
+    <text x="670" y="244" text-anchor="end" fill="#1d4ed8" font-weight="bold">3V3</text>
+    <text x="715" y="130" text-anchor="middle">R14 4.7k</text>
+    <text x="715" y="180" text-anchor="middle">R15 4.7k</text>
+    <text x="715" y="230" text-anchor="middle">R16 10k</text>
+    <text x="766" y="144" fill="#1d4ed8" font-weight="bold">SDA</text>
+    <text x="766" y="194" fill="#1d4ed8" font-weight="bold">SCL</text>
+    <text x="766" y="244" fill="#1d4ed8" font-weight="bold">ALERT</text>
+    <text x="640" y="286" font-weight="bold" font-size="13">Bus nets</text>
+    <text x="640" y="306">SDA: J6.6 · U4.9 · U5.20 · R14</text>
+    <text x="640" y="324">SCL: J6.7 · U4.10 · U5.19 · R15</text>
+    <text x="640" y="342">ALERT: J6.8 · U4.2 · R16 (open-drain, ADS1115 only)</text>
+    <text x="640" y="360">Speed: 100 kHz maximum (MCP9600 limit)</text>
+  </g>
+</svg>

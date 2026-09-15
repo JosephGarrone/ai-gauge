@@ -17,3 +17,24 @@ firmware/sdkconfig.old
 compile_commands.json
 *.swp
 .DS_Store
+
+# KiCad 10 (pcb/)
+# Local history is KiCad's own per-project git repo -- never commit it.
+pcb/**/.history/
+# Lock files held while a board or schematic is open.
+pcb/**/*.lck
+# Per-user view state (open layers, zoom, window layout).
+pcb/**/*.kicad_prl
+# Automatic backups and autosave files.
+pcb/**/*-backups/
+pcb/**/_autosave-*
+pcb/**/*.bak
+pcb/**/*-bak
+pcb/**/\#auto_saved_files\#
+# Footprint/symbol caches and ERC/DRC reports.
+pcb/**/fp-info-cache
+pcb/**/*.rpt
+# Fabrication outputs are regenerated from the board file.
+pcb/**/gerbers/
+pcb/**/fab/
+pcb/**/production/

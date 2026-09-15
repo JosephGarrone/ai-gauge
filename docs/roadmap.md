@@ -117,7 +117,7 @@ network, not a considered security posture. See *Security* in
 
 The actual product goal. **Blocked on hardware that does not exist yet.**
 
-- Build the sensor board: ADS1115 + MCP9600 on `I2C_NUM_1` (GPIO17/18), the 2:1 divider, and
+- Build the sensor board: ADS1115 + MCP9600 on `I2C_NUM_1` (SDA GPIO16, SCL GPIO17, alert GPIO18), the 2:1 divider, and
   the 12V automotive conditioning described in [sensor-frontend.md](sensor-frontend.md)
 - `sensor_hub`: drivers, scaling, IIR filtering, lock-free snapshot publication
 - Calibration values as settings, not constants, so a different sensor is not a recompile

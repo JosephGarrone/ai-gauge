@@ -13,9 +13,9 @@ Re-uses the vehicle's existing boost and EGT sensors. Because no internal ADC is
 
 | Signal | GPIO | Notes |
 |---|---|---|
-| SDA | 17 | Header pin 6 |
-| SCL | 18 | Header pin 7 |
-| ALERT / DRDY | 16 | Header pin 8, open-drain, shared, pulled up |
+| SDA | 16 | Header pin 6 |
+| SCL | 17 | Header pin 7 |
+| ALERT / DRDY | 18 | Header pin 8, open-drain, ADS1115 only, pulled up |
 | 3V3 | — | Header pin 3, logic supply |
 | 5V | — | Header pin 1 (VBUS) — **see the power warning below** |
 | GND | — | Header pin 2 |
@@ -119,7 +119,7 @@ the firmware's scaling constants must match the sensor actually fitted.
 
 ### Sampling
 
-250 SPS continuous-conversion mode, with DRDY on GPIO16 or simple periodic polling. A boost
+250 SPS continuous-conversion mode, with DRDY on GPIO18 or simple periodic polling. A boost
 gauge needs to feel instantaneous, so oversample lightly and let the needle damping in
 `<source damping="...">` do the visual smoothing rather than over-filtering the raw signal.
 
@@ -141,7 +141,7 @@ MAX31855/MAX31856 are the common alternatives but are SPI, and no SPI pins remai
 | Range | Up to ~1372°C for K-type — beyond any realistic EGT |
 
 Reads `T_hot` directly in °C over I2C; no scaling maths needed. Its alert outputs are **push-pull**
-(datasheet section 3), so they must not join the shared open-drain ALERT line on GPIO16. They
+(datasheet section 3), so they must not join the shared open-drain ALERT line on GPIO18. They
 are left unconnected; thermocouple faults are read by polling. See
 [rear-pcb-parts.md](rear-pcb-parts.md).
 
