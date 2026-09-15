@@ -171,8 +171,9 @@ cost is measured and still holds the frame budget.
 | Authoring interface document for the web app | done: [gauge-xml-interface.md](gauge-xml-interface.md) |
 | Face editor ([config-app.md](config-app.md), [ADR 0007](adr/0007-face-editor-static-app-with-parser-port.md)) | **built**: every schema element, shape editor with SVG path import, live preview with damping/alerts/peak, validation, import/export, browser library. 47 tests; the parser port matches the firmware parser on all 480 corpus documents. Checked by rendering in headless Chrome, **not yet used by a person on a real browser session, and not yet deployed** |
 | GitHub Pages publishing | `pages.yml` written: editor at `/editor/`, flashing page at `/` with release firmware; `release.yml` now calls it. **Not yet run**: needs a push to `main`, and the `github-pages` environment must allow `main` |
-| Upload from the editor | client written against §7, **blocked** by the firmware gaps below; never run against a gauge |
-| Browser access to the device (CORS, HTTPS/mixed content, raw XML download) | open firmware gaps, no decision yet; see [gauge-xml-interface.md §8](gauge-xml-interface.md#8-known-gaps-for-a-browser-app). Serving the editor from the gauge itself is one option, recorded in ADR 0007 |
+| Browser access to the device ([ADR 0008](adr/0008-gauge-serves-face-editor.md)) | **verified on hardware**: the firmware embeds the gzipped editor and serves it at `/editor/`, adds raw XML download and loopback-only CORS. 66.7 fps unchanged, `httpd` stack and internal heap measured ([performance.md](performance.md)) |
+| Managing a gauge's faces from the editor | **verified on hardware** in Chrome: list with the face on screen marked, add, update with confirmation, edit without renaming, delete, and deleting the face on screen switches the gauge to another. Firmware refuses a mismatched id and a 13th face. Lowest `httpd` stack 2,192 B ([performance.md](performance.md)) |
+| Upload from the editor | **verified on hardware** in Chrome: `boost_custom` uploaded from the gauge-served editor with 0 warnings reported by the gauge, a face opened back from the gauge, and the dev-server path worked by address. **Not yet used by a person** |
 
 ## M8 — Portability
 

@@ -20,7 +20,8 @@ import { createSim, needleAlertColor, readoutColor, resetPeak, stepSim } from '.
 import { emptyLibrary, listFaces, loadLibrary, newKey, saveLibrary, uniqueId } from './store.js';
 import { validateModel } from './validate.js';
 import {
-    DeviceError, deleteDeviceFace, getStatus, listDeviceFaces, pageBlockReason, uploadFace,
+    DeviceError, deleteDeviceFace, detectGauge, gaugeEditorUrl, getFaceInventory, getFaceXml, pageBlockReason, uploadFace,
+    uploadPlan,
 } from './device.js';
 import { Form, ask, button, h, itemCard, presenceToggle, row, sectionHead, toast } from './ui.js';
 
@@ -49,6 +50,8 @@ const app = {
     redo: [],
     coalesce: { key: null, at: 0 },
     section: 'gauge',
+    /** The /api/status of the gauge that served this page, or null when it was not served by one. */
+    gauge: null,
     form: null,
     editors: [],
     ui: { shapes: {} },
@@ -164,7 +167,11 @@ function describeWarnings(warnings) {
         h('ul', { class: 'warning-list' }, warnings.map((w) => h('li', {}, w))));
 }
 
-async function importXml(text, name) {
+/**
+ * @param {{ fromGauge?: boolean }} opts fromGauge: the file came from a gauge, so it must keep its id.
+ *   Renaming it would make a later upload add a second face rather than update the one it came from.
+ */
+async function importXml(text, name, { fromGauge = false } = {}) {
     const r = parseGauge(text);
     if (!r.ok) {
         await ask(`Cannot import ${name}`, h('p', {}, `The device would reject this file: ${r.error}.`));
@@ -173,8 +180,12 @@ async function importXml(text, name) {
     const existing = listFaces(app.lib).find((f) => f.model.id === r.model.id);
     if (existing) {
         const choice = await ask(`A face called '${r.model.id}' already exists`,
-            h('p', {}, 'Replace the copy in this browser, or keep both?'),
-            [['Cancel', null], ['Keep both', 'copy'], ['Replace', 'replace', 'danger']]);
+            h('p', {}, fromGauge
+                ? 'Replace the copy in this browser with the gauge\'s? Changes made here and not uploaded are lost.'
+                : 'Replace the copy in this browser, or keep both?'),
+            fromGauge
+                ? [['Cancel', null], ['Replace', 'replace', 'danger']]
+                : [['Cancel', null], ['Keep both', 'copy'], ['Replace', 'replace', 'danger']]);
         if (choice === null) return;
         if (choice === 'replace') {
             app.lib.faces[existing.key] = { model: r.model, updated: Date.now() };
@@ -679,68 +690,197 @@ const INSPECTORS = {
         ];
     },
 
-    device(form) {
+    device() {
+        // Served by a gauge, requests go to it at the page's own origin ('' as the host).
+        const gauge = app.gauge;
         const blocked = pageBlockReason();
-        const log = h('div', { class: 'device-log', 'aria-live': 'polite' });
+        // Kept across re-renders: opening a face re-renders this section.
+        const dev = app.ui.device ??= {
+            log: h('div', { class: 'device-log', 'aria-live': 'polite' }),
+            inventory: null,
+            // Every request to the gauge runs in turn. Overlapping ones let an older face list land
+            // after a newer one, showing a face that was just deleted or hiding one just added.
+            queue: Promise.resolve(),
+            refreshQueued: false,
+        };
         const host = h('input', { type: 'text', placeholder: 'ai-gauge-1a2b.local or 192.168.1.50', spellcheck: 'false', value: app.lib.deviceHost ?? '' });
-        host.addEventListener('input', () => { app.lib.deviceHost = host.value.trim(); saveLibrary(app.lib); });
+        const facesBox = h('div', { class: 'gauge-faces' });
+        const actionBox = h('div', { class: 'toolbar' });
 
-        const report = (title, body, kind = 'info') => log.prepend(h('div', { class: `log-entry ${kind}` }, h('strong', {}, title), body ? h('div', {}, body) : null));
-        const run = (label, fn) => async () => {
-            if (!host.value.trim()) {
+        const report = (title, body, kind = 'info') => dev.log.prepend(h('div', { class: `log-entry ${kind}` }, h('strong', {}, title), body ? h('div', {}, body) : null));
+        const run = (label, fn) => () => {
+            if (blocked) {
+                report(label, blocked, 'error');
+                return dev.queue;
+            }
+            if (!gauge && !host.value.trim()) {
                 report(label, 'Enter the gauge\'s address first. It is shown on the gauge\'s settings page.', 'warning');
+                return dev.queue;
+            }
+            const addr = gauge ? '' : host.value.trim();
+            dev.queue = dev.queue.then(async () => {
+                try {
+                    await fn(addr);
+                } catch (err) {
+                    report(`${label} failed`, err instanceof DeviceError ? err.message : String(err), 'error');
+                }
+            });
+            return dev.queue;
+        };
+
+        const describe = (s) => `${s.channel}, ${s.min}–${s.max} ${s.unit}${s.warnings ? ` · ${s.warnings} warning(s)` : ''}`;
+        // replaceChildren() with h()'s rules: it would otherwise print null as text and not flatten arrays.
+        const fill = (el, ...children) => el.replaceChildren(...children.flat(Infinity).filter((c) => c !== null && c !== undefined && c !== false));
+
+        const renderActions = () => {
+            const id = app.model.id;
+            const plan = dev.inventory ? uploadPlan(dev.inventory, id) : null;
+            fill(actionBox,
+                button(plan === 'update' ? `Update '${id}' on gauge` : plan === 'add' ? `Add '${id}' to gauge` : `Upload '${id}'`, upload,
+                    { class: 'primary', disabled: plan === 'full' }),
+                plan === 'full' ? h('span', { class: 'face-meta' }, `The gauge is full (${dev.inventory.max} faces). Delete one to add this face.`) : null);
+        };
+
+        const renderFaces = () => {
+            renderActions();
+            if (!dev.inventory) {
+                fill(facesBox);
                 return;
             }
+            const { faces, active, max } = dev.inventory;
+            fill(facesBox,
+                h('div', { class: 'face-rows-head' },
+                    h('strong', {}, `${faces.length} of ${max} faces on the gauge`),
+                    button('Refresh', refresh)),
+                faces.length ? null : h('p', { class: 'face-meta' }, 'None stored, so the gauge is showing its built-in face.'),
+                faces.map((f) => h('div', { class: 'face-row' },
+                    h('div', { class: 'face-name' },
+                        h('strong', {}, f.id),
+                        f.id === active ? h('span', { class: 'face-badge on' }, 'On screen') : null,
+                        f.id === app.model.id ? h('span', { class: 'face-badge' }, 'Open here') : null,
+                        h('div', { class: 'face-meta' }, f.error ? `The gauge cannot load it: ${f.error}` : describe(f.summary))),
+                    h('div', { class: 'face-actions' },
+                        button('Edit', run(`Open '${f.id}'`, async (addr) => {
+                            await importXml(await getFaceXml(addr, f.id), `${f.id}.xml`, { fromGauge: true });
+                        })),
+                        button('Delete', run(`Delete '${f.id}'`, (addr) => removeFace(addr, f.id)), { class: 'danger' })))));
+        };
+
+        const readGauge = run('Read the gauge', async (addr) => {
+            dev.refreshQueued = false;
             try {
-                await fn(host.value.trim());
+                dev.inventory = await getFaceInventory(addr);
             } catch (err) {
-                report(`${label} failed`, err instanceof DeviceError ? err.message : String(err), 'error');
+                dev.inventory = null;
+                throw err;
+            } finally {
+                renderFaces();
             }
+        });
+        // A refresh already waiting in the queue will read the gauge's latest state; another adds nothing.
+        const refresh = () => {
+            if (dev.refreshQueued) return dev.queue;
+            dev.refreshQueued = true;
+            return readGauge();
         };
 
         const upload = run('Upload', async (addr) => {
+            const id = app.model.id;
             const v = validateModel(app.model);
             if (v.issues.some((i) => i.severity === 'error')) {
-                report('Upload', 'Fix the errors in the Issues panel first. The gauge would reject or change this face.', 'warning');
+                report('Not uploaded', 'Fix the errors in the Issues panel first. The gauge would reject or change this face.', 'warning');
                 return;
             }
-            const faces = await listDeviceFaces(addr);
-            if (!faces.includes(app.model.id) && faces.length >= LIMITS.deviceFaces) {
-                report('Upload', `The gauge already lists ${faces.length} faces, its maximum. Delete one first.`, 'warning');
+            // Decide on the gauge's current state, not on a list read earlier.
+            dev.inventory = await getFaceInventory(addr);
+            renderFaces();
+            const plan = uploadPlan(dev.inventory, id);
+            if (plan === 'full') {
+                report('Not uploaded', `The gauge is full (${dev.inventory.max} faces). Delete one to add '${id}', or change this face's id to one already on the gauge to replace it.`, 'warning');
                 return;
             }
-            const summary = await uploadFace(addr, app.model.id, v.xml);
+            const onScreen = dev.inventory.active === id;
+            if (plan === 'update') {
+                const ok = await ask(`Replace '${id}' on the gauge?`,
+                    h('p', {}, `The gauge's copy is overwritten with this one.${onScreen ? ' It is on screen, so the gauge redraws it straight away.' : ''}`),
+                    [['Cancel', false], ['Replace', true, 'danger']]);
+                if (!ok) return;
+            }
+            const summary = await uploadFace(addr, id, v.xml);
+            const what = plan === 'update' ? 'Updated' : 'Added';
             if (summary.warnings) {
-                report('Uploaded, with warnings', `The gauge reports ${summary.warnings} warning(s), but this editor predicted none. Please report this as a bug: the editor and firmware disagree.`, 'warning');
+                report(`${what}, with warnings`, `The gauge reports ${summary.warnings} warning(s), but this editor predicted none. Please report this as a bug: the editor and firmware disagree.`, 'warning');
             } else {
-                report('Uploaded', `${summary.id}: ${summary.channel}, ${summary.min}–${summary.max} ${summary.unit}. 0 warnings. If it is the face on screen, the gauge has already redrawn it.`, 'ok');
+                report(`${what} '${id}'`, `${describe(summary)}. 0 warnings. ${onScreen ? 'The gauge has redrawn it.' : 'Pick it in the gauge\'s settings to show it.'}`, 'ok');
             }
+            dev.inventory = await getFaceInventory(addr);
+            renderFaces();
         });
 
+        const removeFace = async (addr, id) => {
+            const inv = dev.inventory;
+            const onScreen = inv?.active === id;
+            const lastOne = (inv?.faces.length ?? 0) <= 1;
+            const ok = await ask(`Delete '${id}' from the gauge?`, h('div', {},
+                h('p', {}, 'Faces kept in this browser are not affected.'),
+                onScreen ? h('p', {}, lastOne
+                    ? 'It is on screen and is the only face stored, so the gauge switches to its built-in face.'
+                    : 'It is on screen, so the gauge switches to another of its faces.') : null),
+            [['Cancel', false], ['Delete', true, 'danger']]);
+            if (!ok) return;
+            await deleteDeviceFace(addr, id);
+            dev.inventory = await getFaceInventory(addr);
+            renderFaces();
+            const now = dev.inventory.active;
+            report(`Deleted '${id}'`, onScreen ? `The gauge now shows ${now ? `'${now}'` : 'its built-in face'}.` : null, 'ok');
+        };
+
+        // What this page can and cannot do, and the way round it when it cannot.
+        const curl = h('code', {}, `curl -X PUT --data-binary @${app.model.id || 'face'}.xml http://<gauge>/api/config/${app.model.id || '<id>'}`);
+        let callout;
+        if (gauge) {
+            callout = h('div', { class: 'callout ok' },
+                h('strong', {}, `Connected to ${gauge.wifi.hostname}`),
+                h('p', {}, `This editor was served by the gauge, firmware ${gauge.version}, so it can upload to it directly.`));
+        } else if (blocked) {
+            const link = h('a', { href: '#', target: '_blank', rel: 'noopener' });
+            const syncLink = () => {
+                let url = '';
+                try {
+                    url = host.value.trim() ? gaugeEditorUrl(host.value) : '';
+                } catch {
+                    // Not a valid address yet.
+                }
+                link.textContent = url || 'http://<gauge>/editor/';
+                link.href = url || '#';
+            };
+            syncLink();
+            host.addEventListener('input', syncLink);
+            callout = h('div', { class: 'callout warning' },
+                h('strong', {}, 'Open the editor from your gauge to upload'),
+                h('p', {}, blocked),
+                h('p', {}, 'Enter its address and open ', link, '. Faces kept in this browser do not carry over, so download this one first and import it there.'),
+                h('p', {}, 'Or upload the downloaded file with ', curl, '.'));
+        } else {
+            callout = h('div', { class: 'callout warning' },
+                h('strong', {}, 'Connecting from this page'),
+                h('p', {}, 'The gauge answers other pages only when they are served from http://localhost, like the development server. From anywhere else, open the editor on the gauge itself at http://<gauge>/editor/.'));
+        }
+        host.addEventListener('input', () => { app.lib.deviceHost = host.value.trim(); saveLibrary(app.lib); });
+
+        renderFaces();
+        // On a gauge, always show its current faces; elsewhere, wait for an address and Connect.
+        if (gauge) refresh();
+
         return [
-            sectionHead('Device', 'Send this face straight to a gauge on your network.'),
-            h('div', { class: `callout ${blocked ? 'error' : 'warning'}` },
-                h('strong', {}, blocked ? 'Not available from this page' : 'Needs a firmware change'),
-                h('p', {}, blocked ?? 'The gauge sends no CORS headers, so browsers refuse to read its replies to a page served from anywhere else, including this one. Expect these buttons to fail until the firmware allows it.'),
-                h('p', {}, 'Until then: download the XML, then upload it with ', h('code', {}, `curl -X PUT --data-binary @${app.model.id || 'face'}.xml http://<gauge>/api/config/${app.model.id || '<id>'}`), '.')),
-            h('div', { class: 'field wide' }, h('label', { class: 'field-label' }, 'Gauge address'), host),
-            h('div', { class: 'toolbar' },
-                button('Upload this face', upload, { class: 'primary' }),
-                button('Check status', run('Status', async (addr) => {
-                    const s = await getStatus(addr);
-                    report('Status', h('pre', {}, JSON.stringify(s, null, 2)), 'ok');
-                })),
-                button('List faces', run('List', async (addr) => {
-                    const faces = await listDeviceFaces(addr);
-                    report(`${faces.length} face(s) on the gauge`, faces.join(', ') || 'none', 'ok');
-                })),
-                button('Delete this id from gauge', run('Delete', async (addr) => {
-                    const ok = await ask(`Delete ${app.model.id} from the gauge?`, h('p', {}, 'The copy in this browser is kept.'), [['Cancel', false], ['Delete', true, 'danger']]);
-                    if (!ok) return;
-                    await deleteDeviceFace(addr, app.model.id);
-                    report('Deleted', `${app.model.id} was removed from the gauge.`, 'ok');
-                }), { class: 'danger' })),
-            log,
+            sectionHead('Device', 'Add, update and remove the faces stored on a gauge.'),
+            callout,
+            gauge ? null : h('div', { class: 'field wide' }, h('label', { class: 'field-label' }, 'Gauge address'), host),
+            gauge || blocked ? null : h('div', { class: 'toolbar' }, button('Connect', refresh)),
+            blocked ? null : h('h3', { class: 'device-heading' }, 'The face open here'),
+            blocked ? null : actionBox,
+            blocked ? null : facesBox,
+            dev.log,
         ];
     },
 };
@@ -896,6 +1036,8 @@ function frame(now) {
 
 async function start() {
     app.lib = loadLibrary();
+    // Before the first render: the Device section and the default face depend on it.
+    app.gauge = await detectGauge();
     // #needle opens a section; ?example=boost_custom.xml opens a shipped face. Both are linkable.
     const linked = location.hash.slice(1);
     const known = (id) => SECTIONS.some(([s]) => s === id);

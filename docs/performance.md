@@ -312,6 +312,38 @@ the scarcest resource on the board, so anything that adds a task, a stack, or a 
 must be measured. The method above (a failed-allocation callback plus a periodic `vTaskList()`
 dump) is the quickest way to find where it went.
 
+### Face editor served by the gauge (ADR 0008)
+
+Measured 2026-09-15 on hardware, with WiFi connected and the needle sweeping. The editor is 19 files,
+67KB gzipped, embedded in the app image and sent straight from flash. The handler allocates nothing,
+and adds no task.
+
+| Measurement | Result |
+|---|---|
+| App image | 1.76MB, 58% of the 4MB slot free |
+| Internal free heap after startup | 9,403 B (8.6KB recorded before this change) |
+| Lowest internal free heap since boot, from `/api/status` | 3,587 B |
+| Lowest free `httpd` stack, after loading the editor three times, two uploads, face lists, raw XML downloads and CORS checks | 2,748 B (2,500 B recorded after an upload before this change) |
+| Dial while the editor loaded over WiFi | 66.6–66.7 fps, render 7.7 ms, unchanged |
+| Editor load in Chrome, 18 requests over at most four connections | 0.42–0.58 s to `DOMContentLoaded` |
+
+`/api/status` now reports `internal_min` and `httpd_stack_min`, so both can be checked without a
+serial cable.
+
+**Deleting the face on screen** rebuilds the dial on the HTTP server task: it lists the remaining
+faces, loads one and builds its face inside the `DELETE` handler. The list and config it works with
+are in PSRAM. Measured twice in a row with serial attached, with no reset:
+
+| Measurement | Result |
+|---|---|
+| Delete request to replacement face built | ~80 ms (`boost` to `boost_custom`), ~50 ms (`boost_custom` to `boost`) |
+| Lowest free `httpd` stack after both | **2,192 B**, the lowest recorded, against 2,352 B from uploads, edits and deletes of faces not on screen |
+| Lowest internal free heap | 3,127 B, unchanged by the switch |
+
+**Opening the USB serial port resets this board.** A capture script's open and close each reboot
+the gauge, which looked like a crash during the editor test. Across a run with no serial port open,
+uptime rose from 65 s to 92 s.
+
 ### Custom shapes (ADR 0006): not yet measured
 
 Implemented 2026-09-14. **Built and host-tested only**: no board was attached, so nothing below

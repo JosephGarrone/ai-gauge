@@ -271,6 +271,44 @@ esp_err_t gauge_store_load(const char *id, gauge_config_t *cfg, char *err, size_
     return ESP_OK;
 }
 
+/* Every stored face, including any gauge_store_list() would not report. */
+static int count_faces(void)
+{
+    DIR *dir = opendir(GAUGE_DIR);
+    if (dir == NULL) {
+        return 0;
+    }
+
+    const size_t   suffix_len = strlen(XML_SUFFIX);
+    int            count      = 0;
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL) {
+        size_t len = strlen(ent->d_name);
+        if (len > suffix_len && strcmp(ent->d_name + len - suffix_len, XML_SUFFIX) == 0) {
+            count++;
+        }
+    }
+
+    closedir(dir);
+    return count;
+}
+
+char *gauge_store_read_xml(const char *id, size_t *len, char *err, size_t err_len)
+{
+    if (!id_is_safe(id) || len == NULL) {
+        set_err(err, err_len, "invalid gauge name");
+        return NULL;
+    }
+    if (!s_mounted) {
+        set_err(err, err_len, "storage not mounted");
+        return NULL;
+    }
+
+    char path[128];
+    path_for(id, path, sizeof(path));
+    return read_file(path, len, err, err_len);
+}
+
 esp_err_t gauge_store_save(const char *id, const char *xml, size_t len,
                            char *err, size_t err_len)
 {
@@ -302,14 +340,33 @@ esp_err_t gauge_store_save(const char *id, const char *xml, size_t len,
     }
 
     gauge_config_err_t perr = gauge_config_parse(xml, len, parsed);
-    free(parsed);
     if (perr != GAUGE_CONFIG_OK) {
+        free(parsed);
         set_err(err, err_len, "%s", gauge_config_err_str(perr));
         return ESP_ERR_INVALID_ARG;
     }
 
+    /*
+     * The file name is the face's identity everywhere: the picker, the API and the active-gauge
+     * setting. A file claiming a different id would be listed under one name and describe itself
+     * with another, so "update this face" would stop meaning one thing.
+     */
+    if (strcmp(parsed->id, id) != 0) {
+        set_err(err, err_len, "the face's id is '%s', not '%s'", parsed->id, id);
+        free(parsed);
+        return ESP_ERR_INVALID_ARG;
+    }
+    free(parsed);
+
     char path[128];
     path_for(id, path, sizeof(path));
+
+    /* Past the limit a face would be stored but never listed, so it could not be found again. */
+    struct stat st;
+    if (stat(path, &st) != 0 && count_faces() >= GAUGE_STORE_MAX_GAUGES) {
+        set_err(err, err_len, "gauge is full (%d faces); delete one first", GAUGE_STORE_MAX_GAUGES);
+        return ESP_ERR_NO_MEM;
+    }
 
     /* Write to a temporary file and rename, so an interrupted write cannot truncate the
      * config that was already there. */

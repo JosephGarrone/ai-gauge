@@ -55,29 +55,54 @@ Served on port 80, at most four concurrent connections.
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/` | Management page, or the setup form while in setup mode |
-| `GET` | `/api/status` | Firmware and IDF version, uptime, WiFi state, free heap, storage state |
-| `GET` | `/api/gauges` | `{"gauges":["boost","egt"]}` |
+| `GET` | `/api/status` | Firmware and IDF version, uptime, WiFi state, free and lowest internal heap, lowest free HTTP-server stack, the face on screen (`active_gauge`, empty for the built-in face), storage state |
+| `GET` | `/api/gauges` | `{"gauges":["boost","egt"],"max":12}` |
 | `GET` | `/api/config/<id>` | Parses the stored config and returns a summary: channel, unit, range, warning count |
+| `GET` | `/api/config/<id>.xml` | The stored XML exactly as written, for loading back into the face editor |
 | `PUT` | `/api/config/<id>` | Upload gauge XML (body is the XML, max 16KB) |
 | `DELETE` | `/api/config/<id>` | Remove a gauge config |
+| `OPTIONS` | `/api/config/<id>` | CORS preflight, answered for loopback origins only (below) |
 | `POST` | `/api/wifi` | Form-encoded `ssid` and `password`; used by the setup page |
 | `POST` | `/api/ota` | Raw application image as the body |
+| `GET` | `/editor/` | The face editor, built into the firmware image |
 
-`GET /api/config/<id>` returns a parsed summary rather than the raw XML. Downloading the raw
-file for editing is an open item for the web app.
+`GET /api/config/<id>` returns a parsed summary; add `.xml` for the file itself. The file is
+returned even if it no longer parses, so it can be fixed.
+
+### Browser access and the face editor
+
+Decided in [ADR 0008](adr/0008-gauge-serves-face-editor.md); verified on hardware 2026-09-15.
+
+- **The gauge serves the face editor at `/editor/`**, linked from the management page. The build
+  gzips `tools/config-app` and the shipped faces into the application image
+  (`editor_bundle.cmake`), and `editor_get()` sends each file from flash with
+  `Content-Encoding: gzip`. The editor shares the API's origin, so the browser applies no CORS or
+  mixed-content rules, and it updates with every OTA.
+- **CORS is allowed for loopback origins only** (`http://localhost`, `127.0.0.1`, `[::1]`, any
+  port), on status, the gauge list and config. That exists so the editor's dev server can talk to a
+  real gauge. Any other origin gets no CORS headers, and a `403` preflight.
+- GitHub Pages cannot reach a gauge at all (an HTTPS page calling a plain-HTTP device). Its editor
+  links to the gauge's own copy instead.
 
 ### Config upload
 
 `PUT /api/config/<id>`, handled by `gauge_store_save()`:
 
 1. The body is **parsed and validated before anything is written**. A file that does not parse
-   is rejected with a `400` naming the reason, and the existing config is untouched.
+   is rejected with a `400` naming the reason, and the existing config is untouched. So is a file
+   whose `<gauge id>` differs from `<id>` in the URL, and a new id once 12 faces are stored;
+   replacing an existing face is always allowed. Both rules keep every stored face listed, and
+   addressed by one name.
 2. It is written to `<id>.xml.tmp` and renamed into place, so an interrupted write cannot
    truncate the config already on the device.
 3. If it is the gauge currently on screen, the face is rebuilt live, **without a reboot**.
 
 Ids are restricted to letters, digits, `_` and `-`, so a request cannot escape the gauges
 directory.
+
+Deleting the face on screen switches the gauge to the first remaining face that loads, or to the
+built-in face if none does, and makes it the selected gauge, as startup would. The settings page
+says what happened.
 
 ### Security
 
@@ -89,6 +114,11 @@ posture. Stated plainly:
 - Anyone on the same network can replace configs or reflash the device.
 - The setup network is **open** while the device is unprovisioned. Anyone in range during
   that window can join it and submit credentials.
+- Web pages: CORS is echoed only to loopback origins, so another site cannot pass the preflight
+  that a config `PUT` or `DELETE` needs. `POST /api/ota` and `POST /api/wifi` need no preflight,
+  though, so a page on any site could send one to a gauge on the viewer's network without reading
+  the reply, where the browser does not itself restrict public pages from calling private
+  addresses. `esp_ota_end()` rejects an invalid image, but not a valid image from someone else.
 
 Before exposure to any untrusted network this needs, at minimum, a shared secret on the
 mutating endpoints and signature verification on OTA images.
@@ -148,9 +178,5 @@ is recorded in [performance.md](performance.md) and [display-pipeline.md](displa
 - Captive-portal DNS redirect for the setup network.
 - Settings-page controls to disable WiFi and to forget credentials (`net_svc_forget_credentials()`
   exists but is not wired to the UI).
-- Raw XML download for `GET /api/config/<id>`.
-- Browser access for the M7 web app: no CORS headers or `OPTIONS` handler, and plain HTTP is
-  blocked from an `https://` page such as GitHub Pages. No approach decided; see
-  [gauge-xml-interface.md](gauge-xml-interface.md#8-known-gaps-for-a-browser-app).
 - Telemetry staleness.
 - Authentication, TLS and signed OTA images.

@@ -83,6 +83,7 @@ the architecture:
 | [0005](docs/adr/0005-consume-waveshare-bsp.md) | Use the upstream `waveshare/esp32_s3_touch_amoled_1_75` BSP | Maintained CO5300/CST9217 drivers; effort goes into rendering instead |
 | [0006](docs/adr/0006-custom-shapes-as-polygons.md) | Custom tick/needle/hub shapes are SVG-style polygons and circles, filled by our own anti-aliased rasteriser (`gauge_shape`) | Keeps the needle's tight dirty box; LVGL triangles seam, rotated images blow the budget |
 | [0007](docs/adr/0007-face-editor-static-app-with-parser-port.md) | The face editor is a dependency-free static web app carrying a line-for-line JS port of the gauge XML parser, held to the C by a differential test in CI | Its device verdict must follow the firmware's forgiving rules exactly; no JS toolchain in a C repository |
+| [0008](docs/adr/0008-gauge-serves-face-editor.md) | The firmware embeds the gzipped editor and serves it at `/editor/`; CORS only for loopback origins | Same origin avoids CORS and mixed content; embedded, not on LittleFS, so OTA keeps editor and parser in step; a wildcard origin would let any site replace faces |
 
 ---
 
@@ -142,7 +143,7 @@ documented and accepted trade. Numbers and the two designs that failed first are
 
 **Custom shapes (ADR 0006) are built and host-tested only**: not yet run on a board, frame cost unmeasured.
 
-**The face editor (`tools/config-app`) is built and tested, not yet deployed.** Its parser is a port of `gauge_config.c`: change both in the same commit, or CI's differential test fails. Uploading from it is blocked by the firmware's missing CORS and HTTP-only API. See [docs/config-app.md](docs/config-app.md).
+**The face editor (`tools/config-app`) is built into the firmware and served by the gauge at `/editor/`**, which is where it uploads from; GitHub Pages cannot reach a gauge, and its deploy has not run yet. Its parser is a port of `gauge_config.c`: change both in the same commit, or CI's differential test fails. Every editor file ships in the app image (`net_svc/editor_bundle.cmake`), so editor changes need a firmware build. See [docs/config-app.md](docs/config-app.md).
 
 Faces load from `/storage/gauges/*.xml` on LittleFS, falling back to the next available
 config and then to the compiled-in face. All three paths are verified on hardware.

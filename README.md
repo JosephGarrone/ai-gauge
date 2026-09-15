@@ -29,9 +29,10 @@ Full instructions: [docs/build-and-flash.md](docs/build-and-flash.md).
 Not developing the firmware? Every tagged release publishes a browser-based installer — flash
 from Chrome or Edge with no toolchain. See [docs/ci-release.md](docs/ci-release.md).
 
-To design a face, open the **face editor** at `/editor/` on the same GitHub Pages site: watch it move,
-check exactly what the gauge will make of it, and download the XML. See
-[docs/config-app.md](docs/config-app.md).
+To design a face, open the **face editor**: watch it move, check exactly what the gauge will make of
+it, and download the XML. Every gauge serves it at `http://ai-gauge-XXXX.local/editor/`, and opened
+from there it uploads straight to that gauge. A copy for designing without a gauge is at `/editor/`
+on the GitHub Pages site. See [docs/config-app.md](docs/config-app.md).
 
 ## Documentation
 
@@ -117,8 +118,9 @@ Detail and exit criteria in [docs/roadmap.md](docs/roadmap.md).
 M6 so far: needle alert flash and peak-hold are verified on hardware; the chime is done but
 silent (no speaker). Min/max recall is next, and SD datalogging waits for a card.
 
-M7 so far: the face editor is built and tested and awaits its first Pages deploy; uploading faces
-from it waits on firmware support for browser access.
+M7 so far: the gauge serves the face editor, and faces upload from it, verified on hardware. The
+GitHub Pages copy awaits its first deploy, and the frame cost of a custom-shaped needle is still to
+be measured.
 
 Software comes before sensors deliberately. The sensor board still has to be built, and the
 firmware treats a simulated source, a network feed and a real sensor identically — so the

@@ -210,6 +210,19 @@ h3.sub { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; 
 .callout.error strong { color: var(--error); }
 .callout.warning { border-color: #5a4515; background: #1c160a; }
 .callout.warning strong { color: var(--warning); }
+.callout.ok { border-color: #1b4d2c; background: #0c1a11; }
+.callout.ok strong { color: var(--ok); }
+
+/* Faces stored on a gauge, in the Device section. */
+.device-heading { margin: 1rem 0 0.4rem; font-size: 0.95rem; }
+.gauge-faces { display: grid; gap: 0.4rem; margin: 1rem 0; }
+.face-rows-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.face-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.5rem 0.6rem; border: 1px solid #2a2a30; border-radius: var(--radius); }
+.face-name { min-width: 0; }
+.face-meta { color: var(--muted); font-size: 0.85em; }
+.face-actions { display: flex; gap: 0.4rem; }
+.face-badge { margin-left: 0.4rem; padding: 0 0.45rem; border: 1px solid var(--muted); border-radius: 999px; color: var(--muted); font-size: 0.75em; }
+.face-badge.on { border-color: var(--ok); color: var(--ok); }
 
 /* ------------------------------------------------------------- shape editor ---- */
 

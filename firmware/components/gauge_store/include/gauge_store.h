@@ -66,11 +66,27 @@ void gauge_store_list(gauge_store_list_t *out);
 esp_err_t gauge_store_load(const char *id, gauge_config_t *cfg, char *err, size_t err_len);
 
 /**
+ * @brief Read one configuration's XML exactly as stored, for loading back into the face editor.
+ *
+ * Not parsed: a file the gauge rejects is still returned, so it can be fixed.
+ *
+ * @param id       Configuration id (filename stem).
+ * @param[out] len Length of the file in bytes.
+ * @param[out] err Optional buffer for a message, as for gauge_store_load().
+ * @param err_len  Size of @p err.
+ * @return A NUL-terminated buffer in PSRAM that the caller frees, or NULL on failure.
+ */
+char *gauge_store_read_xml(const char *id, size_t *len, char *err, size_t err_len);
+
+/**
  * @brief Write a configuration, replacing any existing one with the same id.
  *
  * Validates before replacing: the XML is parsed first, and an existing file is left untouched
  * if it does not parse. That is what stops a bad upload leaving a vehicle with a blank gauge.
- * Intended for the HTTP config upload in M4.
+ *
+ * Also refused, so that every stored face is listed and addressed by its own id:
+ * - a file whose `<gauge id>` differs from @p id
+ * - a new id once GAUGE_STORE_MAX_GAUGES faces are stored (replacing one is always allowed)
  */
 esp_err_t gauge_store_save(const char *id, const char *xml, size_t len,
                            char *err, size_t err_len);

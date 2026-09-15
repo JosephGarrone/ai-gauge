@@ -97,6 +97,14 @@ bool net_svc_has_credentials(void);
 /** @brief Human-readable form of a state, for the settings page. */
 const char *net_svc_state_str(net_svc_state_t state);
 
+/**
+ * @brief Record which stored face is on screen, reported by `GET /api/status`.
+ *
+ * @param id Configuration id, or "" for the built-in face. Safe to call from any task, and
+ *           before net_svc_start().
+ */
+void net_svc_set_active_gauge(const char *id);
+
 #ifdef __cplusplus
 }
 #endif
