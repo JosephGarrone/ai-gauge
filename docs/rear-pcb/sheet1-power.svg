@@ -93,7 +93,7 @@
     <text x="330" y="352" fill="#4b5563">to next gauge</text>
     <text x="40" y="372" fill="#4b5563">J1 and J2 are wired pin-for-pin. BATT and AUX pass straight through and are not used on this board.</text>
 
-    <text x="312" y="134">F1 0.75 A PTC</text>
+    <text x="312" y="134">F1 1.5 A PTC</text>
     <text x="442" y="142">D1 SMBJ24CA</text>
     <text x="478" y="82" fill="#1d4ed8" font-weight="bold">IGN_F → Sheet 2 (R11)</text>
     <text x="392" y="100" fill="#1d4ed8" font-weight="bold">IGN_F</text>
@@ -133,7 +133,7 @@
   <!-- notes -->
   <g font-size="12" fill="#111827" transform="translate(0,20)">
     <text x="40" y="380" font-weight="bold" font-size="13">Parts on this sheet</text>
-    <text x="40" y="402">F1   Bourns MF-MSMF075/33X · PTC, 1812 · 33 V max · Ihold 0.75 A · Itrip 1.5 A</text>
+    <text x="40" y="402">F1   Bourns MF-MSMF150/24X · PTC, 1812 · 24 V max · Ihold 1.5 A (1.0 A at 60 °C) · Itrip 3.0 A</text>
     <text x="40" y="422">D1   SMBJ24CA · bidirectional TVS, SMB · VWM 24 V · VBR 26.7–29.5 V · VC 38.9 V at 15.4 A</text>
     <text x="40" y="442">D2   Vishay SS26 · Schottky, SMB · 60 V, 2 A · blocks reverse polarity (KiCad D: pin 1 K, pin 2 A)</text>
     <text x="40" y="462">C1   4.7 µF X7R, 1210, ≥50 V (100 V preferred) · C2 100 nF X7R, 0603, 100 V (TI: 100–220 nF at VIN)</text>

@@ -19,7 +19,7 @@ serves both the boost and the EGT gauge.
 | R4 | Two identical power connectors, wired pin-for-pin, so gauges can be **daisy-chained** |
 | R5 | The same board works as a boost gauge (3-pin MAP sensor) or an EGT gauge (2-pin K-type) |
 | R6 | Boost or EGT selected per gauge. Met by the face config, not a switch — see [Mode selection](#mode-selection--no-switch-needed) |
-| R7 | A speaker for the alert chime |
+| R7 | ~~Speaker~~ Out of scope: a speaker plugs straight into the display's H3 connector ([hardware-reference.md](hardware-reference.md)) |
 | R8 | **Every board is identical and swappable** between boost and EGT gauges: no soldering, jumpers, switches or part variants |
 
 ## Block diagram
@@ -45,36 +45,23 @@ Both sensor chips share the one I2C bus; neither needs its own header pin.
 
 ## Interface to the display board
 
-### The header — source conflict, resolve before layout
+### The header
 
 The header is **2.54mm pitch, 8 pins** (upstream `HARDWARE_REFERENCE.md` and Waveshare docs).
-Pins 1–3 agree everywhere. Pins 4–8 do not:
 
-| Pin | Upstream `HARDWARE_REFERENCE.md` (and [hardware-reference.md](hardware-reference.md)) | Upstream schematic, symbol `H2` |
-|---|---|---|
-| 1 | VBUS | VBUS |
-| 2 | GND | GND |
-| 3 | 3V3 | VCC3V3 |
-| 4 | GPIO44 / U0RXD | U0TXD |
-| 5 | GPIO43 / U0TXD | U0RXD |
-| 6 | GPIO17 | GPIO16 |
-| 7 | GPIO18 | GPIO17 |
-| 8 | GPIO16 | GPIO18 |
+| Header pin | Display signal | ESP32-S3R8 pin | Rear PCB role |
+|---|---|---|---|
+| 1 | VBUS | — | 5V in, through the reverse-current block |
+| 2 | GND | — | Ground |
+| 3 | 3V3 | — | Logic supply for the sensor chips and pull-ups |
+| 4, 5 | UART0 | — | Not connected. UART0 stays free for recovery; never drive it from this board |
+| 6 | GPIO16 | 22 | I2C SDA |
+| 7 | GPIO17 | 23 | I2C SCL |
+| 8 | GPIO18 | 24 | ALERT / DRDY (open-drain, ADS1115) |
 
-The UART difference may just be naming from the other device's side. The GPIO order is a real
-disagreement. **Confirm on the actual board with a meter**: a throwaway build that drives each
-of GPIO16/17/18 high in turn.
-
-**The PCB does not need to wait for the answer.** The ESP32-S3 can put I2C and the alert input
-on any of these three GPIOs. So the PCB fixes the *physical* pins, and the firmware maps GPIO
-numbers to them once the test is done:
-
-| Header pin | Rear PCB role |
-|---|---|
-| 6 | I2C SDA |
-| 7 | I2C SCL |
-| 8 | Shared ALERT / DRDY (open-drain) |
-| 4, 5 | Not connected. UART0 stays free for recovery; never drive it from this board |
+Pins 6–8 were confirmed by the project owner (2026-09-14). They match the upstream schematic's
+header symbol (H2). Upstream `HARDWARE_REFERENCE.md` lists them as 17, 18, 16, which is wrong.
+GPIO16 is the ESP32-S3's XTAL_32K_N pad; this board routes it to the header, not to a crystal.
 
 Still to find out: the header's gender and its position relative to the display's centre.
 Measure it, or take it from Waveshare's 3D model (listed under Resources on the Waveshare wiki).
@@ -101,8 +88,9 @@ So the 5V from our buck goes to **pin 1**, with two conditions:
    make up for the diode drop" would make that TVS conduct.
 
 The display's current draw has **not been measured**. We know only that a front-panel USB port
-could not supply it once WiFi started ([build-and-flash.md](build-and-flash.md)). Size the buck
-for at least 1A until measured.
+could not supply it once WiFi started ([build-and-flash.md](build-and-flash.md)). **Design target: 1.5A
+at 5V** (project owner). U1 delivers 2A; U2's absolute-maximum continuous rating is 1.5A, so that
+is the ceiling.
 
 ## Power input and daisy chain
 
@@ -117,9 +105,10 @@ for at least 1A until measured.
 | 3 | Yellow | Unused | Passed through, otherwise unconnected |
 | 4 | Black | Ground | Passed through, board ground |
 
-"Left to right" depends on which side of the plug you look from, and whether the latch faces up
-or down. Before the footprint is fixed, record it against pin 1 of the connector's datasheet
-drawing.
+**"Left to right" is defined** (project owner): looking from the plug side as it is pushed into
+the socket, with the locating tabs facing up, position 1 is the leftmost wire. The same definition
+applies to J3 and J4. Which JST pin number position 1 lands on is checked once with a real PH
+header, which carries JST's circuit-1 mark, during the Q3 measurement. The footprint follows that check.
 
 **Connector family: JST PH (2.0mm pitch) is assumed but not confirmed.** JST XH (2.5mm) and ZH
 (1.5mm) look alike. Measure the pitch across all four pins with calipers: PH ≈ 6.0mm, XH ≈
@@ -132,7 +121,8 @@ All pass-through current flows through board-level copper and connector contacts
 
 - The first board in a chain carries **the current of every gauge after it**. JST's catalogue
   rates PH contacts at 2A. Keep the chain's total under that, and fuse the vehicle feed at or
-  below it.
+  below it. At the full 1.5A-at-5V target, each gauge draws about 0.74A from 12V, so one chain
+  carries about two gauges at full load. More fit at typical loads.
 - Pass-through copper traces are sized for the full chain current, not one gauge.
 - Each board **fuses only its own supply branch** (after the tap from the chain). A shorted
   buck then blows its own fuse, not the whole chain.
@@ -176,7 +166,7 @@ Both front-ends are fitted on every board. The circuit and the scaling are in
 | 2 | White | Signal, 0–5V |
 | 3 | Red | 5V supply |
 
-Same caveat on "left to right" as the power lead. The colours come from the harness; the JRP
+"Left to right" as defined for the power lead. The colours come from the harness; the JRP
 manual has not been checked for this ([sensor-frontend.md](sensor-frontend.md) verification list).
 
 - **5V sensor supply** comes from the buck through a **current limit** (resistor, polyfuse or
@@ -193,7 +183,9 @@ manual has not been checked for this ([sensor-frontend.md](sensor-frontend.md) v
 temperature rises as *falls*: at idle it reads below ambient, and it goes further wrong as the
 exhaust heats. The pins must be marked `T+` / `T−` on the silkscreen, and the probe's leads
 identified. Common colour codes: ANSI yellow `+` / red `−`; IEC green `+` / white `−`. Confirm
-against the probe actually fitted rather than assuming a standard.
+against the probe actually fitted rather than assuming a standard. Two ways to identify the leads
+on the probe itself: in a type K thermocouple the negative (alumel) conductor is magnetic, so a
+magnet picks it out; or warm the tip and read the millivolt sign on a meter.
 
 The copper connector here is the thermocouple's **cold junction**. That is correct, provided
 the connector sits at the same temperature as the MCP9600, which measures that temperature
@@ -234,55 +226,6 @@ face config stored on the display, which does not change when the rear board is 
 hardware role selector is ever wanted anyway, **no GPIO is left to read it with**. It would have
 to go into a spare ADS1115 input (AIN3) and be read at startup.
 
-## Speaker
-
-### What the display board already has
-
-From the upstream schematic, sheet *PA & SPEAKER & MIC*:
-
-| Item | Value |
-|---|---|
-| Amplifier | **NS4150B** (U7), filterless class-D |
-| Amplifier supply | **VCC3V3** — the board's 3.3V rail, not 5V |
-| Enable | GPIO46 (`PA_CTRL`), 10k pull-down |
-| Output | **Bridged (BTL)**: `OUT+` and `OUT−`, through 0Ω positions L4/L5 |
-| Connector | H3, 2-pin. Upstream docs: **MX1.25 2P** (1.25mm pitch) — **not JST PH** |
-
-So **no extra amplifier is needed**. The amplifier is already there; the missing part is the
-speaker, which explains the silent chime recorded in [roadmap.md](roadmap.md). Wire a small
-speaker to an MX1.25 2-pin plug and connect it to H3.
-
-**Never connect either speaker wire to ground.** In a bridged output both terminals are driven
-and neither is a ground. Tying `OUT−` to GND shorts the amplifier's output. For the same reason,
-any external amplifier added later needs a **differential** input.
-
-### Speaker choice
-
-| Parameter | Recommendation | Why |
-|---|---|---|
-| Impedance | **8Ω** | The amplifier runs from the same 3.3V rail as the ESP32 and the AMOLED. 4Ω doubles the peak current it draws |
-| Power rating | ≥1W | Comfortably above what a 3.3V bridge can deliver into 8Ω |
-| Size | Enclosed micro speaker (sealed back chamber), ~15–20mm | An unenclosed small speaker is very quiet; the enclosed ones are made for this |
-| Lead | MX1.25 2P plug, short pigtail | Matches H3 |
-
-Rough ceiling for a bridged output from 3.3V, before losses: `Vrms ≈ 3.3 / √2 ≈ 2.33V`, so
-about **0.68W into 8Ω** and 1.36W into 4Ω. That is plenty for a chime. The firmware plays short,
-rate-limited chimes, so average current stays low. Peak current into 4Ω on a shared rail is the
-concern, which is why 8Ω is recommended.
-
-### Mounting
-
-The speaker is electrically part of the display board, not this PCB. It only needs somewhere to
-sit. Options:
-
-- **On the rear PCB** — glued or clipped to it, with its pigtail running to H3. The PCB gives it
-  a location and a sound port.
-- **On the display board** — stuck directly to its back.
-
-Either way, sound must be able to escape the housing. If the chime turns out too quiet in a
-running vehicle, the next step is a 5V amplifier on this PCB taking a differential feed from H3.
-That is not planned for v1.
-
 ## Board outline and layout
 
 | Quantity | Value |
@@ -322,22 +265,21 @@ Layout priorities:
 
 | # | Question | Blocks |
 |---|---|---|
-| Q1 | Header pin order: upstream doc vs schematic (see above) | Firmware mapping only, not layout |
-| Q2 | Header gender, position and height on the display board | Outline and placement |
-| Q3 | Connector family and pitch of the JRP leads (PH assumed) | Footprints |
-| Q4 | "Left to right" orientation of each JRP lead against connector pin 1 | Footprints |
-| Q5 | EGT probe: lead colours and polarity, grounded or insulated | J4 silkscreen, input filter |
-| Q6 | Display current draw at 5V, WiFi on, full brightness | Buck and chain current budget |
-| Q7 | Speaker on the rear PCB or on the display board? | Layout |
-| Q8 | Depth available behind the display | Top vs side entry, speaker size |
+| Q1 | ~~Header pin order~~ **Resolved:** pins 6/7/8 = GPIO16/17/18 | — |
+| Q3 | ~~JRP connector family~~ **Resolved:** JST PH assumed (matches the owner's recollection) | — |
+| Q4 | ~~"Left to right"~~ **Resolved:** leftmost wire, looking from the plug side while inserting, locating tabs up | — |
+| Q5 | ~~EGT probe polarity~~ **Not a PCB question:** J4 is marked + and −; the probe's leads are identified when the harness is made (see *Verification*) | — |
+| Q6 | ~~Display current~~ **Resolved:** design target 1.5A at 5V (owner); U2's rating is the ceiling | — |
+
+No open questions remain. Q2 (header gender and position) and Q8 (depth behind the display) are
+handled directly by the project owner during layout. Q7 (speaker) is out of scope: see requirement R7.
 
 ## Verification
 
-- [ ] Q1: GPIO toggle test on header pins 6/7/8 with a meter
-- [ ] Q2: measure the header location, or extract it from the Waveshare 3D model
-- [ ] Q3/Q4: caliper the JRP connectors; record the wire order against pin 1
-- [ ] Q6: measure 5V current into VBUS, idle and worst case
-- [ ] Confirm the AXP2101 VBUS input range covers the chosen reverse-block drop
-- [ ] Speaker on H3: chime audible at settings volume, no brownout or reset during playback
+- [x] Q1: header pins 6/7/8 = GPIO16/17/18 (confirmed by project owner; matches the upstream schematic)
+- [ ] Before ordering: plug a JRP lead into a real PH header and confirm position 1 lands on JST's
+  circuit-1 pin. If J3 is laid out backwards, the MAP sensor gets 5V and GND swapped
+- [ ] Harness: identify the EGT probe's + and − leads (type K negative is magnetic) and wire them to
+  J4's + and −. Optionally check for tip-to-sheath continuity (grounded probe → consider fitting C16)
 - [ ] Daisy chain: two boards, measure the drop across the first board at full chain current
 - [ ] Reverse-polarity and over-voltage tests on the bench before any vehicle connection

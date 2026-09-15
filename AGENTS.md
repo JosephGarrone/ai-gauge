@@ -46,7 +46,7 @@ future sessions. Propagate them — do not let them decay.**
 | [docs/gauge-xml-interface.md](docs/gauge-xml-interface.md) | Authoring guide for the web app: format, rendering model, upload API. Update with the schema |
 | [docs/config-app.md](docs/config-app.md) | The face editor (M7): structure, firmware parity testing, Pages publishing, device-upload status |
 | [docs/sensor-frontend.md](docs/sensor-frontend.md) | ADS1115/MCP9600 wiring, scaling maths, 12V conditioning |
-| [docs/rear-pcb.md](docs/rear-pcb.md) | Rear PCB plan (planning only): 12V input and daisy chain, sensor connectors, speaker, 45mm outline |
+| [docs/rear-pcb.md](docs/rear-pcb.md) | Rear PCB plan (planning only): 12V input and daisy chain, sensor connectors, 45mm outline |
 | [docs/rear-pcb-parts.md](docs/rear-pcb-parts.md) | Rear PCB parts: BOM, KiCad symbols/footprints, per-pin nets, SVG wiring sheets in `docs/rear-pcb/` |
 | [docs/networking.md](docs/networking.md) | Provisioning, HTTP API, telemetry ingest, OTA |
 | [docs/build-and-flash.md](docs/build-and-flash.md) | Local toolchain, build and flash |
@@ -76,7 +76,7 @@ the architecture:
 
 | # | Decision | Rationale |
 |---|---|---|
-| [0001](docs/adr/0001-external-i2c-sensor-frontend.md) | Sensors on external I2C (ADS1115 + MCP9600) on `I2C_NUM_1`, GPIO17/18 | No usable internal ADC; a thermocouple needs a CJC amplifier regardless |
+| [0001](docs/adr/0001-external-i2c-sensor-frontend.md) | Sensors on external I2C (ADS1115 + MCP9600) on `I2C_NUM_1`, SDA GPIO16 / SCL GPIO17, alert GPIO18 | No usable internal ADC; a thermocouple needs a CJC amplifier regardless |
 | [0002](docs/adr/0002-custom-gauge-xml-schema.md) | Custom domain-specific gauge XML, not LVGL's generic XML UI format | Keeps a general layout engine out of the 16ms render path |
 | [0003](docs/adr/0003-static-background-plus-needle-sprite.md) | Pre-render the dial face once to PSRAM; animate only a needle sprite | Bounds the per-frame dirty region, which is what makes 60fps reachable |
 | [0004](docs/adr/0004-retain-sd-and-audio.md) | Keep the microSD slot and audio codecs | Their pins are not connector-accessible anyway, and both have real uses |

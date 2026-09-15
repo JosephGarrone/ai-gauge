@@ -1,0 +1,21 @@
+(module "SOIC-8-1EP_LMR38020" (layer "F.Cu")
+  (descr "TI DDA package, SOIC-8 with exposed pad")
+  (attr smd)
+
+  (pad "1" smd rect (at -2.7 1.905) (size 1.6 0.6) (layers "F.Cu" "F.Paste" "F.Mask"))
+  (pad "2" smd rect (at -2.7 0.635) (size 1.6 0.6) ...)
+  (pad "3" smd rect (at -2.7 -0.635) (size 1.6 0.6) ...)
+  (pad "4" smd rect (at -2.7 -1.905) (size 1.6 0.6) ...)
+
+  (pad "5" smd rect (at 2.7 -1.905) (size 1.6 0.6) ...)
+  (pad "6" smd rect (at 2.7 -0.635) (size 1.6 0.6) ...)
+  (pad "7" smd rect (at 2.7 0.635) (size 1.6 0.6) ...)
+  (pad "8" smd rect (at 2.7 1.905) (size 1.6 0.6) ...)
+
+  (pad "9" smd rect (at 0 0) (size 2.95 4.9)
+       (layers "F.Cu" "F.Mask")
+       (zone_connect 2))
+
+  (pad "" smd rect (at 0 1.2) (size 0.9 1.5) (layers "F.Paste"))
+  (pad "" smd rect (at 0 -1.2) (size 0.9 1.5) (layers "F.Paste"))
+)

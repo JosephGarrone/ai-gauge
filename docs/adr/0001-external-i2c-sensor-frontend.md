@@ -30,9 +30,14 @@ Read both sensors over a **second I2C bus** (`I2C_NUM_1`) on the expansion heade
 
 | GPIO | Role |
 |---|---|
-| 17 | SDA |
-| 18 | SCL |
-| 16 | Shared open-drain ALERT / DRDY |
+| 16 | SDA |
+| 17 | SCL |
+| 18 | Open-drain ALERT / DRDY |
+
+> **Amended 2026-09-14:** originally SDA 17, SCL 18, ALERT 16, following upstream
+> `HARDWARE_REFERENCE.md`, which has the header order wrong. Header pins 6/7/8 are GPIO16/17/18;
+> the roles stay on the same physical pins. The MCP9600's alerts are push-pull, so only the
+> ADS1115 drives ALERT ([rear-pcb-parts.md](../rear-pcb-parts.md)).
 
 | Device | Address | Channel |
 |---|---|---|
@@ -84,4 +89,4 @@ engine bay.
   in [../sensor-frontend.md](../sensor-frontend.md).
 
 **Neutral:**
-- GPIO16 is committed to the shared ALERT/DRDY line, spending the last free header pin.
+- GPIO18 is committed to the ALERT/DRDY line, spending the last free header pin.

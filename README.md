@@ -47,7 +47,7 @@ project follows, then [docs/](docs/) for detail:
 | [config-app.md](docs/config-app.md) | The face editor web app |
 | [hardware-reference.md](docs/hardware-reference.md) | GPIO map, I2C addresses, warnings |
 | [sensor-frontend.md](docs/sensor-frontend.md) | Boost and EGT signal conditioning |
-| [rear-pcb.md](docs/rear-pcb.md) | Planned rear PCB: power, daisy chain, sensors, speaker |
+| [rear-pcb.md](docs/rear-pcb.md) | Planned rear PCB: power, daisy chain, sensors |
 | [rear-pcb-parts.md](docs/rear-pcb-parts.md) | Rear PCB parts list, pinouts and wiring diagrams |
 | [networking.md](docs/networking.md) | Provisioning, HTTP API, telemetry, OTA |
 | [performance.md](docs/performance.md) | Measurement method and results |
