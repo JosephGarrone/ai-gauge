@@ -13,5 +13,6 @@ idf_component_register(
         gauge_store
     PRIV_REQUIRES
         esp_app_format
+        sensor_hub
         waveshare__esp32_s3_touch_amoled_1_75
 )

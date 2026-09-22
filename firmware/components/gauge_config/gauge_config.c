@@ -404,6 +404,7 @@ void gauge_config_set_defaults(gauge_config_t *cfg)
     cfg->face.ticks.major_width_px  = 4;
     cfg->face.ticks.minor_width_px  = 2;
     cfg->face.ticks.color           = (gauge_color_t){0xff, 0xff, 0xff};
+    cfg->face.ticks.band_color      = false;
 
     cfg->face.labels.every  = 0.0f; /* follow major_every */
     cfg->face.labels.color  = (gauge_color_t){0xff, 0xff, 0xff};
@@ -544,6 +545,7 @@ static void parse_ticks(const xml_tag_t *tag, gauge_config_t *cfg)
     attr_px(tag, "major-width", &cfg->face.ticks.major_width_px, &cfg->warning_count);
     attr_px(tag, "minor-width", &cfg->face.ticks.minor_width_px, &cfg->warning_count);
     attr_color(tag, "color", &cfg->face.ticks.color, &cfg->warning_count);
+    attr_bool(tag, "band-color", &cfg->face.ticks.band_color);
 }
 
 static void parse_labels(const xml_tag_t *tag, gauge_config_t *cfg)
@@ -1016,6 +1018,24 @@ gauge_config_err_t gauge_config_parse(const char *xml, size_t len, gauge_config_
     }
 
     return GAUGE_CONFIG_OK;
+}
+
+gauge_color_t gauge_config_tick_color(const gauge_config_t *cfg, float value)
+{
+    gauge_color_t color = cfg->face.ticks.color;
+    if (!cfg->face.ticks.band_color) {
+        return color;
+    }
+
+    /* Ticks step by float addition, so a tick meant to sit exactly on a band edge can miss it. */
+    float eps = (cfg->source.max - cfg->source.min) * 1e-4f;
+    for (uint8_t i = 0; i < cfg->face.band_count; i++) {
+        const gauge_band_t *b = &cfg->face.bands[i];
+        if (value >= b->from - eps && value <= b->to + eps) {
+            color = b->color;
+        }
+    }
+    return color;
 }
 
 const char *gauge_config_err_str(gauge_config_err_t err)

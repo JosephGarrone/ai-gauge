@@ -106,6 +106,12 @@ struct gauge_render_t {
     lv_point_precise_t peak_p1, peak_p2;
     lv_area_t          peak_bbox;
     bool               peak_bbox_valid;
+
+    /* Session min/max of the raw input, shown on request in place of the readouts. */
+    bool        minmax_valid;
+    float       min_value, max_value;
+    lv_obj_t   *recall_label;
+    lv_timer_t *recall_timer;
     gauge_render_alert_cb_t alert_cb;
     void                   *alert_cb_user;
 };
@@ -147,6 +153,9 @@ static const lv_font_t *font_by_name(const char *name)
 #endif
 #if LV_FONT_MONTSERRAT_26
         {"montserrat_26", &lv_font_montserrat_26},
+#endif
+#if LV_FONT_MONTSERRAT_32
+        {"montserrat_32", &lv_font_montserrat_32},
 #endif
 #if LV_FONT_MONTSERRAT_48
         {"montserrat_48", &lv_font_montserrat_48},
@@ -411,7 +420,9 @@ static void draw_shaped_ticks(gauge_render_t *g, const gauge_shape_t *shape, flo
     lv_draw_buf_t *dst = lv_canvas_get_draw_buf(g->face);
 
     for (int32_t t = 0; t <= count; t++) {
-        float deg = value_to_deg(g, c->source.min + (float)t * step);
+        float         v     = c->source.min + (float)t * step;
+        float         deg   = value_to_deg(g, v);
+        gauge_color_t color = gauge_config_tick_color(c, v);
         float rad = DEG2RAD(deg);
         float ox  = (float)g->cx + (float)tick_outer * sinf(rad);
         float oy  = (float)g->cy - (float)tick_outer * cosf(rad);
@@ -422,8 +433,7 @@ static void draw_shaped_ticks(gauge_render_t *g, const gauge_shape_t *shape, flo
 
             gauge_shape_bounds(g->outline, n, &r);
             gauge_shape_rasterize(g->outline, n, &r, acc, cov);
-            blend_mask(dst, &r, cov,
-                       to_lv(gauge_shape_part_color(shape, i, c->face.ticks.color, NULL)));
+            blend_mask(dst, &r, cov, to_lv(gauge_shape_part_color(shape, i, color, NULL)));
         }
     }
 
@@ -521,7 +531,7 @@ static void render_face(gauge_render_t *g)
 
                 lv_draw_line_dsc_t dsc;
                 lv_draw_line_dsc_init(&dsc);
-                dsc.color = to_lv(c->face.ticks.color);
+                dsc.color = to_lv(gauge_config_tick_color(c, v));
                 dsc.width = width;
                 dsc.opa   = LV_OPA_COVER;
                 dsc.p1.x  = x1;
@@ -963,6 +973,130 @@ void gauge_render_reset_peak(gauge_render_t *g)
     set_peak_label(g);
 }
 
+/* ------------------------------------------------------------------ min/max --------- */
+
+static void format_extreme(const gauge_render_t *g, char *out, size_t len, const char *tag,
+                           float value)
+{
+    const gauge_config_t *c = &g->cfg;
+    char                  num[32];
+
+    if (g->minmax_valid) {
+        snprintf(num, sizeof(num), c->readout.format, (double)value);
+    } else {
+        snprintf(num, sizeof(num), "---");
+    }
+    snprintf(out, len, "%s %s%s", tag, num, g->minmax_valid ? c->readout.suffix : "");
+}
+
+static void set_recall_label(gauge_render_t *g)
+{
+    if (g->recall_label == NULL || g->recall_timer == NULL) {
+        return;
+    }
+
+    char hi[96], lo[96], text[200];
+    format_extreme(g, hi, sizeof(hi), "MAX", g->max_value);
+    format_extreme(g, lo, sizeof(lo), "MIN", g->min_value);
+    snprintf(text, sizeof(text), "%s\n%s", hi, lo);
+
+    if (strcmp(lv_label_get_text(g->recall_label), text) != 0) {
+        lv_label_set_text(g->recall_label, text);
+    }
+}
+
+/*
+ * Tracks the raw value, before clamping or damping. Unlike the peak marker, which has to sit
+ * on the scale, the recalled numbers can say what the needle could not: 34 psi on a 30 psi dial.
+ */
+static void update_minmax(gauge_render_t *g, float value, bool valid)
+{
+    if (!valid || !isfinite(value)) {
+        return;
+    }
+    if (!g->minmax_valid) {
+        g->min_value    = value;
+        g->max_value    = value;
+        g->minmax_valid = true;
+    } else if (value < g->min_value) {
+        g->min_value = value;
+    } else if (value > g->max_value) {
+        g->max_value = value;
+    } else {
+        return;
+    }
+    set_recall_label(g);
+}
+
+static void set_readouts_hidden(gauge_render_t *g, bool hidden)
+{
+    lv_obj_t *objs[] = {g->readout, g->peak_label};
+    for (size_t i = 0; i < sizeof(objs) / sizeof(objs[0]); i++) {
+        if (objs[i] == NULL) {
+            continue;
+        }
+        if (hidden) {
+            lv_obj_add_flag(objs[i], LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_remove_flag(objs[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+static void end_recall(gauge_render_t *g)
+{
+    if (g->recall_timer != NULL) {
+        lv_timer_delete(g->recall_timer);
+        g->recall_timer = NULL;
+    }
+    if (g->recall_label != NULL) {
+        lv_obj_add_flag(g->recall_label, LV_OBJ_FLAG_HIDDEN);
+    }
+    set_readouts_hidden(g, false);
+}
+
+static void recall_timer_cb(lv_timer_t *t)
+{
+    gauge_render_t *g = lv_timer_get_user_data(t);
+    g->recall_timer   = NULL; /* one-shot: LVGL deletes it after this callback */
+    end_recall(g);
+}
+
+void gauge_render_recall_minmax(gauge_render_t *g, uint32_t hold_ms)
+{
+    if (g == NULL || g->recall_label == NULL) {
+        return;
+    }
+
+    if (g->recall_timer != NULL) {
+        lv_timer_reset(g->recall_timer);
+    } else {
+        g->recall_timer = lv_timer_create(recall_timer_cb, hold_ms, g);
+        if (g->recall_timer == NULL) {
+            return;
+        }
+        lv_timer_set_repeat_count(g->recall_timer, 1);
+    }
+
+    set_recall_label(g);
+    set_readouts_hidden(g, true);
+    lv_obj_remove_flag(g->recall_label, LV_OBJ_FLAG_HIDDEN);
+}
+
+bool gauge_render_minmax_recalled(const gauge_render_t *g)
+{
+    return g != NULL && g->recall_timer != NULL;
+}
+
+void gauge_render_reset_minmax(gauge_render_t *g)
+{
+    if (g == NULL) {
+        return;
+    }
+    g->minmax_valid = false;
+    set_recall_label(g);
+}
+
 /* ------------------------------------------------------------------ readout --------- */
 
 static void update_readout(gauge_render_t *g)
@@ -1230,6 +1364,25 @@ esp_err_t gauge_render_create(lv_obj_t *parent, const gauge_config_t *cfg,
         lv_obj_align(g->peak_label, LV_ALIGN_TOP_MID, 0, py);
     }
 
+    /*
+     * Min/max recall: hidden until asked for, then shown in place of the live and peak
+     * readouts. A fixed mid-size font, because two lines of a 48px readout font would not fit
+     * the narrowing lower half of a round panel.
+     */
+    g->recall_label = lv_label_create(parent);
+    ESP_GOTO_ON_FALSE(g->recall_label != NULL, ESP_ERR_NO_MEM, fail, TAG, "recall label failed");
+    lv_obj_set_style_text_font(g->recall_label, font_by_name("montserrat_26"), LV_PART_MAIN);
+    lv_obj_set_style_text_color(g->recall_label, to_lv(cfg->readout.color), LV_PART_MAIN);
+    lv_obj_set_style_text_align(g->recall_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_width(g->recall_label, LV_SIZE_CONTENT);
+    lv_label_set_text(g->recall_label, "");
+    lv_obj_add_flag(g->recall_label, LV_OBJ_FLAG_HIDDEN);
+    {
+        int32_t rx = (cfg->readout.present && cfg->readout.x != INT16_MIN) ? cfg->readout.x : g->cx;
+        int32_t ry = cfg->readout.present ? cfg->readout.y : g->cy + 60;
+        lv_obj_align(g->recall_label, LV_ALIGN_TOP_MID, rx - w / 2, ry);
+    }
+
     g->valid     = true;
     g->displayed = cfg->source.min;
     update_readout(g);
@@ -1257,6 +1410,9 @@ void gauge_render_destroy(gauge_render_t *g)
     if (g->flash_timer != NULL) {
         lv_timer_delete(g->flash_timer);
     }
+    if (g->recall_timer != NULL) {
+        lv_timer_delete(g->recall_timer);
+    }
 
     /* Delete the objects before the buffers they point into. */
     if (g->readout != NULL) {
@@ -1264,6 +1420,9 @@ void gauge_render_destroy(gauge_render_t *g)
     }
     if (g->peak_label != NULL) {
         lv_obj_delete(g->peak_label);
+    }
+    if (g->recall_label != NULL) {
+        lv_obj_delete(g->recall_label);
     }
     if (g->peak_marker != NULL) {
         lv_obj_delete(g->peak_marker);
@@ -1314,6 +1473,7 @@ void gauge_render_set_value(gauge_render_t *g, float value, bool valid)
         g->displayed = target;
     }
 
+    update_minmax(g, value, valid);
     update_peak(g, target, valid);
     update_needle(g);
     update_readout(g);

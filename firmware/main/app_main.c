@@ -5,8 +5,8 @@
  * something before anything slow or fallible is touched. A driver turning the ignition on
  * should see a needle immediately.
  *
- * The value source is still simulated -- sensor_hub and the external I2C front-end do not
- * exist yet. See CONFIG_AI_GAUGE_SIMULATED_SOURCE.
+ * Values come from, in order: a fresh UDP telemetry feed, the rear sensor board (sensor_hub), and
+ * -- only until a sensor board has been seen -- the simulated sweep. See value_timer_cb().
  */
 
 #include <inttypes.h>
@@ -29,7 +29,6 @@
 #include "bsp/esp-bsp.h"
 #include "lvgl.h"
 
-#include "app_audio.h"
 #include "app_settings.h"
 #include "app_ui.h"
 #include "board_profile.h"
@@ -38,15 +37,23 @@
 #include "gauge_render.h"
 #include "gauge_store.h"
 #include "net_svc.h"
+#include "sensor_hub.h"
 
 static const char *TAG = "app_main";
 
 /*
  * How often the UI samples the value source. Deliberately faster than the LVGL refresh
  * period, so the needle differs on every frame -- otherwise a measured frame rate just
- * reports this tick rate rather than what the renderer can sustain.
+ * reports this tick rate rather than what the renderer can sustain. The face's damping is
+ * applied per sample, so it is also tuned against this rate.
  */
-#define SIM_TICK_MS 5
+#define VALUE_TICK_MS 5
+
+/* Pause between the UI coming up and WiFi claiming its internal memory (see app_main()). */
+#define NET_START_SETTLE_MS 1000
+
+/* A telemetry value older than this no longer overrides the local sources. */
+#define TELEMETRY_FRESH_US (1000 * 1000)
 
 /*
  * The configuration currently on screen. A copy held here rather than a pointer into someone
@@ -71,19 +78,44 @@ static void set_active_id(const char *id)
     net_svc_set_active_gauge(s_active_id);
 }
 
+/* ------------------------------------------------------------- value source ------- */
+
+/*
+ * The latest telemetry value. Written by the network task, read by the LVGL task, so it goes
+ * through a spinlock held for a few instructions rather than the display lock: a network burst
+ * must never stall a frame.
+ */
+static struct {
+    portMUX_TYPE lock;
+    char         channel[GAUGE_CONFIG_MAX_ID_LEN];
+    float        value;
+    int64_t      at_us;
+} s_telemetry = {.lock = portMUX_INITIALIZER_UNLOCKED};
+
+static bool telemetry_fresh(const char *channel, float *value)
+{
+    bool fresh = false;
+    taskENTER_CRITICAL(&s_telemetry.lock);
+    if (s_telemetry.at_us != 0 && esp_timer_get_time() - s_telemetry.at_us < TELEMETRY_FRESH_US &&
+        strcmp(s_telemetry.channel, channel) == 0) {
+        *value = s_telemetry.value;
+        fresh  = true;
+    }
+    taskEXIT_CRITICAL(&s_telemetry.lock);
+    return fresh;
+}
+
 #if CONFIG_AI_GAUGE_SIMULATED_SOURCE
 
 /*
- * Stands in for sensor_hub. A full-scale triangle sweep is deliberately harsher than real
- * boost behaviour: it keeps the needle moving every frame, which is the worst realistic case
- * for the dirty region.
+ * Stands in for the sensor board on a bare display. A full-scale triangle sweep is deliberately
+ * harsher than real boost behaviour: it keeps the needle moving every frame, which is the worst
+ * realistic case for the dirty region.
  */
-static void sim_timer_cb(lv_timer_t *t)
+static float sim_value(void)
 {
     static uint32_t elapsed_ms;
-    (void)t;
-
-    elapsed_ms += SIM_TICK_MS;
+    elapsed_ms += VALUE_TICK_MS;
 
     const uint32_t period_ms = 4000; /* one full up-and-down sweep */
     float          phase     = (float)(elapsed_ms % period_ms) / (float)period_ms;
@@ -91,11 +123,45 @@ static void sim_timer_cb(lv_timer_t *t)
 
     float min = s_active_cfg->source.min;
     float max = s_active_cfg->source.max;
-
-    gauge_render_set_value(app_ui_get_gauge(), min + tri * (max - min), true);
+    return min + tri * (max - min);
 }
 
 #endif /* CONFIG_AI_GAUGE_SIMULATED_SOURCE */
+
+/*
+ * Feeds the needle. Runs on the LVGL task. Source priority:
+ *
+ * 1. Telemetry for this channel, while it keeps arriving -- a remote feed is an explicit choice.
+ * 2. The sensor board, once it has answered at all. From then on a fault shows as dashes; it is
+ *    never papered over with the simulator (docs/sensor-frontend.md, Fault handling).
+ * 3. The simulated sweep, if built in, while no board has ever been seen.
+ * 4. Otherwise invalid: dashes, needle parked.
+ */
+static void value_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+
+    gauge_render_t *gauge   = app_ui_get_gauge();
+    const char     *channel = s_active_cfg->source.channel;
+    float           value;
+    bool            valid;
+
+    if (telemetry_fresh(channel, &value)) {
+        gauge_render_set_value(gauge, value, true);
+        return;
+    }
+
+    if (sensor_hub_read(channel, s_active_cfg->source.unit, &value, &valid)) {
+        gauge_render_set_value(gauge, value, valid);
+        return;
+    }
+
+#if CONFIG_AI_GAUGE_SIMULATED_SOURCE
+    gauge_render_set_value(gauge, sim_value(), true);
+#else
+    gauge_render_set_value(gauge, s_active_cfg->source.min, false);
+#endif
+}
 
 #if CONFIG_AI_GAUGE_BENCH_TRANSITION
 
@@ -364,20 +430,18 @@ static void on_config_changed(const char *id, bool deleted)
     bsp_display_unlock();
 }
 
+/*
+ * Runs on the network task. Only records the value: value_timer_cb() picks it up on the next UI
+ * tick, so telemetry and the sensors feed the needle through one path and never fight over it.
+ * Telemetry values are in the face's display unit.
+ */
 static void on_telemetry(const char *channel, float value)
 {
-    /*
-     * A remote feed and a local sensor are interchangeable to the renderer, so this is the
-     * same path a real sensor will use once sensor_hub exists.
-     */
-    if (strcmp(channel, s_active_cfg->source.channel) != 0) {
-        return;
-    }
-
-    if (bsp_display_lock(-1) == ESP_OK) {
-        gauge_render_set_value(app_ui_get_gauge(), value, true);
-        bsp_display_unlock();
-    }
+    taskENTER_CRITICAL(&s_telemetry.lock);
+    strlcpy(s_telemetry.channel, channel, sizeof(s_telemetry.channel));
+    s_telemetry.value = value;
+    s_telemetry.at_us = esp_timer_get_time();
+    taskEXIT_CRITICAL(&s_telemetry.lock);
 }
 
 /* Keeps the settings page's network line current. Runs on the LVGL task. */
@@ -461,14 +525,72 @@ static void ota_confirm_timer_cb(void *arg)
     }
 }
 
-/* -------------------------------------------------------------------- alerts -------- */
+/* ------------------------------------------------------------- UI watchdog -------- */
 
-/* Runs on the LVGL task when the displayed gauge enters or leaves an alert. */
-static void on_alert(const gauge_alert_t *alert, bool active, void *user_data)
+/*
+ * Catches the LVGL task blocking forever. That has been seen on hardware: the panel showed
+ * white and green noise and every LVGL timer, the perf report included, stopped. The task
+ * watchdog cannot see it, because a blocked task leaves the idle tasks free to run.
+ *
+ * A heartbeat timer on the LVGL task bumps a counter; an esp_timer, which does not depend on
+ * the LVGL task, checks it. If it stalls, log the memory state and abort. The core dump then
+ * shows where every task was waiting, and the reboot recovers a gauge that would otherwise
+ * stay dead until the ignition was cycled.
+ *
+ * Longest legitimate stall measured is a face rebuild under the display lock, ~80ms
+ * (docs/performance.md), so the limit is far above anything real.
+ */
+#define UI_HEARTBEAT_MS   100
+#define UI_STALL_LIMIT_MS 5000
+
+static volatile uint32_t s_ui_heartbeat;
+static TaskHandle_t      s_ui_task;
+
+static void ui_heartbeat_cb(lv_timer_t *t)
 {
-    (void)user_data;
-    if (active && alert->chime) {
-        app_audio_chime();
+    (void)t;
+    s_ui_task = xTaskGetCurrentTaskHandle();
+    s_ui_heartbeat++;
+}
+
+static void ui_watchdog_cb(void *arg)
+{
+    (void)arg;
+    static uint32_t last_beat;
+    static uint32_t stalled_ms;
+
+    uint32_t beat = s_ui_heartbeat;
+    if (beat != last_beat) {
+        last_beat  = beat;
+        stalled_ms = 0;
+        return;
+    }
+
+    stalled_ms += 1000;
+    if (stalled_ms < UI_STALL_LIMIT_MS) {
+        return;
+    }
+
+    ESP_LOGE(TAG, "UI stalled for %" PRIu32 " ms: LVGL task '%s' state %d",
+             stalled_ms, s_ui_task ? pcTaskGetName(s_ui_task) : "?",
+             s_ui_task ? (int)eTaskGetState(s_ui_task) : -1);
+    ESP_LOGE(TAG, "internal free %u B (lowest %u B), largest DMA block %u B, PSRAM free %u KB",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL),
+             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+    abort();
+}
+
+static void ui_watchdog_start(void)
+{
+    lv_timer_create(ui_heartbeat_cb, UI_HEARTBEAT_MS, NULL);
+
+    const esp_timer_create_args_t args = {.callback = ui_watchdog_cb, .name = "ui_watchdog"};
+    esp_timer_handle_t            timer = NULL;
+    if (esp_timer_create(&args, &timer) != ESP_OK ||
+        esp_timer_start_periodic(timer, 1000 * 1000) != ESP_OK) {
+        ESP_LOGW(TAG, "UI watchdog not started");
     }
 }
 
@@ -550,9 +672,9 @@ void app_main(void)
         app_ui_set_warning(warning);
     }
 
+    lv_timer_create(value_timer_cb, VALUE_TICK_MS, NULL);
 #if CONFIG_AI_GAUGE_SIMULATED_SOURCE
-    lv_timer_create(sim_timer_cb, SIM_TICK_MS, NULL);
-    ESP_LOGW(TAG, "using a SIMULATED value source; no sensors are being read");
+    ESP_LOGW(TAG, "the needle sweeps SIMULATED values until a sensor board answers");
 #endif
 
     ESP_ERROR_CHECK(gauge_perf_attach(NULL));
@@ -565,24 +687,44 @@ void app_main(void)
     ESP_ERROR_CHECK(gauge_perf_start_reporting(5000, "needle sweep"));
 #endif
 
-    app_ui_set_alert_cb(on_alert, NULL);
-
     lv_timer_create(network_status_timer_cb, 1000, NULL);
+
+    ui_watchdog_start();
 
     bsp_display_unlock();
 
 
     /*
-     * Audio before WiFi: its I2S DMA buffers must be claimed while internal memory is still
-     * available. Failure only costs the chime; alerts stay visual.
+     * Sensors after the face is on screen (docs/architecture.md, Startup). The task's stack is in
+     * PSRAM, so this costs WiFi almost no internal memory. A missing board is not a failure: the
+     * task keeps probing for one.
      */
-    app_audio_init();
+    if (board->sensor_i2c_port >= 0) {
+        const sensor_hub_bus_t sensor_bus = {
+            .i2c_port   = board->sensor_i2c_port,
+            .sda_gpio   = board->sensor_sda_gpio,
+            .scl_gpio   = board->sensor_scl_gpio,
+            .alert_gpio = board->sensor_alert_gpio,
+            .scl_hz     = board->sensor_i2c_hz,
+        };
+        if (sensor_hub_start(&sensor_bus) != ESP_OK) {
+            ESP_LOGE(TAG, "sensor hub failed to start; the gauge continues without sensors");
+        }
+    }
+
 
     /*
      * Networking starts last and never blocks the display: by this point the gauge is on
      * screen. Starting WiFi before building the UI was tried and was worse, not better -- WiFi
      * initialised 4 of its static RX buffers instead of 5 (docs/performance.md).
+     *
+     * Wait for the first frames first. Measured: starting WiFi ~80ms after the UI unlock failed
+     * intermittently ("Expected to init 6 rx buffer, actual is 5") -- the first full-screen
+     * render's transient allocations were still live. Audio initialisation used to supply this
+     * pause by accident; since it was removed, the pause is explicit.
      */
+    vTaskDelay(pdMS_TO_TICKS(NET_START_SETTLE_MS));
+
     const net_svc_callbacks_t net_cb = {
         .on_config_changed = on_config_changed,
         .on_telemetry      = on_telemetry,

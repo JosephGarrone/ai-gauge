@@ -467,6 +467,8 @@ const INSPECTORS = {
         return [
             head,
             form.color('Colour', () => t().color, (v) => { t().color = v; }, { help: 'Also inherited by tick shapes.' }),
+            form.checkbox('Take band colour', () => t().bandColor, (v) => { t().bandColor = v; },
+                { help: 'A tick on a band is drawn in that band\'s colour instead. On a shared edge, the later band wins.' }),
             h('h3', { class: 'sub' }, 'Major'),
             row(
                 form.number('Every', () => t().majorEvery, (v) => { t().majorEvery = v; }, { min: 0, unit: m.source.unit, help: '0 for none.' }),

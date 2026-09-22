@@ -119,9 +119,12 @@ This project's allocation — see [sensor-frontend.md](sensor-frontend.md):
 
 | GPIO | Use |
 |---|---|
-| 16 | `I2C_NUM_1` SDA (sensor bus), header pin 6 |
-| 17 | `I2C_NUM_1` SCL (sensor bus), header pin 7 |
+| 16 | `I2C_NUM_0` SDA (sensor bus), header pin 6 |
+| 17 | `I2C_NUM_0` SCL (sensor bus), header pin 7 |
 | 18 | Open-drain ALERT / DRDY input (ADS1115), header pin 8 |
+
+The BSP puts its own bus (GPIO14/15: touch, codec, PMIC) on `I2C_NUM_1`, its
+`CONFIG_BSP_I2C_NUM` default, so the sensor bus uses controller 0. Verified on hardware.
 
 ## Critical warnings
 

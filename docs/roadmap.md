@@ -113,11 +113,12 @@ Scenario 5 also exposed wasted redraws of an unchanged needle. Fixed in `gauge_r
 network, not a considered security posture. See *Security* in
 [networking.md](networking.md) — this is tracked, not forgotten.
 
-## M5 — Sensors 🔜 next
+## M5 — Sensors 🚧 firmware done, board at fabrication
 
-The actual product goal. **Blocked on hardware that does not exist yet.**
+The actual product goal. The board (`pcb/map-and-egt-daughterboard/`) has been sent for
+fabrication. The firmware is written and runs on the display, but has not yet met a board.
 
-- Build the sensor board: ADS1115 + MCP9600 on `I2C_NUM_1` (SDA GPIO16, SCL GPIO17, alert GPIO18), the 2:1 divider, and
+- Build the sensor board: ADS1115 + TMP1075 on `I2C_NUM_0` (SDA GPIO16, SCL GPIO17, alert GPIO18), the 2:1 divider, and
   the 12V automotive conditioning described in [sensor-frontend.md](sensor-frontend.md)
 - `sensor_hub`: drivers, scaling, IIR filtering, lock-free snapshot publication
 - Calibration values as settings, not constants, so a different sensor is not a recompile
@@ -125,8 +126,17 @@ The actual product goal. **Blocked on hardware that does not exist yet.**
 
 **Exit criteria:** the open items checklist at the end of
 [sensor-frontend.md](sensor-frontend.md) — confirmed MAP sensor part number and transfer
-function, measured divider ratio, ADS1115 verified against a pressure reference, MCP9600
-verified against ambient and boiling water, and readings stable with the engine running.
+function, measured divider ratio, ADS1115 verified against a pressure reference, thermocouple
+channel (AIN3 + TMP1075) verified against ambient and boiling water, and readings stable with the engine running.
+
+**Progress:**
+
+| Item | State |
+|---|---|
+| `sensor_hub` driver: ADS1115 single-shot multiplexing, ALERT/RDY, TMP1075, fault detection, hot-plug re-probe | built; runs on the display with no board attached (probes quietly, simulator continues, WiFi unaffected). **Untested against a board** |
+| Conversions: ratiometric MAP, type K + CJC, unit conversion | host-tested: 296 checks, including the NIST type K table |
+| Calibration in NVS, editable on the settings page; live diagnostics | built; memory measured (4.3KB). **Not yet seen on the panel by a person** |
+| Verification checklist in [sensor-frontend.md](sensor-frontend.md) | waiting for the board |
 
 **Settled:** the JRP 7-bar sensor is **absolute** (0–8 bar abs), so the firmware must capture a
 zero at key-on with the engine off, as the JRP gauge does. See
@@ -134,10 +144,8 @@ zero at key-on with the engine off, as the JRP gauge does. See
 
 ## M6 — Alerts and refinement 🚧 in progress
 
-- Audible over-boost / over-EGT chime through the ES8311 codec, wiring up
-  `<alert chime="true">` ([ADR 0004](adr/0004-retain-sd-and-audio.md)). The BSP's own audio
-  setup does not fit alongside WiFi and aborts when it fails, so the chime needs its own
-  speaker-only I2S channel; see the audio section of [performance.md](performance.md).
+- ~~Audible over-boost / over-EGT chime~~ **dropped 2026-09-22**: no speaker will be fitted
+  ([ADR 0004](adr/0004-retain-sd-and-audio.md), amendment).
 - Recolour the needle on alert, not just the readout
 - Peak-hold and min/max recall — conventional on boost and EGT gauges
 - Optional datalogging to the microSD slot
@@ -146,7 +154,7 @@ zero at key-on with the engine off, as the JRP gauge does. See
 
 | Item | State |
 |---|---|
-| Audible chime on `<alert chime="true">` | code complete and running: the codec accepts playback at full volume without errors, fits alongside WiFi, rate-limited, user toggle in settings. **Silent on this board, which appears to have no speaker fitted** (nothing audible at 100% volume). Ready for when one is connected |
+| Audible chime on `<alert chime="true">` | **removed** (no speaker). It was built and ran; `app_audio` and the settings toggle were removed to free internal RAM for `sensor_hub`. The attribute is still parsed and ignored |
 | Needle takes the alert colour while flashing | **verified on hardware**; flashing repaints the needle even when it is not moving |
 | Peak-hold marker, tap to reset | **verified on hardware:** amber marker and PEAK readout appear, a tap clears both, 66.7 fps; `<peak>` schema element with 85 host checks |
 | WiFi memory ceiling (found while adding peak-hold) | **fixed and verified:** smaller LVGL draw-thread stacks restored 6 WiFi RX buffers; config uploads no longer near-overflow the HTTP server stack. 66.7 fps, OTA and 17/17 endpoint checks pass. See [performance.md](performance.md) |

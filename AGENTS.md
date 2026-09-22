@@ -43,9 +43,10 @@ future sessions. Propagate them — do not let them decay.**
 | [docs/architecture.md](docs/architecture.md) | Components, task model, data flow |
 | [docs/display-pipeline.md](docs/display-pipeline.md) | Frame budget, LVGL/DMA/TE strategy, render rules |
 | [docs/gauge-config-schema.md](docs/gauge-config-schema.md) | The gauge XML schema (normative) |
+| [docs/gauge-faces.md](docs/gauge-faces.md) | The shipped faces: PX Ranger style, its sources, generator (`tools/faces/px_faces.py`) |
 | [docs/gauge-xml-interface.md](docs/gauge-xml-interface.md) | Authoring guide for the web app: format, rendering model, upload API. Update with the schema |
 | [docs/config-app.md](docs/config-app.md) | The face editor (M7): structure, firmware parity testing, Pages publishing, device-upload status |
-| [docs/sensor-frontend.md](docs/sensor-frontend.md) | ADS1115/MCP9600 wiring, scaling maths, 12V conditioning |
+| [docs/sensor-frontend.md](docs/sensor-frontend.md) | ADS1115/TMP1075 wiring, scaling and thermocouple maths, 12V conditioning |
 | [docs/rear-pcb.md](docs/rear-pcb.md) | Rear PCB plan (planning only): 12V input and daisy chain, sensor connectors, 45mm outline |
 | [docs/rear-pcb-parts.md](docs/rear-pcb-parts.md) | Rear PCB parts: BOM, KiCad symbols/footprints, per-pin nets, SVG wiring sheets in `docs/rear-pcb/` |
 | [docs/networking.md](docs/networking.md) | Provisioning, HTTP API, telemetry ingest, OTA |
@@ -76,14 +77,15 @@ the architecture:
 
 | # | Decision | Rationale |
 |---|---|---|
-| [0001](docs/adr/0001-external-i2c-sensor-frontend.md) | Sensors on external I2C (ADS1115 + MCP9600) on `I2C_NUM_1`, SDA GPIO16 / SCL GPIO17, alert GPIO18 | No usable internal ADC; a thermocouple needs a CJC amplifier regardless |
+| [0001](docs/adr/0001-external-i2c-sensor-frontend.md) | Sensors on external I2C (ADS1115 + TMP1075; MCP9600 dropped on cost) on `I2C_NUM_0`, SDA GPIO16 / SCL GPIO17, alert GPIO18 | No usable internal ADC; a thermocouple needs a µV-resolution ADC plus cold-junction sensing |
 | [0002](docs/adr/0002-custom-gauge-xml-schema.md) | Custom domain-specific gauge XML, not LVGL's generic XML UI format | Keeps a general layout engine out of the 16ms render path |
 | [0003](docs/adr/0003-static-background-plus-needle-sprite.md) | Pre-render the dial face once to PSRAM; animate only a needle sprite | Bounds the per-frame dirty region, which is what makes 60fps reachable |
-| [0004](docs/adr/0004-retain-sd-and-audio.md) | Keep the microSD slot and audio codecs | Their pins are not connector-accessible anyway, and both have real uses |
+| [0004](docs/adr/0004-retain-sd-and-audio.md) | Keep the microSD slot; audio **dropped** 2026-09-22 (no speaker will be fitted; `chime` is parsed but ignored) | SD pins are not connector-accessible anyway; the chime's RAM went to the sensor driver |
 | [0005](docs/adr/0005-consume-waveshare-bsp.md) | Use the upstream `waveshare/esp32_s3_touch_amoled_1_75` BSP | Maintained CO5300/CST9217 drivers; effort goes into rendering instead |
 | [0006](docs/adr/0006-custom-shapes-as-polygons.md) | Custom tick/needle/hub shapes are SVG-style polygons and circles, filled by our own anti-aliased rasteriser (`gauge_shape`) | Keeps the needle's tight dirty box; LVGL triangles seam, rotated images blow the budget |
 | [0007](docs/adr/0007-face-editor-static-app-with-parser-port.md) | The face editor is a dependency-free static web app carrying a line-for-line JS port of the gauge XML parser, held to the C by a differential test in CI | Its device verdict must follow the firmware's forgiving rules exactly; no JS toolchain in a C repository |
 | [0008](docs/adr/0008-gauge-serves-face-editor.md) | The firmware embeds the gzipped editor and serves it at `/editor/`; CORS only for loopback origins | Same origin avoids CORS and mixed content; embedded, not on LittleFS, so OTA keeps editor and parser in step; a wildcard origin would let any site replace faces |
+| [0009](docs/adr/0009-sensor-hub-sampling-and-calibration.md) | `sensor_hub`: single-shot ADS1115 multiplexing (MAP 100 Hz, others 10 Hz) woken by ALERT/RDY; ratiometric boost; key-on auto-zero; type K via numerically inverted NIST reference function; calibration in NVS, edited through one picker in settings | The BSP owns `I2C_NUM_1`; a row per calibration value cost 24KB of internal RAM and stopped WiFi |
 
 ---
 
@@ -131,17 +133,19 @@ when the code compiles.
 | M2 | Renderer and screens; 60fps gate | complete |
 | M3 | Configuration from LittleFS, gauge switching | complete |
 | M4 | Networking: provisioning, HTTP API, telemetry, OTA | complete |
-| **M5** | **Sensors: ADS1115 + MCP9600 front-end** | **next, blocked on hardware** |
-| M6 | Alerts, chime, peak-hold, datalogging | in progress |
+| **M5** | **Sensors: ADS1115 + TMP1075 front-end** | **firmware done; board at fab, untested** |
+| M6 | Alerts, peak-hold, datalogging (chime dropped) | in progress |
 | M7 | Configuration web app | in progress |
 | M8 | Portability: a second board profile | |
+
+**Frame rate is a user setting** (30 / 45 / 60 / Off, default 60): `apply_fps_cap()` in `app_ui.c` sets LVGL's refresh period, 1ms under the target frame time because the real interval runs ~1ms long. Measure the gate at the default. See [docs/performance.md](docs/performance.md).
 
 **Verified on hardware** (ESP32-S3 rev v0.2): **66.6 fps**, 13.2% dirty, 5.9ms render per
 15ms period, with the needle sweeping continuously. The swipe transition costs ~33 fps, a
 documented and accepted trade. Numbers and the two designs that failed first are in
 [docs/performance.md](docs/performance.md).
 
-**Custom shapes (ADR 0006) are built and host-tested only**: not yet run on a board, frame cost unmeasured.
+**Shipped faces are PX Ranger styled and generated** by `tools/faces/px_faces.py`; edit that, not the XML ([docs/gauge-faces.md](docs/gauge-faces.md)). The PX boost face runs at 61.5 fps. **`boost_custom` measures ~56 fps, below the 60fps gate**, because its shaped needle is bigger than the built-in footprint (20 × 180 px) the budget was measured at; keep shaped needles within it.
 
 **The face editor (`tools/config-app`) is built into the firmware and served by the gauge at `/editor/`**, which is where it uploads from; GitHub Pages cannot reach a gauge, and its deploy has not run yet. Its parser is a port of `gauge_config.c`: change both in the same commit, or CI's differential test fails. Every editor file ships in the app image (`net_svc/editor_bundle.cmake`), so editor changes need a firmware build. See [docs/config-app.md](docs/config-app.md).
 
@@ -163,8 +167,16 @@ allocates speaker and microphone buffers that do not fit once WiFi runs, and the
 the failure, boot-looping the board. OTA images confirm themselves 15s after startup, so a
 crash in that window rolls back rather than looping.
 
-**The value source is simulated** (`CONFIG_AI_GAUGE_SIMULATED_SOURCE`). **No sensor is being
-read**, and no sensor hardware exists yet.
+**WiFi starts 1s after the UI** (`NET_START_SETTLE_MS`). Starting it while the first frames are
+still rendering intermittently leaves it short of RX buffers. Keep the pause.
+
+**LVGL widgets cost internal RAM**, about 300 B each, because they are small `malloc`s. Count
+widgets before adding settings rows ([ADR 0009](docs/adr/0009-sensor-hub-sampling-and-calibration.md)).
+
+**Sensors:** `sensor_hub` drives the rear board on `I2C_NUM_0` (the BSP's bus is `I2C_NUM_1`).
+**It is built and runs on the display, but has never talked to a sensor board**: none has been
+assembled yet. Until a board answers, the needle shows the simulated sweep
+(`CONFIG_AI_GAUGE_SIMULATED_SOURCE`); after that, faults show as dashes.
 
 ### Measuring performance
 

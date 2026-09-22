@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { parseGauge } from '../js/parse.js';
-import { renderFace, renderNeedle, renderPeakText, renderReadout, renderStaticSvg } from '../js/render.js';
+import { renderFace, renderNeedle, tickColor, renderPeakText, renderReadout, renderStaticSvg } from '../js/render.js';
 import { createSim, needleAlertColor, readoutColor, resetPeak, stepSim } from '../js/sim.js';
-import { shippedFaces } from './corpus.mjs';
+import { CLASSIC_BOOST, shippedFaces } from './corpus.mjs';
 
 const face = (name) => parseGauge(shippedFaces().find((f) => f.name === name).xml).model;
+const classic = () => parseGauge(CLASSIC_BOOST).model;
 const count = (s, re) => (s.match(re) ?? []).length;
 
 test('damping and peak-hold', () => {
@@ -27,7 +28,7 @@ test('damping and peak-hold', () => {
 });
 
 test('alerts flash at the configured rate', () => {
-    const m = face('boost.xml');
+    const m = classic();
     m.source.damping = 0;
     const st = createSim(m);
 
@@ -66,7 +67,7 @@ test('alert handover keeps the first alert for the needle, as the firmware does'
 });
 
 test('face renders ticks, labels and titles', () => {
-    const svg = renderFace(face('boost.xml'));
+    const svg = renderFace(classic());
     assert.equal(count(svg, /<line /g), 31 + 7);
     assert.deepEqual([...svg.matchAll(/data-section="labels">(.*?)<\/g>/g)].length, 1);
     for (const label of ['0', '5', '10', '15', '20', '25', '30']) assert.match(svg, new RegExp(`>${label}</text>`));
@@ -89,9 +90,33 @@ test('only inheriting needle parts take the alert colour', () => {
 });
 
 test('readout and peak text', () => {
-    const m = face('boost.xml');
+    const m = classic();
     assert.match(renderReadout(m, 12.34), />12.3 psi<\/text>/);
     assert.match(renderPeakText(m, null), />PEAK --<\/text>/);
     assert.match(renderPeakText(m, 21), />PEAK 21.0<\/text>/);
     assert.match(renderStaticSvg(m, 10), /^<svg /);
+});
+
+test('band-color ticks take the colour of the band under them', () => {
+    const m = parseGauge('<gauge version="1" id="t"><source channel="c" min="0" max="30"/><face>' +
+        '<band from="0" to="25" color="#ffffff"/><band from="25" to="28" color="#ff0000"/>' +
+        '<ticks major-every="5" color="#0000ff" band-color="true"/></face></gauge>').model;
+    assert.equal(tickColor(m, 10), '#ffffff');
+    assert.equal(tickColor(m, 25), '#ff0000', 'a shared edge takes the later band');
+    assert.equal(tickColor(m, 30), '#0000ff', 'no band: the ticks colour');
+    const svg = renderFace(m);
+    assert.equal(count(svg, /stroke="#ff0000"/g), 1, 'one red tick');
+    assert.equal(count(svg, /stroke="#0000ff"/g), 1, 'one blue tick');
+    m.ticks.bandColor = false;
+    assert.equal(tickColor(m, 10), '#0000ff');
+});
+
+test('the PX boost face: segmented ring, red redline pointers, no minor ticks', () => {
+    const m = face('boost.xml');
+    const svg = renderFace(m, 'px');
+    assert.equal(count(svg, /<path /g), 8, 'seven ring segments, one split at the redline');
+    assert.equal(count(svg, /<use href="#px-major-tick"/g), 6, '0 to 25 in the ring colour');
+    assert.equal(count(svg, /<use href="#px-major-tick-1"/g), 1, '30, past the redline at 26, in red');
+    assert.equal(tickColor(m, 30), '#ff3030');
+    assert.equal(count(svg, /data-part="minor"/g), 0);
 });

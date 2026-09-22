@@ -1,6 +1,6 @@
 # ADR 0004 — Retain the microSD slot and audio codecs
 
-**Status:** Accepted
+**Status:** Accepted for microSD. The audio part is superseded: see the Amendment at the end.
 
 ## Context
 
@@ -58,3 +58,12 @@ So the rework buys nothing. Both subsystems stay, and both earn their place:
 **Neutral:**
 - If a future revision ever needs ADC1, this decision is reversible — the analysis above is
   the starting point, and the schematic pull-up question would need answering first.
+
+## Amendment (2026-09-22): audio dropped
+
+The owner has decided not to fit a speaker, so the chime had no way to be heard. `app_audio` and
+the "Alert sound" setting have been removed. That returned internal RAM that the sensor driver
+needed ([ADR 0009](0009-sensor-hub-sampling-and-calibration.md)). The codecs stay on the board
+(they are part of it) but are not initialised. `<alert chime="true">` is still parsed, so existing
+faces and the editor stay compatible, but the firmware ignores it. The microSD half of this
+decision stands.

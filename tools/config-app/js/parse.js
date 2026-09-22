@@ -507,6 +507,7 @@ function parseTicks(r, tag, m) {
     t.majorWidth = r.px(tag, 'major-width', t.majorWidth, 'ticks');
     t.minorWidth = r.px(tag, 'minor-width', t.minorWidth, 'ticks');
     t.color = r.color(tag, 'color', t.color, 'ticks color');
+    t.bandColor = r.bool(tag, 'band-color') ?? t.bandColor;
     m.ticks = t;
 }
 

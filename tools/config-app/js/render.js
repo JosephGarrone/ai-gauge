@@ -92,6 +92,18 @@ function bandPath(m, b) {
     return `<path d="${d}" fill="${b.color}"/>`;
 }
 
+/** gauge_config_tick_color(): the band's colour under band-color, the later band on a shared edge. */
+export function tickColor(m, value) {
+    const t = m.ticks;
+    if (!t?.bandColor) return t?.color;
+    const eps = (m.source.max - m.source.min) * 1e-4;
+    let color = t.color;
+    for (const b of m.bands) {
+        if (value >= b.from - eps && value <= b.to + eps) color = b.color;
+    }
+    return color;
+}
+
 function ticksLayer(m, prefix) {
     const t = m.ticks;
     if (!t) return { defs: '', body: '' };
@@ -107,9 +119,16 @@ function ticksLayer(m, prefix) {
         if (values.length === 0) continue;
         body += `<g data-section="ticks" data-part="${key}">`;
         if (shape) {
-            const id = `${prefix}-${key}-tick`;
-            defs += `<g id="${id}">${shapeParts(shape, t.color)}</g>`;
+            // One definition per colour in use: with band-color set, ticks differ by band.
+            const ids = new Map();
             for (const v of values) {
+                const color = tickColor(m, v);
+                let id = ids.get(color);
+                if (!id) {
+                    id = `${prefix}-${key}-tick${ids.size ? `-${ids.size}` : ''}`;
+                    ids.set(color, id);
+                    defs += `<g id="${id}">${shapeParts(shape, color)}</g>`;
+                }
                 const deg = valueToDeg(m, v);
                 const [dx, dy] = polar(outer, deg);
                 body += `<use href="#${id}" transform="translate(${n(CX + dx)} ${n(CY + dy)}) rotate(${n(deg)})"/>`;
@@ -119,7 +138,7 @@ function ticksLayer(m, prefix) {
                 const deg = valueToDeg(m, v);
                 const [x1, y1] = polarPx(outer, deg);
                 const [x2, y2] = polarPx(outer - len, deg);
-                body += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${t.color}" stroke-width="${width}" stroke-linecap="butt"/>`;
+                body += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${tickColor(m, v)}" stroke-width="${width}" stroke-linecap="butt"/>`;
             }
         }
         body += '</g>';

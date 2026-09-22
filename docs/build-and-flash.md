@@ -103,6 +103,8 @@ zig cc -std=c11 -Wall -Wextra -Werror -Ifirmware/components/gauge_config/include
 zig cc -std=c11 -Wall -Wextra -Werror -Ifirmware/components/gauge_shape/include \
   -Ifirmware/components/gauge_config/include \
   tools/host-tests/test_gauge_shape.c firmware/components/gauge_shape/gauge_shape.c -o tgs
+zig cc -std=c11 -Wall -Wextra -Werror -Ifirmware/components/sensor_hub/include \
+  tools/host-tests/test_sensor_math.c firmware/components/sensor_hub/sensor_math.c -o tsm
 ```
 
 ```bash

@@ -1,12 +1,16 @@
 menu "AI-Gauge"
 
 config AI_GAUGE_SIMULATED_SOURCE
-    bool "Drive channels from a simulated sweep"
+    bool "Sweep simulated values until a sensor board answers"
     default y
     help
-        Sweeps the gauge across its full range instead of reading real sensors. Keep this
-        enabled until sensor_hub and the external I2C front-end exist; it also lets the
-        renderer be exercised on a bare board with nothing wired to the expansion header.
+        Sweeps the gauge across its full range while no sensor board has answered since
+        startup, so the renderer can be exercised on a bare display with nothing wired to the
+        expansion header. Once a board has been seen, a sensor fault shows as dashes and the
+        sweep does not return until the next restart.
+
+        Turn this off for an installed gauge: a missing board then shows dashes from the
+        start instead of a moving needle.
 
 config AI_GAUGE_BENCH_TRANSITION
     bool "Benchmark the tile transition"

@@ -98,7 +98,7 @@ prefix + number + suffix is cut at 95.
 | colour | `#rrggbb` or `#rgb`. Emit `#rrggbb` |
 | bool | `true` / `false` (the parser also accepts `1` / `0`) |
 | int, float | Decimal. Out-of-range values clamp; see [§6](#6-validation) |
-| font | One of `montserrat_12`, `montserrat_16`, `montserrat_18`, `montserrat_20`, `montserrat_22`, `montserrat_24`, `montserrat_26`, `montserrat_48` |
+| font | One of `montserrat_12`, `montserrat_16`, `montserrat_18`, `montserrat_20`, `montserrat_22`, `montserrat_24`, `montserrat_26`, `montserrat_32`, `montserrat_48` |
 | point list | SVG `points` syntax: numbers separated by spaces and/or commas, in x,y pairs. Emit `x,y x,y …` |
 
 ---
@@ -190,6 +190,7 @@ Omit the element and there are no ticks.
 | `major-len`, `minor-len` | int | `20`, `10` | Ignored when the matching shape is set |
 | `major-width`, `minor-width` | int | `4`, `2` | Ignored when the matching shape is set |
 | `color` | colour | `#ffffff` | Inherited by tick shapes |
+| `band-color` | bool | `false` | A tick on a band takes that band's colour instead; on a shared edge, the later band wins. Colours ticks by zone, as a redline does |
 
 ### `<labels>` — inside `<face>`, at most one
 
@@ -262,7 +263,7 @@ Omit it and peak-hold is off.
 | `below` | float | — | Fires while the value is strictly less |
 | `color` | colour | `#d50000` | Flash colour |
 | `flash-hz` | float 0–20 | `2` | `0` = steady colour, no flashing |
-| `chime` | bool | `false` | Sound once on entry, if the user has chimes enabled |
+| `chime` | bool | `false` | Accepted but ignored: the gauge has no speaker |
 
 At least one of `above` / `below` is needed, or the alert is dropped.
 
@@ -431,6 +432,7 @@ is no readout.
 | `montserrat_22` | 24 |
 | `montserrat_24` | 27 |
 | `montserrat_26` | 29 |
+| `montserrat_32` | 35 |
 | `montserrat_48` | 52 |
 
 Montserrat is available from Google Fonts, so a preview can use the same face. Glyph metrics
@@ -476,6 +478,10 @@ inwards to `R − length`.
   to its colour, toggling every `500 / flash-hz` ms; with `flash-hz="0"` the colour stays
   steady. The chime sounds once on entry.
 - **Peak** tracks the *raw* (undamped) value. Tapping the dial clears it.
+- **Min/max recall** is not configured by the file. Long-pressing the dial shows `MAX` and `MIN`
+  for 3s in place of the readout and peak value, in `montserrat_26` and the readout's colour,
+  `format` and `suffix`, at the readout's position. The values are the raw input, before damping
+  *and before clamping*, since the face was loaded, so they can lie outside `[min, max]`.
 
 ### 5.7 Previewing shapes in SVG
 

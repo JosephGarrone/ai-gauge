@@ -249,6 +249,39 @@ update during which it remained the running image, but anything that adds intern
 must be measured. The HTTP request body and OTA buffers are now explicitly PSRAM, since both sat
 at or under the 4KB threshold below which plain `malloc()` still takes internal memory.
 
+### Sensor hub (M5) and removing audio, 2026-09-22
+
+Internal-RAM cost, measured on hardware by logging free internal heap around each step, with no
+sensor board attached:
+
+| Step | Internal RAM |
+|---|---|
+| `sensor_hub_start()`: bus, devices, ALERT ISR, semaphore (task stack is in PSRAM) | 1.5 KB |
+| Settings section, first design: a row per calibration value (~70 widgets) | **24.4 KB**, and WiFi failed to start (`esf_buf_setup_static: alloc eb fail`) |
+| Settings section, as built: one picker + one −/+ pair | 4.3 KB |
+
+Even at 5.9KB it only fitted comfortably once audio was removed. That gave 6 of 6 RX buffers and
+3.5KB of internal RAM free after WiFi init. Removing audio also removed ~900ms that had
+unintentionally separated the UI's first frames from WiFi init. Without it, WiFi failed in 2 of 4
+boots ("Expected to init 6 rx buffer, actual is 5"), with 50KB free but fragmented while the
+first frames were rendering. A 1s pause before `net_svc_start()` fixed it: 6/6 boots, and HTTP
+status, gauge list and editor all respond.
+
+Frame cost, A/B with the sensor bus disabled in `board_profile` (same build, same face
+`boost_custom`, needle sweeping, WiFi connected):
+
+| | fps | render |
+|---|---|---|
+| Sensor bus off | 56.4 | 8.79 ms |
+| Sensor bus on, no board | 56.3–56.6 | 8.8–8.9 ms |
+
+So `sensor_hub` costs nothing measurable on the dial, and the 56 fps predates this change.
+**It is below the 60 fps gate, and it is the face:** the same build ran the PX `boost` face at
+61.5 fps (see *Custom shapes* below). `boost_custom` is the custom-shape test face; the 66.6 fps
+figures were taken on the plain `boost` face as it was then. The sensor task's stack high-water mark was
+2.7KB free of 4KB after 30s. That will change once real conversions run, so re-read it with a
+board attached.
+
 ### WiFi static RX buffers
 
 Adding peak-hold stopped WiFi starting at all:
@@ -312,6 +345,34 @@ the scarcest resource on the board, so anything that adds a task, a stack, or a 
 must be measured. The method above (a failed-allocation callback plus a periodic `vTaskList()`
 dump) is the quickest way to find where it went.
 
+### Frame-rate limit setting, 2026-09-22
+
+The settings page's *Frame rate limit* (30 / 45 / 60 / Off) sets the period of LVGL's display
+refresh timer at runtime (`apply_fps_cap()` in `app_ui.c`), replacing `CONFIG_LV_DEF_REFR_PERIOD`
+once the UI is built. Measured on hardware: PX `boost` face, needle sweeping, WiFi connected, each
+cap held for 15 s by a temporary benchmark timer.
+
+**The real frame interval runs about 1 ms longer than the timer period.** The first periods tried,
+the target frame time rounded (33 / 22 / 16 ms), all came in about 5% low, and "60" missed the
+gate:
+
+| Setting | Period | fps | Period tried first | fps |
+|---|---|---|---|---|
+| 30 | 32 ms | **30.2** | 33 ms | 29.2 |
+| 45 | 21 ms | **45.4–45.6** | 22 ms | 43.3 |
+| 60 (default) | 15 ms | **61.7–62.0** | 16 ms | 59.2 |
+| Off | 1 ms | **99–105** | | |
+
+Render time per frame is unchanged by the cap (6.4–6.7 ms). Uncapped, frames come as fast as
+rendering allows (5.5–6 ms each, with smaller dirty regions because the needle moves less between
+frames), well past the 60 Hz the panel can show. With WiFi connected, HTTP requests during the
+uncapped window all succeeded, in 109–199 ms after a 498 ms first request. The sensor task's stack
+high-water mark was unchanged. "60" is the old 15 ms default, so the gate figures above still apply
+to the default setting.
+
+The lower caps exist to save power and heat, not frame time: the CPU is idle between frames.
+Anything below 60 is below the performance gate by the user's choice.
+
 ### Face editor served by the gauge (ADR 0008)
 
 Measured 2026-09-15 on hardware, with WiFi connected and the needle sweeping. The editor is 19 files,
@@ -368,10 +429,24 @@ has been verified on hardware.
 - A shaped needle also holds one worst-case A8 mask per part and a float scratch buffer, all in
   PSRAM.
 
-**Owed on hardware:**
-- Scenario 2 with `boost_custom`: fps, dirty %, render ms
-- Internal free heap after startup with WiFi, compared with the 8.6KB recorded above
-- A live switch between `boost` and `boost_custom`
+**First data point** (2026-09-22, incidental to M5): `boost_custom`, needle sweeping, WiFi
+connected: **56.4 fps**, 14.7% dirty, 8.8 ms mean render (12.5 ms max). That is below the 60 fps
+gate and not yet investigated. See *Sensor hub (M5)* above.
+
+**Same build, two shaped faces** (2026-09-22, with the PX restyle, [gauge-faces.md](gauge-faces.md)):
+
+| Face | Needle | fps | dirty | render |
+|---|---|---|---|---|
+| `boost_custom` | two polygons, 18 × 176 px | 55.8 | 14.9% | ~8.8 ms |
+| PX `boost` | one polygon, 19 × 180 px, small shaped hub | **61.2–61.8** | 10.8% | 6.5 ms (max 9.7) |
+
+A shaped needle kept to the built-in footprint stays above the gate, so a custom shape is not in
+itself the problem. What costs `boost_custom` its frames has not been pinned down: its 22 px
+two-colour hub, its second needle polygon, or its larger dirty area are the candidates. Free
+internal heap with WiFi connected was 8.7KB (1.0KB lowest). The switch between the two ran live,
+through the HTTP delete-fallback path, without a reboot.
+
+**Still owed:** the plain built-in-needle `boost` on this build, for the baseline.
 
 ### Not yet measured
 - Scenarios 1, 3 and 6.

@@ -31,11 +31,23 @@ typedef enum {
     APP_SETTINGS_ROTATION_COUNT,
 } app_settings_rotation_t;
 
+/**
+ * Frame-rate cap: the most frames per second the display will draw. Lower caps leave the CPU idle
+ * between frames; "uncapped" draws as fast as rendering allows, past what the 60 Hz panel can show.
+ */
+typedef enum {
+    APP_SETTINGS_FPS_CAP_30 = 0,
+    APP_SETTINGS_FPS_CAP_45,
+    APP_SETTINGS_FPS_CAP_60,
+    APP_SETTINGS_FPS_CAP_UNCAPPED,
+    APP_SETTINGS_FPS_CAP_COUNT,
+} app_settings_fps_cap_t;
+
 typedef struct {
     uint8_t brightness;                          /**< Percent, clamped to the range above. */
     bool    show_fps;                            /**< FPS badge on the gauge screen. */
-    bool    alert_sound;                         /**< Audible chime on alerts that request one. */
     app_settings_rotation_t rotation;            /**< Screen rotation. */
+    app_settings_fps_cap_t  fps_cap;             /**< Frame-rate cap. */
     char    active_gauge[APP_SETTINGS_MAX_GAUGE_ID];
 } app_settings_t;
 
@@ -56,11 +68,11 @@ void app_settings_set_brightness(uint8_t percent);
 /** @brief Update the FPS badge preference in memory. */
 void app_settings_set_show_fps(bool show);
 
-/** @brief Update the alert sound preference in memory. */
-void app_settings_set_alert_sound(bool on);
-
 /** @brief Update the screen rotation in memory. Out-of-range values are ignored. */
 void app_settings_set_rotation(app_settings_rotation_t rotation);
+
+/** @brief Update the frame-rate cap in memory. Out-of-range values are ignored. */
+void app_settings_set_fps_cap(app_settings_fps_cap_t cap);
 
 /** @brief Update the active gauge id in memory. */
 void app_settings_set_active_gauge(const char *id);

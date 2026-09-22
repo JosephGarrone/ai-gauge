@@ -19,15 +19,15 @@ static const char *NAMESPACE = "ai_gauge";
 
 static const char *KEY_BRIGHTNESS = "bright";
 static const char *KEY_SHOW_FPS   = "showfps";
-static const char *KEY_SOUND      = "sound";
 static const char *KEY_ROTATION   = "rotate";
+static const char *KEY_FPS_CAP    = "fpscap";
 static const char *KEY_GAUGE      = "gauge";
 
 static app_settings_t s_settings = {
     .brightness   = 80,
     .show_fps     = false,
-    .alert_sound  = true,
     .rotation     = APP_SETTINGS_ROTATION_0,
+    .fps_cap      = APP_SETTINGS_FPS_CAP_60,
     .active_gauge = "boost",
 };
 
@@ -62,11 +62,11 @@ esp_err_t app_settings_init(void)
     if (nvs_get_u8(h, KEY_SHOW_FPS, &u8) == ESP_OK) {
         s_settings.show_fps = (u8 != 0);
     }
-    if (nvs_get_u8(h, KEY_SOUND, &u8) == ESP_OK) {
-        s_settings.alert_sound = (u8 != 0);
-    }
     if (nvs_get_u8(h, KEY_ROTATION, &u8) == ESP_OK && u8 < APP_SETTINGS_ROTATION_COUNT) {
         s_settings.rotation = (app_settings_rotation_t)u8;
+    }
+    if (nvs_get_u8(h, KEY_FPS_CAP, &u8) == ESP_OK && u8 < APP_SETTINGS_FPS_CAP_COUNT) {
+        s_settings.fps_cap = (app_settings_fps_cap_t)u8;
     }
 
     size_t len = sizeof(s_settings.active_gauge);
@@ -77,9 +77,9 @@ esp_err_t app_settings_init(void)
 
     nvs_close(h);
 
-    ESP_LOGI(TAG, "loaded: brightness=%u%% show_fps=%d rotation=%d gauge='%s'",
+    ESP_LOGI(TAG, "loaded: brightness=%u%% show_fps=%d rotation=%d fps_cap=%d gauge='%s'",
              s_settings.brightness, (int)s_settings.show_fps, (int)s_settings.rotation * 90,
-             s_settings.active_gauge);
+             (int)s_settings.fps_cap, s_settings.active_gauge);
     return ESP_OK;
 }
 
@@ -105,14 +105,6 @@ void app_settings_set_show_fps(bool show)
     }
 }
 
-void app_settings_set_alert_sound(bool on)
-{
-    if (on != s_settings.alert_sound) {
-        s_settings.alert_sound = on;
-        s_dirty                = true;
-    }
-}
-
 void app_settings_set_rotation(app_settings_rotation_t rotation)
 {
     if ((unsigned)rotation >= APP_SETTINGS_ROTATION_COUNT) {
@@ -121,6 +113,17 @@ void app_settings_set_rotation(app_settings_rotation_t rotation)
     if (rotation != s_settings.rotation) {
         s_settings.rotation = rotation;
         s_dirty             = true;
+    }
+}
+
+void app_settings_set_fps_cap(app_settings_fps_cap_t cap)
+{
+    if ((unsigned)cap >= APP_SETTINGS_FPS_CAP_COUNT) {
+        return;
+    }
+    if (cap != s_settings.fps_cap) {
+        s_settings.fps_cap = cap;
+        s_dirty            = true;
     }
 }
 
@@ -153,10 +156,10 @@ esp_err_t app_settings_commit(void)
         err = nvs_set_u8(h, KEY_SHOW_FPS, s_settings.show_fps ? 1 : 0);
     }
     if (err == ESP_OK) {
-        err = nvs_set_u8(h, KEY_SOUND, s_settings.alert_sound ? 1 : 0);
+        err = nvs_set_u8(h, KEY_ROTATION, (uint8_t)s_settings.rotation);
     }
     if (err == ESP_OK) {
-        err = nvs_set_u8(h, KEY_ROTATION, (uint8_t)s_settings.rotation);
+        err = nvs_set_u8(h, KEY_FPS_CAP, (uint8_t)s_settings.fps_cap);
     }
     if (err == ESP_OK) {
         err = nvs_set_str(h, KEY_GAUGE, s_settings.active_gauge);

@@ -73,6 +73,21 @@ typedef void (*gauge_render_alert_cb_t)(const gauge_alert_t *alert, bool active,
 /** @brief Clear the peak marker and peak readout. No effect if the face has no `<peak>`. */
 void gauge_render_reset_peak(gauge_render_t *g);
 
+/**
+ * @brief Show the session minimum and maximum in place of the live and peak readouts.
+ *
+ * Reverts by itself after @p hold_ms; calling again while shown restarts the hold. The values
+ * are of the raw input, before damping and clamping to the scale, since the start of this
+ * gauge or the last gauge_render_reset_minmax().
+ */
+void gauge_render_recall_minmax(gauge_render_t *g, uint32_t hold_ms);
+
+/** @brief Whether the min/max recall is on screen. */
+bool gauge_render_minmax_recalled(const gauge_render_t *g);
+
+/** @brief Forget the recorded minimum and maximum. Updates the recall if it is showing. */
+void gauge_render_reset_minmax(gauge_render_t *g);
+
 /** @brief Register an alert transition callback, or NULL to remove it. */
 void gauge_render_set_alert_cb(gauge_render_t *g, gauge_render_alert_cb_t cb, void *user_data);
 

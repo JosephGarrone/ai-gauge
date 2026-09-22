@@ -55,9 +55,10 @@ function checkString(is, section, label, value, maxBytes, opts = {}) {
     if (/[&<]/.test(value) || (value.includes('"') && value.includes("'"))) {
         is.error(section, `${label} contains & < or both quote characters, which the file format cannot carry.`, opts);
     }
-    const unusual = [...new Set([...value].filter((c) => c < ' ' || c > '~'))];
+    // LVGL's built-in Montserrat is generated with -r 0x20-0x7F,0xB0,0x2022: ASCII plus ° and •.
+    const unusual = [...new Set([...value].filter((c) => (c < ' ' || c > '~') && c !== '°' && c !== '•'))];
     if (unusual.length > 0) {
-        is.warning(section, `${label} uses ${unusual.map((c) => `'${c}'`).join(', ')}; the device fonts only have plain ASCII, so it may not render.`, opts);
+        is.warning(section, `${label} uses ${unusual.map((c) => `'${c}'`).join(', ')}; the device fonts only have plain ASCII, ° and •, so it may not render.`, opts);
     }
 }
 

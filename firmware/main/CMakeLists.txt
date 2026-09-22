@@ -4,7 +4,6 @@ idf_component_register(
     INCLUDE_DIRS
         "."
     REQUIRES
-        app_audio
         app_settings
         app_ui
         board_profile
@@ -13,6 +12,7 @@ idf_component_register(
         gauge_render
         gauge_store
         net_svc
+        sensor_hub
         nvs_flash
         esp_timer
         app_update

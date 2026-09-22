@@ -157,6 +157,7 @@ static void dump(const gauge_config_t *c)
                c->face.ticks.major_len_px, c->face.ticks.minor_len_px,
                c->face.ticks.major_width_px, c->face.ticks.minor_width_px);
         put_color(c->face.ticks.color);
+        printf(",\"bandColor\":%s", c->face.ticks.band_color ? "true" : "false");
         printf(",\"majorShape\":");
         put_shape(&c->face.ticks.major_shape);
         printf(",\"minorShape\":");

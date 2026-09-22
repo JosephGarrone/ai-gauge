@@ -6,9 +6,10 @@ import {
     tickRadius, valueToDeg,
 } from '../js/geometry.js';
 import { parseGauge } from '../js/parse.js';
-import { shippedFaces } from './corpus.mjs';
+import { CLASSIC_BOOST, shippedFaces } from './corpus.mjs';
 
 const face = (name) => parseGauge(shippedFaces().find((f) => f.name === name).xml).model;
+const classic = () => parseGauge(CLASSIC_BOOST).model;
 
 test('value to angle', () => {
     const m = face('boost.xml');
@@ -19,8 +20,11 @@ test('value to angle', () => {
 });
 
 test('tick circle and label radius', () => {
-    const boost = face('boost.xml');
+    const boost = classic();
     assert.equal(tickRadius(boost), 225 - 18 - 6);
+
+    const px = face('boost.xml');
+    assert.equal(tickRadius(px), 220 - 12 - 6, 'the PX face sets its own radius');
 
     const custom = face('boost_custom.xml');
     assert.equal(tickRadius(custom), 225 - 10 - 6);

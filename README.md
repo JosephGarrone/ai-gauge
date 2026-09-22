@@ -57,19 +57,23 @@ project follows, then [docs/](docs/) for detail:
 
 ## Status
 
-Running on hardware, driven by a **simulated** value source — no sensor is being read yet, and
-the sensor board does not exist.
+Running on hardware. The sensor board has been designed and sent for fabrication, and the
+firmware to read it is written, but it has not met a board yet. Until one answers, the needle
+shows a **simulated** sweep.
 
 **Working today:** the dial renders from an XML configuration held on flash, with colour
 bands, ticks, labels and a damped needle. Crossing an alert threshold flashes the needle in the
 alert colour. A peak-hold marker records the highest reading on the dial; tap the dial to reset
-it. Swipe up for settings — pick a different gauge, adjust brightness, rotate the screen in 90°
-steps to suit how the gauge is mounted, toggle an FPS badge or the alert sound, and read live
+it. Long-press the dial to recall the session minimum and maximum for 3s; long-press again
+while they show to reset them. Swipe up for settings — pick a different gauge, adjust brightness, rotate the screen in 90°
+steps to suit how the gauge is mounted, cap the frame rate at 30, 45 or 60 fps or leave it
+uncapped, toggle an FPS badge, and read live
 frame statistics and firmware information. Choices persist across
-reboots.
+reboots. The settings page also shows live sensor readings and faults, has a **Zero boost now**
+button, and holds the sensor calibration (sensor range and output voltages, divider trims, EGT
+offset, smoothing, auto-zero).
 
-The alert chime is implemented and plays through the audio codec without errors, but nothing is
-audible on the development board, which appears to have no speaker fitted.
+There is no audible alert: no speaker will be fitted, so the chime was removed.
 
 Over WiFi, the gauge is set up from a phone and then reachable at `ai-gauge-XXXX.local`. Its HTTP
 API uploads new gauge faces and applies them live, accepts telemetry from other devices, and
@@ -110,13 +114,13 @@ Detail and exit criteria in [docs/roadmap.md](docs/roadmap.md).
 | M2 | Renderer and screens; the 60fps gate | ✅ |
 | M3 | Load configurations from flash; switch gauges at runtime | ✅ |
 | M4 | WiFi: provisioning, config upload, telemetry feeds, OTA | ✅ |
-| M5 | Sensors: boost via ADS1115, EGT via MCP9600 | blocked on hardware |
+| **M5** | **Sensors: boost via ADS1115, EGT via ADS1115 + TMP1075 cold junction** | **🚧 firmware done; board at fab** |
 | **M6** | **Alerts, peak-hold, min/max recall, datalogging** | **🚧 in progress** |
 | **M7** | **Web app for designing gauge faces** | **🚧 in progress** |
 | M8 | Portability: square and other round panels | |
 
-M6 so far: needle alert flash and peak-hold are verified on hardware; the chime is done but
-silent (no speaker). Min/max recall is next, and SD datalogging waits for a card.
+M6 so far: needle alert flash and peak-hold are verified on hardware; the chime was dropped (no
+speaker). SD datalogging waits for a card.
 
 M7 so far: the gauge serves the face editor, and faces upload from it, verified on hardware. The
 GitHub Pages copy awaits its first deploy, and the frame cost of a custom-shaped needle is still to

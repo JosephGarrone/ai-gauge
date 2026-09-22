@@ -52,6 +52,13 @@ the rasterisation itself, which is not yet measured.
 Digital readouts are their own small labels with their own background, so a changing number
 dirties only its own box rather than the dial behind it.
 
+### Frame-rate cap
+
+The display redraws on LVGL's refresh timer. Its period is the user's *Frame rate limit* setting
+(30 / 45 / 60 / Off, default 60), applied by `apply_fps_cap()` in `app_ui.c`; the Kconfig value
+only covers startup. The periods are 1 ms shorter than the target frame time, because the
+real interval runs about 1 ms long. Measurements in [performance.md](performance.md).
+
 ### 4. Flush buffers in internal DMA memory, not PSRAM
 
 LVGL runs in **partial mode** with two flush buffers of `466 x 20 x 2B = 18,640 bytes` each,

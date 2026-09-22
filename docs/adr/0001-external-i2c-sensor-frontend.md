@@ -20,13 +20,13 @@ in use.
 
 So the internal ADC is unavailable, and continuous WiFi is a product requirement.
 
-Separately, a K-type thermocouple outputs ~41µV/°C and requires cold-junction compensation. It
-cannot be connected to a general-purpose ADC at all — it needs a dedicated amplifier
-regardless of which ADC is available.
+Separately, a K-type thermocouple outputs ~41µV/°C and requires cold-junction compensation. The
+ESP32's internal ADC cannot resolve it. It needs either a dedicated amplifier or a precision
+ADC with a low-voltage range, plus a cold-junction sensor.
 
 ## Decision
 
-Read both sensors over a **second I2C bus** (`I2C_NUM_1`) on the expansion header:
+Read both sensors over a **second I2C bus** (`I2C_NUM_0`; the BSP owns `I2C_NUM_1`, see [ADR 0009](0009-sensor-hub-sampling-and-calibration.md)) on the expansion header:
 
 | GPIO | Role |
 |---|---|
@@ -36,13 +36,19 @@ Read both sensors over a **second I2C bus** (`I2C_NUM_1`) on the expansion heade
 
 > **Amended 2026-09-14:** originally SDA 17, SCL 18, ALERT 16, following upstream
 > `HARDWARE_REFERENCE.md`, which has the header order wrong. Header pins 6/7/8 are GPIO16/17/18;
-> the roles stay on the same physical pins. The MCP9600's alerts are push-pull, so only the
-> ADS1115 drives ALERT ([rear-pcb-parts.md](../rear-pcb-parts.md)).
+> the roles stay on the same physical pins. Only the ADS1115 drives ALERT; the MCP9600 then
+> fitted had push-pull alerts, and its TMP1075 replacement leaves its ALERT unconnected ([rear-pcb-parts.md](../rear-pcb-parts.md)).
 
 | Device | Address | Channel |
 |---|---|---|
-| ADS1115 (16-bit ADC) | 0x48 | `boost` |
-| MCP9600 (K-type + CJC) | 0x67 | `egt` |
+| ADS1115 (16-bit ADC) | 0x48 | `boost`; AIN3 carries the raw thermocouple voltage for `egt` |
+| TMP1075 (cold-junction sensor) | 0x49 | `egt` cold-junction compensation |
+
+> **Amended 2026-09-21:** the EGT path was originally an MCP9600 (K-type + CJC in one part,
+> 0x67). It cost about $10 of a board's parts. The thermocouple now goes into the ADS1115's
+> spare AIN3 at the ±0.256V range, and a ~$0.35 TMP1075 measures the cold junction. The firmware
+> does the linearisation and CJC. Accuracy is similar, about ±3°C. The cost is that the ADS1115
+> has no free input left. The I2C-only decision below is unchanged.
 
 Wiring, scaling maths and protection requirements are in
 [../sensor-frontend.md](../sensor-frontend.md).
@@ -60,7 +66,8 @@ actively drives GPIO10), so it means board rework, and it would not avoid needin
 thermocouple amplifier anyway.
 
 **MAX31855 / MAX31856 for the thermocouple.** Rejected: both are SPI, and no SPI pins remain
-free. The MCP9600 is the I2C equivalent.
+free. The MCP9600 is the I2C equivalent. It was used at first, then replaced by ADS1115 AIN3 plus
+a TMP1075 on cost (see the amendment above).
 
 **UART companion MCU doing all analogue conditioning.** Rejected as unnecessary complexity for
 two channels. It remains the right answer if the channel count grows substantially or if
@@ -84,7 +91,8 @@ engine bay.
 **Bad:**
 - Two additional components and a small custom sensor board to design and build.
 - ADS1115 tops out at 860 SPS. Ample for a boost gauge, but it forecloses high-rate sampling
-  should a future channel need it.
+  should a future channel need it. Its four inputs are now all used (MAP, sensor supply,
+  ignition, thermocouple).
 - A 5V rail is needed for the MAP sensor, plus the automotive protection circuitry described
   in [../sensor-frontend.md](../sensor-frontend.md).
 

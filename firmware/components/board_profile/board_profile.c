@@ -20,6 +20,20 @@ static const board_profile_t s_profile = {
     .has_imu        = true,
     .has_rtc        = true,
     .has_battery    = true,
+
+    /*
+     * The 8-pin header's free pins (docs/hardware-reference.md): SDA pin 6, SCL pin 7, ADS1115
+     * ALERT/RDY pin 8. 100 kHz because the bus leaves the board through a connector.
+     *
+     * I2C_NUM_0, because the BSP's own bus (touch, codec, PMIC) is on I2C_NUM_1: that is the
+     * BSP's CONFIG_BSP_I2C_NUM default. Measured on hardware: asking for port 1 here failed with
+     * "bus already acquired", and the failed attempt broke the codec's bus on the way out.
+     */
+    .sensor_i2c_port   = 0,
+    .sensor_sda_gpio   = 16,
+    .sensor_scl_gpio   = 17,
+    .sensor_alert_gpio = 18,
+    .sensor_i2c_hz     = 100000,
 };
 
 const board_profile_t *board_profile_get(void)

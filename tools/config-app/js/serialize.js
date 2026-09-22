@@ -107,6 +107,7 @@ export function serializeGauge(m) {
             ['minor-len', t.minorLen, !t.minorShape && t.minorLen !== 10],
             ['minor-width', t.minorWidth, !t.minorShape && t.minorWidth !== 2],
             ['color', t.color],
+            ['band-color', 'true', t.bandColor],
         ]);
         if (t.majorShape || t.minorShape) {
             w.line(2, `<ticks${a}>`);

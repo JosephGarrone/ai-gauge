@@ -170,6 +170,7 @@ typedef struct {
             uint16_t      major_width_px;
             uint16_t      minor_width_px;
             gauge_color_t color;
+            bool          band_color;    /**< Each tick takes the colour of the band it sits on. */
             gauge_shape_t major_shape;   /**< When set, replaces major_len/width. */
             gauge_shape_t minor_shape;   /**< When set, replaces minor_len/width. */
         } ticks;
@@ -262,6 +263,15 @@ gauge_config_err_t gauge_config_parse(const char *xml, size_t len, gauge_config_
 
 /** @brief Human-readable form of an error code, for logs and HTTP responses. */
 const char *gauge_config_err_str(gauge_config_err_t err);
+
+/**
+ * @brief The colour a tick at @p value is drawn in, before any colour its own shape part sets.
+ *
+ * `<ticks color>`, unless `band-color` is set and a band covers @p value: then that band's colour.
+ * Where bands overlap or share an edge, the one later in the file wins, so a tick on the boundary
+ * of an ascending run of bands takes the colour of the band above it.
+ */
+gauge_color_t gauge_config_tick_color(const gauge_config_t *cfg, float value);
 
 /**
  * @brief Load the compiled-in fallback face into @p out.

@@ -36,7 +36,7 @@ serves both the boost and the EGT gauge.
                                     reverse-block      │   │
                                           │         divider│
                                           ▼            │   │
-                                   H2 pin 1 (VBUS)  ADS1115 MCP9600 ── I2C ── H2 pins 6/7/8
+                                   H2 pin 1 (VBUS)  ADS1115 TMP1075 ── I2C ── H2 pins 6/7/8
                                    H2 pin 2 (GND)      ▲
                                    H2 pin 3 (3V3) ─────┴── logic supply, I2C pull-ups
 ```
@@ -73,7 +73,7 @@ From the upstream schematic:
 
 - **3V3 (pin 3)** is `VCC3V3`, the output of the AXP2101's DCDC1. Feeding a second supply into
   a regulator output makes the two fight each other. Use pin 3 only as a **supply** for this
-  board's logic (ADS1115, MCP9600, I2C pull-ups), which draws a few mA.
+  board's logic (ADS1115, TMP1075, I2C pull-ups), which draws a few mA.
 - **VBUS (pin 1)** is the same net as the USB-C connector's VBUS and the AXP2101 VBUS input.
   Its only protection is a `LTVS16H5.0ET5G` TVS diode at the USB connector. There is no diode
   between USB and the header.
@@ -132,7 +132,8 @@ All pass-through current flows through board-level copper and connector contacts
 The board runs **only from ignition**, so it cannot flatten the battery. Battery 12V is passed
 through untouched. It has no job yet. Possible later uses, none planned:
 
-- Battery-voltage readout through a divider into a spare ADS1115 channel (AIN1/AIN2 are free).
+- Battery-voltage readout. No ADS1115 channel is free any more (AIN0–3: MAP, sensor supply,
+  ignition, thermocouple), so this would need a second ADC.
 - A deliberate shutdown, e.g. saving min/max to flash when ignition drops. This would need a
   battery-fed supply with very low quiescent current, and is out of scope for v1.
 
@@ -179,7 +180,7 @@ manual has not been checked for this ([sensor-frontend.md](sensor-frontend.md) v
 
 ### J4 — EGT K-type thermocouple, 2-pin
 
-**Polarity does matter.** A thermocouple is a voltage source. Reversed, the MCP9600 sees
+**Polarity does matter.** A thermocouple is a voltage source. Reversed, the firmware sees
 temperature rises as *falls*: at idle it reads below ambient, and it goes further wrong as the
 exhaust heats. The pins must be marked `T+` / `T−` on the silkscreen, and the probe's leads
 identified. Common colour codes: ANSI yellow `+` / red `−`; IEC green `+` / white `−`. Confirm
@@ -188,10 +189,10 @@ on the probe itself: in a type K thermocouple the negative (alumel) conductor is
 magnet picks it out; or warm the tip and read the millivolt sign on a meter.
 
 The copper connector here is the thermocouple's **cold junction**. That is correct, provided
-the connector sits at the same temperature as the MCP9600, which measures that temperature
-itself:
+the connector sits at the same temperature as the TMP1075 (U6), which measures that
+temperature:
 
-- Place J4 **immediately beside** the MCP9600, sharing a solid ground pour, away from the buck
+- Place J4 **immediately beside** U6, sharing a solid ground pour, away from the buck
   and its inductor.
 - Everything upstream of J4 (probe to connector) stays K-type extension wire, as
   sensor-frontend.md already requires.
@@ -205,8 +206,8 @@ The original idea was a DIP switch choosing which sensor's value reaches the ESP
 architecture there is nothing to switch:
 
 - **Both sensors share one I2C bus** on header pins 6/7, at different addresses (ADS1115 `0x48`,
-  MCP9600 `0x67`). The firmware reads both on every cycle over the same two wires.
-- **The shared ALERT line** (pin 8) is open-drain, so both chips can drive it.
+  TMP1075 `0x49`). The firmware reads both on every cycle over the same two wires.
+- **The ALERT line** (pin 8) is open-drain and driven only by the ADS1115.
 - **Which value the gauge shows is already configuration**: `<source channel="boost">` or
   `<source channel="egt">` in the face XML ([gauge-config-schema.md](gauge-config-schema.md)).
 
@@ -223,8 +224,8 @@ where a jumper would make boards non-identical.
 
 Rear boards are therefore fully interchangeable. What makes a unit a boost or EGT gauge is the
 face config stored on the display, which does not change when the rear board is swapped. If a
-hardware role selector is ever wanted anyway, **no GPIO is left to read it with**. It would have
-to go into a spare ADS1115 input (AIN3) and be read at startup.
+hardware role selector is ever wanted anyway, **no GPIO is left to read it with**, and all four
+ADS1115 inputs are now in use.
 
 ## Board outline and layout
 
@@ -254,12 +255,30 @@ Layout priorities:
    actually is.
 2. **Keep clear of the display board's rim features**: USB-C, buttons, the microSD slot and the
    battery connector must stay reachable, or at least not be crushed.
-3. **Split noisy and quiet**: buck and inductor on one side; ADS1115, MCP9600 and J4 on the other.
+3. **Split noisy and quiet**: buck and inductor on one side; ADS1115, TMP1075 and J4 on the other.
 4. **Strain relief**: harness pulls must not go into the 8-pin header's solder joints. Add a
    cable-tie slot or adhesive standoff.
 5. **Assembly order**: the rear PCB is soldered to a board with a display on it. Keep tall and
    hot-to-solder parts where an iron can reach, or assemble the PCB first and solder the header
    last.
+
+### Net classes
+
+Defined in the KiCad project and assigned by net-name patterns. Widths are for JLCPCB 2-layer
+1oz outer copper at about a 10°C rise (IPC-2152). Extra rules live in `map-and-egt-daughterboard.kicad_dru`.
+
+| Class | Nets | Track | Clearance | Via | Why |
+|---|---|---|---|---|---|
+| Default | I2C, ALERT, FB, RT, ILIM, BOOT, dividers | 0.2 | 0.2 | 0.6/0.3 | Signal |
+| Chain_12V | `Net-(J1-Pin_1..3)`: battery, ignition, spare pass-through | 1.0 | 0.3 | 0.8/0.4 | Whole daisy chain, up to 2A |
+| Power_12V | `/IGN` (after the fuse), `/VIN_P` | 0.8 | 0.3 | 0.8/0.4 | ~0.9A, 3A until the fuse trips; sees surges |
+| SW | `/SW` | 1.0 | 0.3 | none (rule) | ~3.8A peak; keep it short and on one layer |
+| Power_5V | `/+5V`, `/+5V_ESP` | 0.8 | 0.2 | 0.8/0.4 | 1.5A display feed |
+| Power_Low | `/+3V3`, `/+5V_SNS` | 0.4 | 0.2 | 0.6/0.3 | ≤150mA |
+| Analog | `/TC+`, `/TC_IN`, `Net-(U4-AIN?)` | 0.25 | 0.2 | 0.6/0.3 | Kept ≥1.5mm from `SW` (rule) |
+
+GND stays in Default and is carried by fills on both layers, stitched with vias. Use two or more
+vias wherever a power net changes layer.
 
 ## Open questions
 

@@ -36,11 +36,13 @@ test('formats, fonts and characters', () => {
     const m = boost();
     m.readout.format = '%d';
     m.labels.font = 'montserrat_14';
-    m.readout.suffix = ' °C';
+    m.readout.suffix = ' µs';
+    m.readout.prefix = '°';
     m.titles[0].text = 'A & B';
     assert.equal(having(m, 'error', /Readout format '%d'/).length, 1);
     assert.equal(having(m, 'error', /not a device font/).length, 1);
-    assert.equal(having(m, 'warning', /'°'/).length, 1);
+    assert.equal(having(m, 'warning', /'µ'/).length, 1, 'not in the device fonts');
+    assert.equal(having(m, 'warning', /'°'/).length, 0, 'the device fonts carry the degree sign');
     assert.equal(having(m, 'error', /& </).length, 1);
 });
 

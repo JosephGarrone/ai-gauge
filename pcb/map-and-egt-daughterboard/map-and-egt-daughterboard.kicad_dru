@@ -1,0 +1,22 @@
+(version 1)
+
+# Thermocouple and ADC inputs stay well away from the buck's switch node.
+(rule "Analog clear of switch node"
+	(condition "A.hasNetclass('Analog') && B.hasNetclass('SW')")
+	(constraint clearance (min 1.5mm)))
+
+# Vias carrying real current: 0.8/0.4mm, and place two or more per layer change.
+(rule "Power vias"
+	(condition "A.Type == 'Via' && (A.hasNetclass('Chain_12V') || A.hasNetclass('Power_12V') || A.hasNetclass('Power_5V'))")
+	(constraint via_diameter (min 0.8mm))
+	(constraint hole_size (min 0.4mm)))
+
+# Keep the switch node on one layer: smallest loop, least radiated noise.
+(rule "No vias on switch node"
+	(condition "A.Type == 'Via' && A.hasNetclass('SW')")
+	(constraint disallow via))
+
+# U6 (VSSOP-8, 0.65mm pitch) has 0.15mm between its own pads; JLCPCB's minimum is 0.1mm.
+(rule "U6 fine-pitch pads"
+	(condition "A.Type == 'Pad' && B.Type == 'Pad' && A.memberOfFootprint('U6') && B.memberOfFootprint('U6')")
+	(constraint clearance (min 0.15mm)))

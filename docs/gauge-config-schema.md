@@ -112,6 +112,7 @@ A coloured arc segment marking a value range.
 | `major-len`, `minor-len` | int | `20`, `10` | Tick length in pixels |
 | `major-width`, `minor-width` | int | `4`, `2` | Tick thickness in pixels |
 | `color` | colour | `#ffffff` | Tick colour |
+| `band-color` | bool | `false` | Each tick takes the colour of the band it sits on. Where bands overlap or share an edge, the one later in the file wins, so in an ascending run a tick on a boundary takes the band above. A tick on no band keeps `color`. Shape parts with their own colour keep it |
 
 Optional children: `<major-shape>` and `<minor-shape>` replace the built-in rectangular ticks
 with a custom outline, and make the matching `-len` and `-width` attributes irrelevant. See
@@ -171,7 +172,8 @@ The live numeric value. A separate LVGL label, not part of the background — se
 ### `<peak>` (0..1)
 
 A telltale marker that stays at the highest value reached, with an optional peak readout.
-**Tapping the dial clears it.** The marker is drawn over the face and under the needle, and is
+**Tapping the dial clears it.** (A long-press is min/max recall, which every face has; see
+[gauge-xml-interface.md](gauge-xml-interface.md).) The marker is drawn over the face and under the needle, and is
 repainted only when the peak rises, so it costs nothing while the value is below its peak.
 
 The peak tracks the **raw input value, before damping**, so a brief boost spike registers even
@@ -200,7 +202,7 @@ Fires when the value crosses a threshold. Give `above`, `below`, or both.
 | `below` | float | — | Trigger when value falls below this |
 | `color` | colour | `#d50000` | Flash colour applied to readout and needle |
 | `flash-hz` | float | `2` | Flash rate; `0` = steady colour change, no flash |
-| `chime` | bool | `false` | Audible alert via the onboard ES8311 codec |
+| `chime` | bool | `false` | Parsed but **ignored**: audio was dropped ([ADR 0004](adr/0004-retain-sd-and-audio.md)). Kept so existing faces stay valid |
 
 ## Shapes
 
@@ -321,7 +323,7 @@ The hub never flashes, just as the built-in hub never has.
   in x,y pairs. Accepts signs, decimals and exponents (`1e1`), and SVG's run-together forms
   (`3-4` is `3, -4`; `.5.5` is `0.5, 0.5`).
 - **font name** — one of the fonts compiled into the firmware. Currently the Montserrat
-  sizes enabled in `sdkconfig.defaults`: `montserrat_12/16/18/20/22/24/26/48`. An unknown
+  sizes enabled in `sdkconfig.defaults`: `montserrat_12/16/18/20/22/24/26/32/48`. An unknown
   font name falls back to LVGL's default font (`montserrat_14`, which is otherwise not
   selectable) and logs a warning on the serial console. It does not count as a parse warning.
 

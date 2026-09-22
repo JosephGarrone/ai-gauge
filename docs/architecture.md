@@ -9,18 +9,16 @@
 | `gauge_store` | Owns the LittleFS `storage` partition: list, load, save and delete configs. Keeps filesystem concerns out of `gauge_config`. |
 | `gauge_shape` | Geometry and anti-aliased rasterisation of custom tick, needle and hub shapes ([ADR 0006](adr/0006-custom-shapes-as-polygons.md)). No LVGL, no I/O — tested on the host. |
 | `gauge_render` | Build the LVGL dial from a `gauge_config_t`: pre-rendered face, needle sprite, readouts, alerts. |
-| `sensor_hub` | Own `I2C_NUM_1`; drive ADS1115 and MCP9600; scale, filter and publish readings. Also hosts the simulated and network sources. |
-| `app_settings` | NVS-backed user settings (active gauge, brightness, rotation, FPS badge, alert sound). |
+| `sensor_hub` | Own `I2C_NUM_0`; drive ADS1115 and TMP1075 (EGT linearisation + cold-junction compensation); scale, filter and publish readings; own the sensor calibration in NVS. Pure maths in `sensor_math.c`, host-tested. See [ADR 0009](adr/0009-sensor-hub-sampling-and-calibration.md). |
+| `app_settings` | NVS-backed user settings (active gauge, brightness, rotation, FPS badge). |
 | `app_ui` | Tileview screens: the dial and the swipe-up settings page. |
-| `app_audio` | Alert chime through the ES8311, on its own speaker-only I2S channel. Never uses the BSP audio setup. |
 | `net_svc` | WiFi provisioning, HTTP server, mDNS, telemetry ingest, OTA. |
 
 Dependency direction is strictly one-way:
 
 ```
 main
- ├── app_ui       ──> gauge_render, gauge_store, gauge_perf, app_settings
- ├── app_audio    ──> app_settings
+ ├── app_ui       ──> gauge_render, gauge_store, gauge_perf, app_settings, sensor_hub
  ├── gauge_render ──> gauge_config, gauge_shape, board_profile
  ├── gauge_store  ──> gauge_config
  ├── sensor_hub   ──> (nothing above it)
@@ -37,7 +35,7 @@ attached.
 | Task | Core | Prio | Responsibility |
 |---|---|---|---|
 | `lvgl_port` (from `esp_lvgl_port`) | 1 | 4 | LVGL timer handler and flush. Owns the LVGL mutex. |
-| `sensor_hub` | 0 | 5 | I2C polling, scaling, filtering, snapshot publish |
+| `sensor_hub` | 0 | 5 | I2C sampling, scaling, filtering, snapshot publish. 4KB stack **in PSRAM** (2.7KB unused, measured), so it never writes flash |
 | `net_svc` | 0 | 3 | WiFi, HTTP, mDNS, telemetry, OTA |
 
 The LVGL task gets **core 1 to itself**. Everything that can block — I2C transactions, WiFi,
@@ -50,10 +48,15 @@ response does not.
 ## Data flow
 
 ```
-ADS1115 / MCP9600 ─┐
-simulated source  ─┼─> sensor_hub ─> channel snapshot ─> LVGL timer ─> gauge_render
-UDP telemetry     ─┘                  (lock-free)         (core 1)
+ADS1115 / TMP1075 ──> sensor_hub ──> snapshot (lock-free) ─┐
+UDP telemetry ──> net_svc ──> latest value (spinlock) ────────┼─> value_timer_cb ─> gauge_render
+simulated sweep (until a board has answered) ─────────────────┘   (LVGL task, 5ms)
 ```
+
+`value_timer_cb()` in `app_main.c` picks one source per tick. First, telemetry for the face's
+channel, if it arrived in the last second. Then `sensor_hub`, once a board has answered. Then the
+simulated sweep, if built in, until a board has answered. Otherwise the channel is invalid.
+`sensor_hub` publishes in native units (kPa, °C, V); the face's `unit` converts them.
 
 ### The snapshot rule
 
@@ -93,8 +96,15 @@ a bolt-on.
 An `lv_tileview` with two vertically stacked tiles:
 
 - **Tile 0 — dial.** The gauge. Optimised per [display-pipeline.md](display-pipeline.md).
+  A tap (`LV_EVENT_SHORT_CLICKED`) clears the peak. A long-press shows the session min/max for
+  3s, and a second long-press while shown resets them. `SHORT_CLICKED` rather than `CLICKED`
+  because LVGL also sends `CLICKED` when a long press is released. Min/max lives in
+  `gauge_render`, so it resets on reboot and on switching faces; persisting it needs the
+  ignition-drop hold-up discussed in [rear-pcb.md](rear-pcb.md).
 - **Tile 1 — settings.** WiFi status and provisioning, gauge selection, brightness, screen
-  rotation, units, FPS overlay toggle, firmware version, and any config-load warnings. Sized for
+  rotation, frame-rate limit (30 / 45 / 60 / Off), units, FPS overlay toggle, live sensor readings with *Zero boost now*, sensor
+  calibration (one picker and one −/+ pair, for the RAM reason in ADR 0009), firmware version,
+  and any config-load warnings. Sized for
   a finger on a 1.75" panel: 26px text or larger, and controls at least 54px tall.
 
 Rotation is applied by the panel itself (MADCTL), not by LVGL: the adapter never rotates frames
@@ -115,8 +125,9 @@ thing the UI does — see the worst-case analysis in
    next available config is tried, and the compiled-in default face is the last resort.
    Whatever happened is surfaced on the settings page, not just in the serial log.
 5. `gauge_render` pre-renders the face and builds the screen.
-6. `sensor_hub` starts (real sources if the I2C front-end responds, simulated otherwise).
-7. `app_audio` claims its I2S buffers.
+6. `sensor_hub` starts. It never fails for a missing board: it keeps probing every 2s.
+7. A 1s pause, so the first frames' transient allocations are gone before WiFi claims its
+   buffers ([ADR 0009](adr/0009-sensor-hub-sampling-and-calibration.md)).
 8. `net_svc` starts last — nothing in the display path waits on the network. Inside it, the HTTP
    server starts before WiFi initialises, for the memory reason in [performance.md](performance.md).
 

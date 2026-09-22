@@ -9,6 +9,9 @@
 #include "app_ui.h"
 
 #include <inttypes.h>
+#include <math.h>
+#include <stdarg.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -23,6 +26,7 @@
 #include "app_settings.h"
 #include "gauge_perf.h"
 #include "gauge_store.h"
+#include "sensor_hub.h"
 
 static const char *TAG = "app_ui";
 
@@ -60,6 +64,53 @@ static const char *TAG = "app_ui";
 /* How long "Reset network" waits for the confirming second tap. */
 #define NET_RESET_CONFIRM_MS 4000
 
+/* How long a long-press shows min/max before the live readout returns. */
+#define MINMAX_RECALL_MS 3000
+
+#define COLOR_FAULT 0xffab00
+#define DEG         "\xC2\xB0"
+
+/*
+ * Sensor calibration, edited on the settings page with one picker and one -/+ pair rather than a
+ * row per parameter. Measured: a row each cost 24KB of internal RAM (LVGL widgets are small
+ * allocations, which land in internal RAM), enough to stop WiFi starting. A tap moves the value
+ * one step, holding repeats, and the result is saved once, on release.
+ */
+typedef enum {
+    CAL_FLOAT,
+    CAL_BOOL, /* -/+ turns it off/on */
+} cal_kind_t;
+
+typedef struct {
+    const char *name;
+    cal_kind_t  kind;
+    const char *fmt;    /* CAL_FLOAT: for the displayed value */
+    size_t      offset; /* of the field in sensor_hub_cal_t */
+    float       step;   /* CAL_FLOAT: in the field's own unit */
+    float       scale;  /* CAL_FLOAT: displayed = field * scale */
+} cal_param_t;
+
+#define CAL_F(name, fmt, field, step, scale) \
+    {name, CAL_FLOAT, fmt, offsetof(sensor_hub_cal_t, field), step, scale}
+#define CAL_B(name, field) {name, CAL_BOOL, NULL, offsetof(sensor_hub_cal_t, field), 0.0f, 0.0f}
+
+static const cal_param_t k_cal_params[] = {
+    CAL_B("Auto-zero at start", auto_zero),
+    CAL_F("Stored zero",        "%.1f kPa",       baro_kpa,     0.1f,   1.0f),
+    CAL_F("Sensor range",       "%.1f bar abs",   map_p_hi_kpa, 10.0f,  0.01f),
+    CAL_F("Output at 0 bar",    "%.2f V",         map_v_lo,     0.01f,  1.0f),
+    CAL_F("Output at max",      "%.2f V",         map_v_hi,     0.01f,  1.0f),
+    CAL_B("Ratiometric",        ratiometric),
+    CAL_F("Boost smoothing",    "%.0f ms",        boost_tau_ms, 10.0f,  1.0f),
+    CAL_F("EGT offset",         "%+.1f " DEG "C", egt_offset_c, 0.5f,   1.0f),
+    CAL_F("EGT smoothing",      "%.0f ms",        egt_tau_ms,   50.0f,  1.0f),
+    CAL_F("MAP divider",        "%.3f",           map_div,      0.002f, 1.0f),
+    CAL_F("Supply divider",     "%.3f",           supply_div,   0.002f, 1.0f),
+    CAL_F("Ignition divider",   "%.3f",           ignition_div, 0.01f,  1.0f),
+};
+
+#define CAL_PARAM_COUNT (sizeof(k_cal_params) / sizeof(k_cal_params[0]))
+
 /*
  * Rotation is done by the panel (MADCTL), not by LVGL. The BSP registers this QSPI panel with
  * the adapter as interface OTHER, for which the adapter never rotates frames -- and a hardware
@@ -84,6 +135,23 @@ static const char *const k_rotation_map[] = {
     "0" "\xC2\xB0", "90" "\xC2\xB0", "180" "\xC2\xB0", "270" "\xC2\xB0", "",
 };
 
+/*
+ * Frame-rate cap, as the period of LVGL's display refresh timer. Each is 1ms shorter than the
+ * target's frame time: measured on hardware, the real interval runs about 1ms longer than the
+ * period (the timer is serviced on 1ms ticks after the previous frame's work), so 33/22/16ms gave
+ * 29.2, 43.3 and 59.2 fps -- and "60" must not land below 60. "Off" is a 1ms period: the display
+ * redraws as soon as a frame is rendered and the value has moved, so the rate is set by render
+ * time, faster than the 60 Hz panel can show. Measurements: docs/performance.md.
+ */
+static const uint32_t k_fps_cap_period_ms[APP_SETTINGS_FPS_CAP_COUNT] = {
+    [APP_SETTINGS_FPS_CAP_30]       = 32,
+    [APP_SETTINGS_FPS_CAP_45]       = 21,
+    [APP_SETTINGS_FPS_CAP_60]       = 15,
+    [APP_SETTINGS_FPS_CAP_UNCAPPED] = 1,
+};
+
+static const char *const k_fps_cap_map[] = {"30", "45", "60", "Off", ""};
+
 static struct {
     lv_obj_t *tileview;
     lv_obj_t *tile_gauge;
@@ -105,6 +173,11 @@ static struct {
     bool        net_reset_armed;
 
     app_ui_network_reset_cb_t on_network_reset;
+
+    lv_obj_t *sensor_status_label;
+    lv_obj_t *sensor_msg_label;
+    lv_obj_t *cal_dropdown;
+    lv_obj_t *cal_value_label;
 
     /* Ids backing the dropdown, in the order they appear in it. */
     char gauge_ids[GAUGE_STORE_MAX_GAUGES][GAUGE_CONFIG_MAX_ID_LEN];
@@ -145,6 +218,18 @@ static void apply_rotation(app_settings_rotation_t rotation)
     /* What is on the glass was drawn for the old orientation. */
     lv_obj_invalidate(lv_screen_active());
 }
+
+static void apply_fps_cap(app_settings_fps_cap_t cap)
+{
+    lv_display_t *disp  = lv_display_get_default();
+    lv_timer_t   *timer = (disp != NULL) ? lv_display_get_refr_timer(disp) : NULL;
+    if (timer == NULL || (unsigned)cap >= APP_SETTINGS_FPS_CAP_COUNT) {
+        return;
+    }
+    lv_timer_set_period(timer, k_fps_cap_period_ms[cap]);
+    ESP_LOGI(TAG, "refresh period %" PRIu32 " ms", k_fps_cap_period_ms[cap]);
+}
+
 
 static void apply_rotation_async_cb(void *arg)
 {
@@ -255,6 +340,17 @@ static void rotation_changed_cb(lv_event_t *e)
     lv_async_call(apply_rotation_async_cb, (void *)(uintptr_t)rotation);
 }
 
+static void fps_cap_changed_cb(lv_event_t *e)
+{
+    uint32_t idx = lv_buttonmatrix_get_selected_button(lv_event_get_target(e));
+    if (idx >= APP_SETTINGS_FPS_CAP_COUNT) {
+        return; /* LV_BUTTONMATRIX_BUTTON_NONE */
+    }
+    app_settings_set_fps_cap((app_settings_fps_cap_t)idx);
+    app_settings_commit();
+    apply_fps_cap((app_settings_fps_cap_t)idx);
+}
+
 static void set_net_reset_armed(bool armed)
 {
     s.net_reset_armed = armed;
@@ -327,7 +423,11 @@ static void gauge_selected_cb(lv_event_t *e)
     s.on_gauge_selected(s.gauge_ids[idx]);
 }
 
-/* Tapping the dial clears the peak marker. LVGL does not report a swipe as a click. */
+/*
+ * Tapping the dial clears the peak marker. SHORT_CLICKED, not CLICKED: LVGL sends CLICKED on
+ * release after a long press too, which would clear the peak on every min/max recall. Neither
+ * is sent for a swipe.
+ */
 static void dial_tapped_cb(lv_event_t *e)
 {
     (void)e;
@@ -336,11 +436,258 @@ static void dial_tapped_cb(lv_event_t *e)
     }
 }
 
-static void alert_sound_changed_cb(lv_event_t *e)
+/* Long-press recalls min/max; a second long-press while it is showing resets them. */
+static void dial_long_pressed_cb(lv_event_t *e)
 {
-    lv_obj_t *sw = lv_event_get_target(e);
-    app_settings_set_alert_sound(lv_obj_has_state(sw, LV_STATE_CHECKED));
-    app_settings_commit();
+    (void)e;
+    if (s.gauge == NULL) {
+        return;
+    }
+    if (gauge_render_minmax_recalled(s.gauge)) {
+        gauge_render_reset_minmax(s.gauge);
+    }
+    gauge_render_recall_minmax(s.gauge, MINMAX_RECALL_MS);
+}
+
+/* ---------------------------------------------------------------- sensors ---------- */
+
+static const cal_param_t *selected_cal_param(void)
+{
+    uint32_t idx = (s.cal_dropdown != NULL) ? lv_dropdown_get_selected(s.cal_dropdown) : 0;
+    return &k_cal_params[idx < CAL_PARAM_COUNT ? idx : 0];
+}
+
+static void refresh_cal_value(void)
+{
+    if (s.cal_value_label == NULL) {
+        return;
+    }
+
+    const cal_param_t *p = selected_cal_param();
+    sensor_hub_cal_t   cal;
+    sensor_hub_get_cal(&cal);
+    void *field = (char *)&cal + p->offset;
+
+    if (p->kind == CAL_BOOL) {
+        lv_label_set_text(s.cal_value_label, *(bool *)field ? "On" : "Off");
+        return;
+    }
+
+    char buf[32];
+    snprintf(buf, sizeof(buf), p->fmt, (double)(*(float *)field * p->scale));
+    lv_label_set_text(s.cal_value_label, buf);
+}
+
+static void cal_param_selected_cb(lv_event_t *e)
+{
+    (void)e;
+    refresh_cal_value();
+}
+
+/* User data is +1 or -1 as a pointer-sized integer. */
+static void cal_step_cb(lv_event_t *e)
+{
+    int dir = (int)(intptr_t)lv_event_get_user_data(e);
+
+    if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
+        sensor_hub_save_cal();
+        return;
+    }
+
+    const cal_param_t *p = selected_cal_param();
+    sensor_hub_cal_t   cal;
+    sensor_hub_get_cal(&cal);
+    void *field = (char *)&cal + p->offset;
+
+    if (p->kind == CAL_BOOL) {
+        *(bool *)field = (dir > 0);
+    } else {
+        /* Snap to the step grid, so repeated taps land on round numbers rather than drifting. */
+        float *f = field;
+        *f       = roundf(*f / p->step + (float)dir) * p->step;
+    }
+
+    sensor_hub_set_cal(&cal);
+    refresh_cal_value(); /* shows the value after clamping */
+}
+
+static lv_obj_t *add_step_button(lv_obj_t *parent, const char *text, int dir)
+{
+    lv_obj_t *btn = lv_button_create(parent);
+    lv_obj_set_size(btn, SETTINGS_CONTROL_H, SETTINGS_CONTROL_H);
+    lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(COLOR_RESET_IDLE), LV_PART_MAIN);
+    lv_obj_add_event_cb(btn, cal_step_cb, LV_EVENT_SHORT_CLICKED, (void *)(intptr_t)dir);
+    lv_obj_add_event_cb(btn, cal_step_cb, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(intptr_t)dir);
+    lv_obj_add_event_cb(btn, cal_step_cb, LV_EVENT_RELEASED, (void *)(intptr_t)dir);
+
+    lv_obj_t *label = lv_label_create(btn);
+    lv_label_set_text(label, text);
+    lv_obj_set_style_text_font(label, SETTINGS_FONT, LV_PART_MAIN);
+    lv_obj_center(label);
+    return btn;
+}
+
+static void zero_boost_clicked_cb(lv_event_t *e)
+{
+    (void)e;
+    char msg[80];
+    esp_err_t err = sensor_hub_zero_boost(msg, sizeof(msg));
+    lv_label_set_text(s.sensor_msg_label, msg);
+    lv_obj_set_style_text_color(s.sensor_msg_label,
+                                lv_color_hex(err == ESP_OK ? COLOR_VALUE : COLOR_FAULT),
+                                LV_PART_MAIN);
+    lv_obj_remove_flag(s.sensor_msg_label, LV_OBJ_FLAG_HIDDEN);
+    refresh_cal_value();
+}
+
+static int append(char *buf, size_t len, int used, const char *fmt, ...)
+    __attribute__((format(printf, 4, 5)));
+
+static int append(char *buf, size_t len, int used, const char *fmt, ...)
+{
+    if (used < 0 || (size_t)used >= len) {
+        return used;
+    }
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf + used, len - (size_t)used, fmt, ap);
+    va_end(ap);
+    return (n < 0) ? used : used + n;
+}
+
+/* Live readings for calibration. Native units, so they compare directly with a DMM. */
+static void update_sensor_status(void)
+{
+    if (s.sensor_status_label == NULL) {
+        return;
+    }
+
+    sensor_hub_snapshot_t snap;
+    sensor_hub_get_snapshot(&snap);
+    const sensor_hub_reading_t *ch = snap.ch;
+
+    char buf[320];
+    int  n = append(buf, sizeof(buf), 0, "Board %s", sensor_hub_state_str(snap.state));
+
+    if (snap.state != SENSOR_HUB_ONLINE) {
+#if CONFIG_AI_GAUGE_SIMULATED_SOURCE
+        if (snap.state == SENSOR_HUB_SEARCHING) {
+            n = append(buf, sizeof(buf), n, "\nNeedle is simulated");
+        }
+#endif
+        lv_label_set_text(s.sensor_status_label, buf);
+        return;
+    }
+
+    if (!snap.ads1115_ok) {
+        n = append(buf, sizeof(buf), n, "\nADC missing");
+    }
+    if (!snap.tmp1075_ok) {
+        n = append(buf, sizeof(buf), n, "\nCJ sensor missing");
+    }
+
+    if (ch[SENSOR_HUB_CH_MAP].valid) {
+        n = append(buf, sizeof(buf), n, "\nMAP %.1f kPa (%.3f V)",
+                   (double)ch[SENSOR_HUB_CH_MAP].value, (double)snap.map_sensor_v);
+        n = append(buf, sizeof(buf), n, "\nBoost %.1f kPa", (double)ch[SENSOR_HUB_CH_BOOST].value);
+    } else if (snap.ads1115_ok) {
+        n = append(buf, sizeof(buf), n, "\nBoost: %s (%.3f V)",
+                   snap.boost_fault ? snap.boost_fault : "--", (double)snap.map_sensor_v);
+    }
+
+    if (ch[SENSOR_HUB_CH_EGT].valid) {
+        n = append(buf, sizeof(buf), n, "\nEGT %.0f " DEG "C (%.0f uV)",
+                   (double)ch[SENSOR_HUB_CH_EGT].value, (double)snap.tc_uv);
+    } else if (snap.ads1115_ok || snap.tmp1075_ok) {
+        n = append(buf, sizeof(buf), n, "\nEGT: %s", snap.egt_fault ? snap.egt_fault : "--");
+    }
+    if (ch[SENSOR_HUB_CH_COLD_JUNCTION].valid) {
+        n = append(buf, sizeof(buf), n, "\nCold junction %.1f " DEG "C",
+                   (double)ch[SENSOR_HUB_CH_COLD_JUNCTION].value);
+    }
+
+    if (snap.ads1115_ok) {
+        n = append(buf, sizeof(buf), n, "\nSupply %.2f V", (double)ch[SENSOR_HUB_CH_SENSOR_SUPPLY].value);
+        n = append(buf, sizeof(buf), n, "\nIgnition %.1f V", (double)ch[SENSOR_HUB_CH_IGNITION].value);
+    }
+
+    n = append(buf, sizeof(buf), n, "\nZero %.1f kPa%s", (double)snap.baro_kpa,
+               snap.auto_zeroed ? " (auto)" : "");
+    if (snap.ads1115_ok && !snap.alert_ok) {
+        n = append(buf, sizeof(buf), n, "\nALERT line silent");
+    }
+    if (snap.i2c_errors > 0) {
+        n = append(buf, sizeof(buf), n, "\nI2C errors %" PRIu32, snap.i2c_errors);
+    }
+    (void)n;
+
+    lv_label_set_text(s.sensor_status_label, buf);
+}
+
+static void build_sensor_section(lv_obj_t *col)
+{
+    lv_obj_t *row         = add_row(col, "Sensors");
+    s.sensor_status_label = add_value_label(row, "starting...", COLOR_VALUE);
+
+    lv_obj_t *zero_btn = lv_button_create(row);
+    lv_obj_set_size(zero_btn, LV_PCT(100), SETTINGS_CONTROL_H);
+    lv_obj_set_style_margin_top(zero_btn, 8, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(zero_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(zero_btn, lv_color_hex(COLOR_RESET_IDLE), LV_PART_MAIN);
+    lv_obj_add_event_cb(zero_btn, zero_boost_clicked_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *zero_label = lv_label_create(zero_btn);
+    lv_label_set_text(zero_label, "Zero boost now");
+    lv_obj_set_style_text_font(zero_label, SETTINGS_FONT, LV_PART_MAIN);
+    lv_obj_set_style_text_color(zero_label, lv_color_hex(COLOR_VALUE), LV_PART_MAIN);
+    lv_obj_center(zero_label);
+
+    s.sensor_msg_label = add_value_label(row, "", COLOR_VALUE);
+    lv_obj_add_flag(s.sensor_msg_label, LV_OBJ_FLAG_HIDDEN);
+
+    /* --- calibration: pick a parameter, then -/+ --- */
+    lv_obj_t *cal_row = add_row(col, "Calibration");
+
+    static char options[CAL_PARAM_COUNT * 24];
+    size_t      used = 0;
+    for (size_t i = 0; i < CAL_PARAM_COUNT && used < sizeof(options); i++) {
+        int n = snprintf(options + used, sizeof(options) - used, "%s%s", i ? "\n" : "",
+                         k_cal_params[i].name);
+        used += (n > 0) ? (size_t)n : 0;
+    }
+
+    s.cal_dropdown = lv_dropdown_create(cal_row);
+    lv_obj_set_width(s.cal_dropdown, LV_PCT(100));
+    lv_obj_set_style_min_height(s.cal_dropdown, SETTINGS_CONTROL_H, LV_PART_MAIN);
+    lv_obj_set_style_pad_ver(s.cal_dropdown, 16, LV_PART_MAIN);
+    lv_obj_set_style_text_font(s.cal_dropdown, SETTINGS_FONT, LV_PART_MAIN);
+    /* Static options: LVGL keeps the pointer instead of copying the text into internal RAM. */
+    lv_dropdown_set_options_static(s.cal_dropdown, options);
+    lv_obj_add_event_cb(s.cal_dropdown, cal_param_selected_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_obj_t *dd_list = lv_dropdown_get_list(s.cal_dropdown);
+    lv_obj_set_style_text_font(dd_list, SETTINGS_FONT, LV_PART_MAIN);
+    lv_obj_set_style_text_line_space(dd_list, 28, LV_PART_MAIN);
+    lv_obj_set_style_pad_ver(dd_list, 14, LV_PART_MAIN);
+
+    lv_obj_t *line = lv_obj_create(cal_row);
+    lv_obj_remove_style_all(line);
+    lv_obj_set_width(line, LV_PCT(100));
+    lv_obj_set_height(line, LV_SIZE_CONTENT);
+    lv_obj_set_style_margin_top(line, 8, LV_PART_MAIN);
+    lv_obj_set_flex_flow(line, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(line, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_remove_flag(line, LV_OBJ_FLAG_SCROLLABLE);
+
+    add_step_button(line, LV_SYMBOL_MINUS, -1);
+    s.cal_value_label = lv_label_create(line);
+    lv_obj_set_style_text_font(s.cal_value_label, SETTINGS_FONT, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s.cal_value_label, lv_color_hex(COLOR_VALUE), LV_PART_MAIN);
+    add_step_button(line, LV_SYMBOL_PLUS, +1);
+
+    refresh_cal_value();
 }
 
 /* Refreshes the live numbers on the settings page and the optional badge on the dial. */
@@ -361,6 +708,10 @@ static void status_timer_cb(lv_timer_t *t)
                               "%.1f fps\n%.1f%% dirty\n%.2f ms render",
                               (double)st.fps, (double)st.dirty_pct_mean,
                               (double)st.render_ms_mean);
+    }
+
+    if (app_ui_get_tile() == APP_UI_TILE_SETTINGS) {
+        update_sensor_status();
     }
 
     if (s.heap_label != NULL && app_ui_get_tile() == APP_UI_TILE_SETTINGS) {
@@ -433,9 +784,24 @@ static void build_settings_tile(lv_obj_t *tile, const gauge_config_t *cfg)
     lv_obj_set_style_text_font(rot, SETTINGS_FONT, LV_PART_ITEMS);
     lv_obj_add_event_cb(rot, rotation_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
+    /* --- frame-rate cap: one buttonmatrix, so four choices cost one widget --- */
+    lv_obj_t *fps_row = add_row(col, "Frame rate limit");
+    lv_obj_t *fps     = lv_buttonmatrix_create(fps_row);
+    lv_buttonmatrix_set_map(fps, k_fps_cap_map);
+    lv_buttonmatrix_set_button_ctrl_all(
+        fps, (lv_buttonmatrix_ctrl_t)(LV_BUTTONMATRIX_CTRL_CHECKABLE | LV_BUTTONMATRIX_CTRL_CLICK_TRIG));
+    lv_buttonmatrix_set_one_checked(fps, true);
+    lv_buttonmatrix_set_button_ctrl(fps, (uint32_t)set->fps_cap, LV_BUTTONMATRIX_CTRL_CHECKED);
+    lv_obj_set_size(fps, LV_PCT(100), SETTINGS_CONTROL_H);
+    lv_obj_set_style_pad_all(fps, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_gap(fps, 6, LV_PART_MAIN);
+    lv_obj_set_style_border_width(fps, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(fps, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_text_font(fps, SETTINGS_FONT, LV_PART_ITEMS);
+    lv_obj_add_event_cb(fps, fps_cap_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
     /* --- toggles --- */
     add_toggle_row(col, "Show FPS", set->show_fps, show_fps_changed_cb);
-    add_toggle_row(col, "Alert sound", set->alert_sound, alert_sound_changed_cb);
 
     /* --- gauge picker --- */
     lv_obj_t *gauge_row = add_row(col, "Gauge");
@@ -456,6 +822,11 @@ static void build_settings_tile(lv_obj_t *tile, const gauge_config_t *cfg)
 
     s.gauge_info_label = add_value_label(gauge_row, "", COLOR_VALUE);
     update_gauge_info(cfg);
+
+    /* --- sensors, on boards that have a sensor bus --- */
+    if (s.board != NULL && s.board->sensor_i2c_port >= 0) {
+        build_sensor_section(col);
+    }
 
     /* --- network --- */
     lv_obj_t *net_row = add_row(col, "Network");
@@ -500,6 +871,7 @@ esp_err_t app_ui_create(const gauge_config_t *cfg, const board_profile_t *board)
     s.board = board;
 
     apply_rotation(app_settings_get()->rotation);
+    apply_fps_cap(app_settings_get()->fps_cap);
 
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_black(), LV_PART_MAIN);
@@ -535,7 +907,8 @@ esp_err_t app_ui_create(const gauge_config_t *cfg, const board_profile_t *board)
     }
 
     lv_obj_remove_flag(s.tile_gauge, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_event_cb(s.tile_gauge, dial_tapped_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(s.tile_gauge, dial_tapped_cb, LV_EVENT_SHORT_CLICKED, NULL);
+    lv_obj_add_event_cb(s.tile_gauge, dial_long_pressed_cb, LV_EVENT_LONG_PRESSED, NULL);
     lv_obj_set_style_bg_color(s.tile_gauge, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s.tile_gauge, LV_OPA_COVER, LV_PART_MAIN);
 

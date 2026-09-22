@@ -44,11 +44,21 @@ typedef struct {
 
     /* Capabilities. Features degrade gracefully when these are false. */
     bool has_touch;
-    bool has_audio;   /**< Audible alerts (docs/adr/0004-retain-sd-and-audio.md). */
+    bool has_audio;   /**< Codec present. Unused: no speaker is fitted (ADR 0004). */
     bool has_sdcard;
     bool has_imu;
     bool has_rtc;
     bool has_battery; /**< Battery telemetry via the PMIC. */
+
+    /**
+     * The external sensor bus (docs/sensor-frontend.md). GPIO numbers, or -1 where the board has
+     * no such line; a board without a sensor bus sets sensor_i2c_port to -1.
+     */
+    int8_t   sensor_i2c_port;
+    int8_t   sensor_sda_gpio;
+    int8_t   sensor_scl_gpio;
+    int8_t   sensor_alert_gpio;
+    uint32_t sensor_i2c_hz;
 } board_profile_t;
 
 /**

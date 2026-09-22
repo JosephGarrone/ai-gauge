@@ -266,7 +266,7 @@ static void test_builtin_default_is_valid(void)
     gauge_config_builtin_default(&cfg);
 
     CHECK(strcmp(cfg.id, "default") == 0, "id was '%s'", cfg.id);
-    CHECK(cfg.face.band_count == 3, "expected 3 bands, got %u", cfg.face.band_count);
+    CHECK(cfg.face.band_count == 8, "expected 8 ring segments, got %u", cfg.face.band_count);
     CHECK(cfg.readout.present, "should have a readout");
     CHECK(cfg.title_count == 1, "should have a title");
     CHECK(cfg.warning_count == 0,
@@ -505,6 +505,39 @@ static void test_peak(void)
     CHECK(cfg.peak.value_y == INT16_MIN, "default value-y is below the readout");
 }
 
+static void test_tick_band_color(void)
+{
+    gauge_config_t cfg;
+    const gauge_color_t white = {0xff, 0xff, 0xff};
+    const gauge_color_t red   = {0xff, 0x00, 0x00};
+    const gauge_color_t blue  = {0x00, 0x00, 0xff};
+
+    CHECK(gauge_config_parse(MINIMAL, 0, &cfg) == GAUGE_CONFIG_OK, "minimal should parse");
+    CHECK(!cfg.face.ticks.band_color, "band-color is off by default");
+
+    static const char *XML =
+        "<gauge version=\"1\" id=\"t\">"
+        "<source channel=\"c\" min=\"0\" max=\"30\"/>"
+        "<face>"
+        "<band from=\"0\" to=\"25\" color=\"#ffffff\"/>"
+        "<band from=\"25\" to=\"28\" color=\"#ff0000\"/>"
+        "<ticks major-every=\"5\" color=\"#0000ff\" band-color=\"true\"/>"
+        "</face></gauge>";
+    CHECK(gauge_config_parse(XML, 0, &cfg) == GAUGE_CONFIG_OK, "should parse");
+    CHECK(cfg.face.ticks.band_color, "band-color parsed");
+    CHECK(cfg.warning_count == 0, "unexpected warnings: %u", cfg.warning_count);
+
+#define SAME(x, y) ((x).r == (y).r && (x).g == (y).g && (x).b == (y).b)
+    CHECK(SAME(gauge_config_tick_color(&cfg, 10.0f), white), "inside the first band");
+    CHECK(SAME(gauge_config_tick_color(&cfg, 25.0f), red), "a shared edge takes the later band");
+    CHECK(SAME(gauge_config_tick_color(&cfg, 24.99999f), red), "within float error of the edge");
+    CHECK(SAME(gauge_config_tick_color(&cfg, 30.0f), blue), "no band: the ticks colour");
+
+    cfg.face.ticks.band_color = false;
+    CHECK(SAME(gauge_config_tick_color(&cfg, 10.0f), blue), "off: always the ticks colour");
+#undef SAME
+}
+
 int main(void)
 {
     struct {
@@ -521,6 +554,7 @@ int main(void)
         {"long_strings_truncate",    test_long_strings_truncate},
         {"builtin_default_is_valid", test_builtin_default_is_valid},
         {"peak",                     test_peak},
+        {"tick_band_color",          test_tick_band_color},
         {"shapes_absent_by_default", test_shapes_absent_by_default},
         {"shapes_parse",             test_shapes_parse},
         {"shape_context",            test_shape_context},

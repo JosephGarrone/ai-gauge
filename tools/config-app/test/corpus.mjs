@@ -27,6 +27,32 @@ function ring(n, r) {
     }).join(' ');
 }
 
+/**
+ * The boost face as it shipped before the PX restyle. Kept as a fixture because it exercises the
+ * built-in drawing paths (line ticks, three bands, a suffixed readout) that no shipped face uses now.
+ */
+export const CLASSIC_BOOST = `<gauge version="1" id="boost">
+  <panel shape="round" width="466" height="466"/>
+  <source channel="boost" unit="psi" min="0" max="30" damping="0.15"/>
+
+  <face start-angle="225" sweep="270" background="#000000">
+    <band from="0"  to="18" color="#00c853"/>
+    <band from="18" to="25" color="#ffab00"/>
+    <band from="25" to="30" color="#d50000"/>
+    <ticks major-every="5" minor-every="1"
+           major-len="24" minor-len="12" color="#ffffff"/>
+    <labels every="5" font="montserrat_24" color="#ffffff" radius="150"/>
+  </face>
+
+  <needle style="taper" length="170" width="14" color="#ff1744" pivot-radius="18"/>
+
+  <title text="BOOST" y="150" font="montserrat_20" color="#9e9e9e"/>
+  <readout y="320" font="montserrat_48" format="%.1f" suffix=" psi" color="#ffffff"/>
+
+  <peak color="#ffab00" length="28" width="5"/>
+  <alert above="25" flash-hz="2" color="#d50000" chime="true"/>
+</gauge>`;
+
 /** Hand-written cases: name -> xml. */
 export const CASES = {
     minimal: doc(''),
@@ -138,6 +164,9 @@ export const CASES = {
     styles: doc('<needle style="line"/><needle style="sword"/>'),
     alertBoth: doc('<alert above="8" below="2" flash-hz="30" color="#abc"/>'),
     shortColours: doc('<face background="#AbC"/><band from="1" to="2" color="123456"/><band from="2" to="3" color="#12345"/><band from="3" to="4" color="#ggg"/>'),
+    bandColorTicks: doc('<face><band from="0" to="5" color="#ffffff"/><band from="5" to="10" color="#ff0000"/>' +
+        '<ticks major-every="5" band-color="true"/></face>'),
+    bandColorFalse: doc('<face><ticks band-color="false" color="#123456"/></face>'),
 };
 
 /** Deterministic PRNG (mulberry32) so a failing random case can be reproduced. */

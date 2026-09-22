@@ -27,6 +27,7 @@ export const FONTS = Object.freeze({
     montserrat_22: 24,
     montserrat_24: 27,
     montserrat_26: 29,
+    montserrat_32: 35,
     montserrat_48: 52,
 });
 
@@ -104,7 +105,7 @@ export function defaultTicks() {
         majorEvery: 10, minorEvery: 0,
         majorLen: 20, minorLen: 10,
         majorWidth: 4, minorWidth: 2,
-        color: '#ffffff',
+        color: '#ffffff', bandColor: false,
         majorShape: null, minorShape: null,
     };
 }
