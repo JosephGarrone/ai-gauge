@@ -338,6 +338,7 @@ The hub never flashes, just as the built-in hub never has.
 | Number out of documented range | Clamped, warning logged |
 | Band range outside source range | Clamped to the source range |
 | Malformed colour | Documented default substituted, warning counted |
+| `format` other than literal text, `%%` and exactly one `%f`/`%e`/`%g` (flags, width and precision allowed) | Previous value kept (normally the default), warning counted |
 | Unknown font | LVGL default font (`montserrat_14`) used; logged on the serial console only |
 | More than 8 bands, 4 titles or 4 alerts | Extras dropped, warning each |
 | Shape slot or part outside its parent | Ignored (as an unknown element) |

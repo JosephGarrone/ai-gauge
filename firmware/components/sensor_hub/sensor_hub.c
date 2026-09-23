@@ -442,7 +442,9 @@ static void sample_map(task_state_t *t, sensor_hub_snapshot_t *snap, const senso
         snap->ch[SENSOR_HUB_CH_BOOST].valid = false;
         snap->ch[SENSOR_HUB_CH_MAP].timestamp_us   = now;
         snap->ch[SENSOR_HUB_CH_BOOST].timestamp_us = now;
+        /* Restart the filters too: the auto-zero must not average in a reading from before. */
         t->map_samples = 0;
+        t->map_seen    = false;
         return;
     }
 

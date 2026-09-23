@@ -8,11 +8,13 @@
 #include "net_svc.h"
 #include "net_svc_priv.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "esp_app_desc.h"
+#include "esp_app_format.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
@@ -48,10 +50,64 @@ void net_svc_set_active_gauge(const char *id)
 
 /* ---------------------------------------------------------------------- helpers ---- */
 
+/*
+ * Copies @p in into @p out escaped for a JSON string, truncating to fit. Control characters, which
+ * only a malformed SSID could carry, become '?' rather than \u escapes, so the output is at most
+ * twice the input.
+ */
+static void json_escape(const char *in, char *out, size_t out_len)
+{
+    size_t o = 0;
+    for (; *in != '\0'; in++) {
+        bool   quote = (*in == '"' || *in == '\\');
+        size_t need  = quote ? 2 : 1;
+        if (o + need >= out_len) {
+            break;
+        }
+        if (quote) {
+            out[o++] = '\\';
+        }
+        out[o++] = ((unsigned char)*in < 0x20) ? '?' : *in;
+    }
+    out[o] = '\0';
+}
+
+/* Copies @p in into @p out escaped for HTML text or a quoted attribute, truncating to fit. */
+static void html_escape(const char *in, char *out, size_t out_len)
+{
+    size_t o = 0;
+    for (; *in != '\0'; in++) {
+        const char *rep = NULL;
+        switch (*in) {
+        case '&':  rep = "&amp;"; break;
+        case '<':  rep = "&lt;"; break;
+        case '>':  rep = "&gt;"; break;
+        case '"':  rep = "&quot;"; break;
+        case '\'': rep = "&#39;"; break;
+        default:   break;
+        }
+        size_t need = (rep != NULL) ? strlen(rep) : 1;
+        if (o + need >= out_len) {
+            break;
+        }
+        if (rep != NULL) {
+            memcpy(out + o, rep, need);
+        } else {
+            out[o] = *in;
+        }
+        o += need;
+    }
+    out[o] = '\0';
+}
+
 static esp_err_t send_json_error(httpd_req_t *req, const char *status, const char *message)
 {
-    char body[192];
-    snprintf(body, sizeof(body), "{\"error\":\"%s\"}", message);
+    /* Messages can quote a face's own text, e.g. its id, so they are escaped. */
+    char escaped[2 * GAUGE_STORE_ERR_LEN];
+    json_escape(message, escaped, sizeof(escaped));
+
+    char body[sizeof(escaped) + 16];
+    snprintf(body, sizeof(body), "{\"error\":\"%s\"}", escaped);
 
     httpd_resp_set_status(req, status);
     httpd_resp_set_type(req, "application/json");
@@ -143,9 +199,12 @@ static bool form_field(const char *body, const char *name, char *out, size_t out
     if (p == NULL) {
         return false;
     }
-    /* Only accept a match at the start or right after a separator. */
-    if (p != body && p[-1] != '&') {
-        return false;
+    /* Only accept a match at the start or right after a separator: "xssid=" is not "ssid=". */
+    while (p != body && p[-1] != '&') {
+        p = strstr(p + 1, key);
+        if (p == NULL) {
+            return false;
+        }
     }
     p += key_len;
 
@@ -154,7 +213,8 @@ static bool form_field(const char *body, const char *name, char *out, size_t out
         if (*p == '+') {
             out[i++] = ' ';
             p++;
-        } else if (*p == '%' && p[1] && p[2]) {
+        } else if (*p == '%' && isxdigit((unsigned char)p[1]) && isxdigit((unsigned char)p[2])) {
+            /* A malformed escape is kept as literal text rather than decoded to a NUL. */
             char hex[3] = {p[1], p[2], '\0'};
             out[i++]    = (char)strtol(hex, NULL, 16);
             p += 3;
@@ -184,6 +244,10 @@ static esp_err_t status_get(httpd_req_t *req)
     memcpy(active, s_active_gauge, sizeof(active));
     taskEXIT_CRITICAL(&s_active_lock);
 
+    /* An SSID is any 32 bytes, quotes included. The editor parses this reply to find the gauge. */
+    char ssid[2 * NET_SVC_SSID_LEN];
+    json_escape(net.ssid, ssid, sizeof(ssid));
+
     /*
      * The minimums are what future measurements need without a serial cable: internal RAM is the
      * board's binding constraint, and this handler runs on the HTTP server task, so its own stack
@@ -200,7 +264,7 @@ static esp_err_t status_get(httpd_req_t *req)
              "\"storage_mounted\":%s}",
              app ? app->version : "unknown", app ? app->idf_ver : "unknown",
              esp_timer_get_time() / 1000000,
-             net_svc_state_str(net.state), net.ssid, net.ip, net.rssi, net.hostname,
+             net_svc_state_str(net.state), ssid, net.ip, net.rssi, net.hostname,
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
              (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
@@ -219,10 +283,12 @@ static esp_err_t gauges_get(httpd_req_t *req)
     gauge_store_list_t list;
     gauge_store_list(&list);
 
-    char   body[512];
+    /* Sized from the limits, so raising GAUGE_STORE_MAX_GAUGES can never truncate or overflow. */
+    char   body[sizeof("{\"gauges\":[],\"max\":}") + 11 +
+                GAUGE_STORE_MAX_GAUGES * (GAUGE_CONFIG_MAX_ID_LEN + 2)];
     size_t used = (size_t)snprintf(body, sizeof(body), "{\"gauges\":[");
 
-    for (int i = 0; i < list.count && used < sizeof(body) - 4; i++) {
+    for (int i = 0; i < list.count; i++) {
         used += (size_t)snprintf(body + used, sizeof(body) - used, "%s\"%s\"",
                                  (i == 0) ? "" : ",", list.ids[i]);
     }
@@ -284,11 +350,19 @@ static esp_err_t config_get(httpd_req_t *req)
         return send_json_error(req, "404 Not Found", err[0] ? err : "not found");
     }
 
-    char body[256];
+    /* The face's own strings: a single-quoted attribute can carry a '"'. */
+    char id_esc[2 * GAUGE_CONFIG_MAX_ID_LEN];
+    char channel[2 * sizeof(cfg->source.channel)];
+    char unit[2 * GAUGE_CONFIG_MAX_UNIT_LEN];
+    json_escape(cfg->id, id_esc, sizeof(id_esc));
+    json_escape(cfg->source.channel, channel, sizeof(channel));
+    json_escape(cfg->source.unit, unit, sizeof(unit));
+
+    char body[320];
     snprintf(body, sizeof(body),
              "{\"id\":\"%s\",\"channel\":\"%s\",\"unit\":\"%s\","
              "\"min\":%.3f,\"max\":%.3f,\"warnings\":%u}",
-             cfg->id, cfg->source.channel, cfg->source.unit,
+             id_esc, channel, unit,
              (double)cfg->source.min, (double)cfg->source.max, cfg->warning_count);
     free(cfg);
 
@@ -386,6 +460,39 @@ static esp_err_t wifi_post(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* An app image starts with its header, the first segment's header, then esp_app_desc_t. */
+#define OTA_DESC_OFFSET (sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t))
+#define OTA_HEAD_BYTES  (OTA_DESC_OFFSET + sizeof(esp_app_desc_t))
+_Static_assert(OTA_HEAD_BYTES <= OTA_CHUNK, "the image head must fit the first chunk");
+
+/*
+ * Refuses an image built from another project. esp_ota_end() only proves an image is well formed,
+ * and rollback only catches one that crashes: a valid image for some other board would boot, never
+ * confirm itself or never crash, and leave the gauge unrecoverable without a cable.
+ */
+static bool ota_image_is_ours(const char *head, size_t len, char *why, size_t why_len)
+{
+    if (len < OTA_HEAD_BYTES) {
+        snprintf(why, why_len, "not a firmware image (too short)");
+        return false;
+    }
+
+    /* Read in place, not copied to this internal-RAM stack: the heap buffer and offset 32 align it. */
+    const esp_app_desc_t *desc = (const esp_app_desc_t *)(head + OTA_DESC_OFFSET);
+    if (desc->magic_word != ESP_APP_DESC_MAGIC_WORD) {
+        snprintf(why, why_len, "not a firmware image (no app description)");
+        return false;
+    }
+
+    const esp_app_desc_t *self = esp_app_get_description();
+    if (strncmp(desc->project_name, self->project_name, sizeof(desc->project_name)) != 0) {
+        snprintf(why, why_len, "image is for project '%.32s', not '%.32s'", desc->project_name,
+                 self->project_name);
+        return false;
+    }
+    return true;
+}
+
 static esp_err_t ota_post(httpd_req_t *req)
 {
     const esp_partition_t *target = esp_ota_get_next_update_partition(NULL);
@@ -395,22 +502,50 @@ static esp_err_t ota_post(httpd_req_t *req)
 
     ESP_LOGW(TAG, "OTA starting: %u bytes -> %s", (unsigned)req->content_len, target->label);
 
-    esp_ota_handle_t handle = 0;
-    esp_err_t err = esp_ota_begin(target, req->content_len, &handle);
-    if (err != ESP_OK) {
-        return send_json_error(req, "500 Internal Server Error", esp_err_to_name(err));
-    }
-
     /* Exactly at the 4KB internal threshold, so plain malloc() would take internal memory. */
-    char  *chunk    = heap_caps_malloc(OTA_CHUNK, MALLOC_CAP_SPIRAM);
-    size_t received = 0;
-
+    char *chunk = heap_caps_malloc(OTA_CHUNK, MALLOC_CAP_SPIRAM);
     if (chunk == NULL) {
-        esp_ota_abort(handle);
         return send_json_error(req, "500 Internal Server Error", "out of memory");
     }
 
-    while (received < req->content_len) {
+    /* The head of the image first: it has to be checked before esp_ota_begin() erases anything. */
+    size_t received = 0;
+    while (received < OTA_HEAD_BYTES && received < req->content_len) {
+        int n = httpd_req_recv(req, chunk + received, OTA_CHUNK - received);
+        if (n <= 0) {
+            free(chunk);
+            return send_json_error(req, "400 Bad Request", "upload interrupted");
+        }
+        received += (size_t)n;
+    }
+
+    char why[96];
+    if (!ota_image_is_ours(chunk, received, why, sizeof(why))) {
+        free(chunk);
+        ESP_LOGE(TAG, "OTA refused: %s", why);
+        return send_json_error(req, "400 Bad Request", why);
+    }
+
+    esp_ota_handle_t handle = 0;
+    esp_err_t err = esp_ota_begin(target, req->content_len, &handle);
+    if (err != ESP_OK) {
+        free(chunk);
+        return send_json_error(req, "500 Internal Server Error", esp_err_to_name(err));
+    }
+
+    /* `pending` bytes of `chunk` are received but not yet written; the head starts it off. */
+    size_t pending = received;
+    for (;;) {
+        err = esp_ota_write(handle, chunk, pending);
+        if (err != ESP_OK) {
+            free(chunk);
+            esp_ota_abort(handle);
+            return send_json_error(req, "400 Bad Request", esp_err_to_name(err));
+        }
+        if (received >= req->content_len) {
+            break;
+        }
+
         int n = httpd_req_recv(req, chunk, OTA_CHUNK);
         if (n <= 0) {
             free(chunk);
@@ -418,13 +553,7 @@ static esp_err_t ota_post(httpd_req_t *req)
             ESP_LOGE(TAG, "OTA aborted: upload ended early at %u bytes", (unsigned)received);
             return send_json_error(req, "400 Bad Request", "upload interrupted");
         }
-
-        err = esp_ota_write(handle, chunk, (size_t)n);
-        if (err != ESP_OK) {
-            free(chunk);
-            esp_ota_abort(handle);
-            return send_json_error(req, "400 Bad Request", esp_err_to_name(err));
-        }
+        pending   = (size_t)n;
         received += (size_t)n;
     }
 
@@ -480,8 +609,19 @@ static esp_err_t root_get(httpd_req_t *req)
             "<button type=submit>Connect</button></form>");
     }
 
-    char body[1024];
-    snprintf(body, sizeof(body),
+    char ssid[6 * NET_SVC_SSID_LEN]; /* "&quot;" is six bytes */
+    html_escape(net.ssid, ssid, sizeof(ssid));
+
+    /*
+     * PSRAM, not this task's internal-RAM stack: with an escaped SSID the page can pass 1KB, and a
+     * body under the 4KB SPIRAM_MALLOC_ALWAYSINTERNAL threshold needs asking for explicitly.
+     */
+    const size_t body_len = 1280;
+    char        *body     = heap_caps_malloc(body_len, MALLOC_CAP_SPIRAM);
+    if (body == NULL) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+    }
+    snprintf(body, body_len,
              "<!doctype html><meta charset=utf-8>"
              "<meta name=viewport content='width=device-width,initial-scale=1'>"
              "<title>AI-Gauge</title>"
@@ -500,10 +640,12 @@ static esp_err_t root_get(httpd_req_t *req)
              "</ul>"
              "<p style='color:#ffab00'>This interface has no authentication. Use it only on "
              "a network you trust.</p>",
-             app ? app->version : "unknown", net.ssid, net.ip);
+             app ? app->version : "unknown", ssid, net.ip);
 
     httpd_resp_set_type(req, "text/html");
-    return httpd_resp_sendstr(req, body);
+    esp_err_t ret = httpd_resp_sendstr(req, body);
+    free(body);
+    return ret;
 }
 
 /* PUT and DELETE are preflighted; only a loopback origin passes (see allow_loopback_origin). */

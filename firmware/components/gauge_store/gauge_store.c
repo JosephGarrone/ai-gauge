@@ -388,7 +388,11 @@ esp_err_t gauge_store_save(const char *id, const char *xml, size_t len,
         return ESP_FAIL;
     }
 
-    unlink(path); /* rename() will not overwrite on some VFS backends */
+    /*
+     * No unlink() first: LittleFS's rename replaces an existing file atomically, so power lost at
+     * any point leaves either the old face or the new one. Deleting first would open a window
+     * with neither.
+     */
     if (rename(tmp, path) != 0) {
         unlink(tmp);
         set_err(err, err_len, "could not replace existing config");

@@ -118,7 +118,8 @@ posture. Stated plainly:
   that a config `PUT` or `DELETE` needs. `POST /api/ota` and `POST /api/wifi` need no preflight,
   though, so a page on any site could send one to a gauge on the viewer's network without reading
   the reply, where the browser does not itself restrict public pages from calling private
-  addresses. `esp_ota_end()` rejects an invalid image, but not a valid image from someone else.
+  addresses. `esp_ota_end()` rejects an invalid image and the project-name check rejects another
+  project's, but neither stops a valid ai-gauge image built by someone else.
 
 Before exposure to any untrusted network this needs, at minimum, a shared secret on the
 mutating endpoints and signature verification on OTA images.
@@ -140,7 +141,9 @@ Frame format, one JSON object per datagram:
 | `ch` | Channel name, matching the gauge's `<source channel="...">` |
 | `v` | Value in the channel's native unit |
 
-Malformed datagrams are dropped silently. UDP is deliberate: telemetry is a stream of perishable
+Malformed datagrams are dropped silently, and so is a `v` that is not finite (`nan`, `inf`):
+the renderer also treats a non-finite value as invalid, because NaN would otherwise stick in its
+damping filter for good. UDP is deliberate: telemetry is a stream of perishable
 values, so dropping a datagram is strictly better than delaying the stream to retransmit one.
 
 **Not yet implemented:** the staleness rule. If a feed stops, the needle currently holds its
@@ -152,6 +155,9 @@ last value rather than going invalid. That belongs with the channel snapshot in 
 - Dual `ota_0` / `ota_1` app partitions, 4MB each ([../firmware/partitions.csv](../firmware/partitions.csv)).
 - `POST /api/ota` streams the body into the inactive slot. `esp_ota_end()` validates the image
   before the boot partition is switched, so a corrupt upload is rejected rather than booted.
+- Before anything is erased, the image's app description must carry this firmware's
+  `project_name`. A well-formed image for some other project would pass `esp_ota_end()`, and
+  rollback only catches one that crashes before confirming.
 - `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` is on. A newly installed image confirms itself with
   `esp_ota_mark_app_valid_cancel_rollback()` only once **startup has finished and the gauge has
   stayed up for 15 seconds**. A crash anywhere in that window leaves the image unconfirmed, and

@@ -17,6 +17,7 @@ import {
     ERRORS, LIMITS, SCHEMA_VERSION, defaultAlert, defaultBand, defaultLabels, defaultModel,
     defaultPeak, defaultReadout, defaultTicks, defaultTitle,
 } from './schema.js';
+import { checkFormat } from './printf.js';
 
 const f32 = Math.fround;
 const encoder = new TextEncoder();
@@ -214,6 +215,18 @@ class Reader {
             return fallback;
         }
         return c;
+    }
+
+    /** attr_format(): a format attribute, or `fallback` (with a warning) when it is not safe to print. */
+    format(tag, fallback, what) {
+        const v = this.str(tag, 'format', 16);
+        if (v === null) return fallback;
+        const bad = checkFormat(v);
+        if (bad !== null) {
+            this.warn(`${what} format: ${bad}; kept '${fallback}'`);
+            return fallback;
+        }
+        return v;
     }
 
     /** attr_px(): a non-negative pixel size, clamped to 0..4096 and truncated to an integer. */
@@ -516,7 +529,7 @@ function parseLabels(r, tag, m) {
     const every = r.float(tag, 'every');
     if (every !== null) l.every = r.clamp(every, 0, 1e6, 'labels every');
     l.font = r.str(tag, 'font', 24) ?? l.font;
-    l.format = r.str(tag, 'format', 16) ?? l.format;
+    l.format = r.format(tag, l.format, 'labels');
     l.color = r.color(tag, 'color', l.color, 'labels color');
     l.radius = r.px(tag, 'radius', l.radius, 'labels');
     m.labels = l;
@@ -562,7 +575,7 @@ function parseReadout(r, tag, m) {
     o.x = r.coord(tag, 'x', o.x, 'readout');
     o.y = r.coord(tag, 'y', o.y, 'readout');
     o.font = r.str(tag, 'font', 24) ?? o.font;
-    o.format = r.str(tag, 'format', 16) ?? o.format;
+    o.format = r.format(tag, o.format, 'readout');
     o.prefix = r.str(tag, 'prefix', 32) ?? o.prefix;
     o.suffix = r.str(tag, 'suffix', 32) ?? o.suffix;
     o.color = r.color(tag, 'color', o.color, 'readout color');
@@ -577,7 +590,7 @@ function parsePeak(r, tag, m) {
     k.showValue = r.bool(tag, 'show-value') ?? k.showValue;
     k.valueY = r.coord(tag, 'value-y', k.valueY, 'peak');
     k.font = r.str(tag, 'font', 24) ?? k.font;
-    k.format = r.str(tag, 'format', 16) ?? k.format;
+    k.format = r.format(tag, k.format, 'peak');
     k.prefix = r.str(tag, 'prefix', 32) ?? k.prefix;
     m.peak = k;
 }

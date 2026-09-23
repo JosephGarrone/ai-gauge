@@ -1450,6 +1450,14 @@ void gauge_render_set_value(gauge_render_t *g, float value, bool valid)
         return;
     }
 
+    /*
+     * NaN passes both clamps below, and once it is in the damping filter nothing brings it back
+     * out: every later update is NaN too. A non-finite reading is no reading.
+     */
+    if (!isfinite(value)) {
+        valid = false;
+    }
+
     bool validity_changed = (valid != g->valid);
     g->valid = valid;
 

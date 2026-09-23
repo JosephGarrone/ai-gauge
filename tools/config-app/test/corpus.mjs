@@ -197,7 +197,8 @@ export function randomDocuments(count, seed = 1) {
     const colour = () => pick(['#fff', '#123456', '#ABCDEF', 'red', '#12', '#1234567', '00c853', '#0f0']);
     const text = () => pick(['', 'BOOST', 'x'.repeat(Math.floor(r() * 40)), 'a b', 'ünïcödé', 'P&amp;Q']);
     const font = () => pick(['montserrat_12', 'montserrat_24', 'montserrat_48', 'montserrat_14', 'comic_sans', '']);
-    const fmt = () => pick(['%.1f', '%g', '%.0f psi', '%d', 'x'.repeat(20)]);
+    const fmt = () => pick(['%.1f', '%g', '%.0f psi', '%d', 'x'.repeat(20), '%s', '%n', '%', '%%', '%.1f%%',
+        '%-+ #08.3E', '%f %f', '12345678901234%f', '%.f']);
     const bool = () => pick(['true', 'false', '1', '0', 'yes', 'TRUE']);
     const attrs = (spec) => spec
         .filter(() => r() < 0.7)

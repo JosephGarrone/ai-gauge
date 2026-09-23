@@ -16,6 +16,7 @@ idf_component_register(
         esp_http_server
         esp_timer
         esp_app_format
+        bootloader_support
         app_update
         nvs_flash
         lwip

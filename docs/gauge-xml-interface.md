@@ -86,7 +86,8 @@ Longer strings are **silently truncated**. Enforce these limits in the editor:
 floating-point conversion with optional flags, width and precision: `%f`, `%g` or `%e`, for
 example `%.1f`, `%.0f`, `%g`. Literal text around it is allowed, and `%%` prints a percent sign.
 Anything else (`%d`, `%s`, two conversions) is undefined behaviour on the device and must be
-rejected by the editor.
+rejected by the editor. The firmware enforces the same rule as a backstop: it ignores such a
+format, keeps the default and counts a warning, so a face uploaded by other means cannot crash it.
 
 Rendered text buffers are also finite: labels hold 15 characters, and a readout's
 prefix + number + suffix is cut at 95.

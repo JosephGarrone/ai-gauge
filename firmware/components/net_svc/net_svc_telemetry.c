@@ -10,6 +10,7 @@
 #include "net_svc_priv.h"
 
 #include <errno.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -63,7 +64,8 @@ static bool parse_frame(const char *json, char *channel, size_t channel_len, flo
 
     char  *end = NULL;
     double d   = strtod(v + 1, &end);
-    if (end == v + 1) {
+    /* strtod() accepts "nan" and "inf", which JSON does not and no gauge can show. */
+    if (end == v + 1 || !isfinite(d)) {
         return false;
     }
 

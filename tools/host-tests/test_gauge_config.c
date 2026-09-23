@@ -255,6 +255,41 @@ static void test_long_strings_truncate(void)
     CHECK(strlen(cfg.id) == GAUGE_CONFIG_MAX_ID_LEN - 1, "id should truncate to fit");
 }
 
+/* Formats reach snprintf() with a double, so anything but one %f/%e/%g must never get through. */
+static void test_unsafe_formats_rejected(void)
+{
+    static const struct {
+        const char *fmt;
+        bool        safe;
+    } cases[] = {
+        {"%.1f", true},       {"%g", true},         {"%-+ #08.3E", true}, {"%.f", true},
+        {"%.0f psi", true},   {"%.1f%%", true},     {"%s", false},        {"%n", false},
+        {"%d", false},        {"%", false},         {"%%", false},        {"no conversion", false},
+        {"%f %f", false},     {"%.1f%", false},     {"%lf", false},       {"%*f", false},
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        char xml[256];
+        snprintf(xml, sizeof(xml),
+                 "<gauge version=\"1\" id=\"t\"><source channel=\"c\" min=\"0\" max=\"10\"/>"
+                 "<labels format=\"%s\"/><readout format=\"%s\"/><peak format=\"%s\"/></gauge>",
+                 cases[i].fmt, cases[i].fmt, cases[i].fmt);
+
+        gauge_config_t cfg;
+        CHECK(gauge_config_parse(xml, 0, &cfg) == GAUGE_CONFIG_OK, "'%s' should parse", cases[i].fmt);
+        if (cases[i].safe) {
+            CHECK(cfg.warning_count == 0, "'%s': %u warnings", cases[i].fmt, cfg.warning_count);
+            CHECK(strcmp(cfg.readout.format, cases[i].fmt) == 0, "'%s' not kept", cases[i].fmt);
+        } else {
+            CHECK(cfg.warning_count == 3, "'%s': %u warnings, want 3", cases[i].fmt,
+                  cfg.warning_count);
+            CHECK(strcmp(cfg.face.labels.format, "%g") == 0, "'%s': labels default lost", cases[i].fmt);
+            CHECK(strcmp(cfg.readout.format, "%.1f") == 0, "'%s': readout default lost", cases[i].fmt);
+            CHECK(strcmp(cfg.peak.format, "%.1f") == 0, "'%s': peak default lost", cases[i].fmt);
+        }
+    }
+}
+
 static void test_builtin_default_is_valid(void)
 {
     /*
@@ -552,6 +587,7 @@ int main(void)
         {"degenerate_elements",      test_degenerate_elements_dropped},
         {"overflow_is_bounded",      test_overflow_is_bounded},
         {"long_strings_truncate",    test_long_strings_truncate},
+        {"unsafe_formats_rejected",  test_unsafe_formats_rejected},
         {"builtin_default_is_valid", test_builtin_default_is_valid},
         {"peak",                     test_peak},
         {"tick_band_color",          test_tick_band_color},

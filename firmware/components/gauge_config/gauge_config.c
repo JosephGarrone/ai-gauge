@@ -286,6 +286,59 @@ static bool attr_bool(const xml_tag_t *tag, const char *name, bool *out)
     return false;
 }
 
+/*
+ * The printf subset a format attribute may use: literal text, "%%", and exactly one %f, %e or %g
+ * (either case) with optional flags, width and precision. The renderer hands every format a
+ * double, so anything else -- %s, %n, a second conversion -- is undefined behaviour on the device,
+ * and in the active face that means a crash on every boot. Ported to the editor as checkFormat()
+ * in tools/config-app/js/printf.js.
+ */
+static bool format_is_safe(const char *fmt)
+{
+    int conversions = 0;
+    for (const char *p = fmt; *p != '\0'; p++) {
+        if (*p != '%') {
+            continue;
+        }
+        if (p[1] == '%') {
+            p++;
+            continue;
+        }
+        p++;
+        while (*p == '-' || *p == '+' || *p == ' ' || *p == '#' || *p == '0') {
+            p++;
+        }
+        while (*p >= '0' && *p <= '9') {
+            p++;
+        }
+        if (*p == '.') {
+            p++;
+            while (*p >= '0' && *p <= '9') {
+                p++;
+            }
+        }
+        if (*p != 'f' && *p != 'F' && *p != 'e' && *p != 'E' && *p != 'g' && *p != 'G') {
+            return false;
+        }
+        conversions++;
+    }
+    return conversions == 1;
+}
+
+/* Reads a format attribute; an unsafe one leaves *dst untouched and counts a warning. */
+static void attr_format(const xml_tag_t *tag, char *dst, uint16_t *warnings)
+{
+    char buf[GAUGE_CONFIG_MAX_FORMAT_LEN];
+    if (!attr_str(tag, "format", buf, sizeof(buf))) {
+        return;
+    }
+    if (!format_is_safe(buf)) {
+        (*warnings)++;
+        return;
+    }
+    memcpy(dst, buf, sizeof(buf));
+}
+
 static int hex_val(char c)
 {
     if (c >= '0' && c <= '9') return c - '0';
@@ -559,7 +612,7 @@ static void parse_labels(const xml_tag_t *tag, gauge_config_t *cfg)
     }
 
     attr_str(tag, "font", cfg->face.labels.font, sizeof(cfg->face.labels.font));
-    attr_str(tag, "format", cfg->face.labels.format, sizeof(cfg->face.labels.format));
+    attr_format(tag, cfg->face.labels.format, &cfg->warning_count);
     attr_color(tag, "color", &cfg->face.labels.color, &cfg->warning_count);
     attr_px(tag, "radius", &cfg->face.labels.radius_px, &cfg->warning_count);
 }
@@ -839,7 +892,7 @@ static void parse_readout(const xml_tag_t *tag, gauge_config_t *cfg)
     attr_coord(tag, "x", &cfg->readout.x, &cfg->warning_count);
     attr_coord(tag, "y", &cfg->readout.y, &cfg->warning_count);
     attr_str(tag, "font", cfg->readout.font, sizeof(cfg->readout.font));
-    attr_str(tag, "format", cfg->readout.format, sizeof(cfg->readout.format));
+    attr_format(tag, cfg->readout.format, &cfg->warning_count);
     attr_str(tag, "prefix", cfg->readout.prefix, sizeof(cfg->readout.prefix));
     attr_str(tag, "suffix", cfg->readout.suffix, sizeof(cfg->readout.suffix));
     attr_color(tag, "color", &cfg->readout.color, &cfg->warning_count);
@@ -855,7 +908,7 @@ static void parse_peak(const xml_tag_t *tag, gauge_config_t *cfg)
     attr_bool(tag, "show-value", &cfg->peak.show_value);
     attr_coord(tag, "value-y", &cfg->peak.value_y, &cfg->warning_count);
     attr_str(tag, "font", cfg->peak.font, sizeof(cfg->peak.font));
-    attr_str(tag, "format", cfg->peak.format, sizeof(cfg->peak.format));
+    attr_format(tag, cfg->peak.format, &cfg->warning_count);
     attr_str(tag, "prefix", cfg->peak.prefix, sizeof(cfg->peak.prefix));
 }
 

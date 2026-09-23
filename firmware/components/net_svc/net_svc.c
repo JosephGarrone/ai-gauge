@@ -18,6 +18,7 @@
 #include "esp_netif.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#include "freertos/FreeRTOS.h"
 #include "mdns.h"
 #include "nvs.h"
 
@@ -41,6 +42,11 @@ static struct {
     esp_netif_t *sta_netif;
     esp_netif_t *ap_netif;
 
+    /*
+     * Written by the WiFi event task and the callers of start/stop, read by the UI and HTTP tasks.
+     * The strings would tear without the lock: a copy taken mid-snprintf can hold no terminator.
+     */
+    portMUX_TYPE     status_lock;
     net_svc_status_t status;
     net_svc_callbacks_t cb;
 
@@ -51,7 +57,12 @@ static struct {
     char pending_ssid[NET_SVC_SSID_LEN];
     char pending_pass[64];
     bool have_pending;
-} s;
+} s = {
+    .status_lock = portMUX_INITIALIZER_UNLOCKED,
+};
+
+#define STATUS_LOCK()   taskENTER_CRITICAL(&s.status_lock)
+#define STATUS_UNLOCK() taskEXIT_CRITICAL(&s.status_lock)
 
 const char *net_svc_state_str(net_svc_state_t state)
 {
@@ -68,7 +79,9 @@ const char *net_svc_state_str(net_svc_state_t state)
 void net_svc_get_status(net_svc_status_t *out)
 {
     if (out != NULL) {
+        STATUS_LOCK();
         *out = s.status;
+        STATUS_UNLOCK();
     }
 }
 
@@ -189,7 +202,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
     if (base == WIFI_EVENT) {
         switch (id) {
         case WIFI_EVENT_STA_START:
+            STATUS_LOCK();
             s.status.state = NET_SVC_CONNECTING;
+            STATUS_UNLOCK();
             esp_wifi_connect();
             break;
 
@@ -203,8 +218,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
 
             ESP_LOGW(TAG, "disconnected from '%s' (reason %d)", s.status.ssid, d->reason);
 
+            STATUS_LOCK();
             s.status.ip[0] = '\0';
             s.status.rssi  = 0;
+            STATUS_UNLOCK();
 
             /*
              * Credentials only prove themselves by reaching a connection. If a set of
@@ -218,7 +235,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
                 break;
             }
 
+            STATUS_LOCK();
             s.status.state = NET_SVC_CONNECTING;
+            STATUS_UNLOCK();
             schedule_retry();
             break;
         }
@@ -236,15 +255,18 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
     if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *ev = data;
 
-        snprintf(s.status.ip, sizeof(s.status.ip), IPSTR, IP2STR(&ev->ip_info.ip));
-        s.status.state   = NET_SVC_CONNECTED;
-        s.retry_delay_ms = 0;
-
         wifi_ap_record_t ap;
-        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+        bool             have_ap = (esp_wifi_sta_get_ap_info(&ap) == ESP_OK);
+
+        STATUS_LOCK();
+        snprintf(s.status.ip, sizeof(s.status.ip), IPSTR, IP2STR(&ev->ip_info.ip));
+        s.status.state = NET_SVC_CONNECTED;
+        if (have_ap) {
             s.status.rssi = ap.rssi;
             snprintf(s.status.ssid, sizeof(s.status.ssid), "%s", (const char *)ap.ssid);
         }
+        STATUS_UNLOCK();
+        s.retry_delay_ms = 0;
 
         ESP_LOGI(TAG, "connected to '%s' as %s", s.status.ssid, s.status.ip);
 
@@ -266,7 +288,9 @@ static void set_hostname(void)
      * The MAC suffix keeps two gauges on one network from colliding. Documented in
      * docs/networking.md so the name is predictable rather than a surprise.
      */
+    STATUS_LOCK();
     snprintf(s.status.hostname, sizeof(s.status.hostname), "ai-gauge-%02x%02x", mac[4], mac[5]);
+    STATUS_UNLOCK();
 }
 
 static void start_mdns(void)
@@ -301,9 +325,11 @@ static void start_ap_mode(void)
     esp_wifi_set_config(WIFI_IF_AP, &ap);
     esp_wifi_start();
 
+    STATUS_LOCK();
     s.status.state = NET_SVC_AP_MODE;
     snprintf(s.status.ssid, sizeof(s.status.ssid), "%s", AP_SSID_PREFIX);
     snprintf(s.status.ip, sizeof(s.status.ip), "192.168.4.1");
+    STATUS_UNLOCK();
 
     ESP_LOGW(TAG, "no working credentials: setup network '%s' is up at %s",
              AP_SSID_PREFIX, s.status.ip);
@@ -319,8 +345,10 @@ static esp_err_t start_sta_mode(const char *ssid, const char *pass)
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &sta), TAG, "set_config");
     ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "wifi_start");
 
+    STATUS_LOCK();
     snprintf(s.status.ssid, sizeof(s.status.ssid), "%s", ssid);
     s.status.state = NET_SVC_CONNECTING;
+    STATUS_UNLOCK();
 
     ESP_LOGI(TAG, "connecting to '%s'", ssid);
     return ESP_OK;
@@ -436,9 +464,11 @@ esp_err_t net_svc_stop(void)
     esp_wifi_stop();
     esp_wifi_deinit();
 
-    s.started      = false;
+    s.started = false;
+    STATUS_LOCK();
     s.status.state = NET_SVC_DISABLED;
     s.status.ip[0] = '\0';
+    STATUS_UNLOCK();
 
     ESP_LOGI(TAG, "stopped");
     return ESP_OK;
