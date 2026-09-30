@@ -448,6 +448,31 @@ through the HTTP delete-fallback path, without a reboot.
 
 **Still owed:** the plain built-in-needle `boost` on this build, for the baseline.
 
+### GitHub updates (ADR 0010) and PSRAM statics, 2026-10-01
+
+Adding TLS for GitHub updates, with `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC` on, cost internal RAM
+through the statics it links in: the heap's start moved up by 1,416 B. After startup, internal free
+fell from 3,943 B to 1,855 B, and **the largest DMA block from 2,432 B to 448 B**. A USB reset
+still booted, but **at power-on the panel showed green and white noise**: the known DMA-starvation
+failure.
+
+The fix was `CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY`. With it, IDF's own linker fragments put
+the `.bss` of lwIP, `net80211` and `pp` in PSRAM (`g_cnxMgr` alone is 3,880 B).
+
+| Measurement (needle sweeping, WiFi connected, sensor board attached) | Before TLS | TLS only | TLS + PSRAM `.bss` |
+|---|---|---|---|
+| Internal free after startup | 3,943 B | 1,855 B | **15,603 B** |
+| Largest internal DMA block after startup | 2,432 B | 448 B | **7,936 B** |
+| Lowest internal free since boot, including a TLS check against GitHub | — | — | 11,967 B |
+| Lowest free `httpd` stack | — | — | 4,160 B |
+
+The frame rate held through the TLS check. At the 45 fps cap it read 47.6 fps before, during and
+after, with a 2.1 ms mean render. **The 60 fps gate was not re-measured on this build**: the board's
+saved cap is 45.
+
+Still owed: power-on boot confirmed by hand, the 60 fps gate, and a full download-and-install of a
+release, which needs a release to exist.
+
 ### Not yet measured
 - Scenarios 1, 3 and 6.
 - Scenario 2 with a custom needle shape (above).

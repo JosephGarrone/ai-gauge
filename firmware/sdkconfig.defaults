@@ -64,6 +64,11 @@ CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
 CONFIG_MDNS_MEMORY_ALLOC_SPIRAM=y
+# Static data of lwIP and the WiFi libraries (net80211, pp) in PSRAM, via IDF's own linker
+# fragments; EXT_RAM_BSS_ATTR can move ours too. Measured: adding TLS for GitHub updates cost ~2KB
+# of internal RAM, which left the largest DMA block at 448 B and the panel failing at power-on
+# (green and white noise). See docs/performance.md.
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 CONFIG_MDNS_TASK_STACK_SIZE=3072
 
 # --- CPU and cache --------------------------------------------------------------------
@@ -81,6 +86,11 @@ CONFIG_FREERTOS_HZ=1000
 # --- OTA ------------------------------------------------------------------------------
 # A new image must confirm itself healthy or the bootloader reverts (docs/networking.md).
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Updates from GitHub need TLS, and a handshake makes hundreds of small allocations. The default
+# puts all of them in internal RAM, of which ~3KB is left once WiFi runs. Nothing else here uses
+# TLS, so moving mbedTLS to PSRAM costs the rest of the system nothing (ADR 0010).
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 
 # --- LVGL -----------------------------------------------------------------------------
 CONFIG_LV_OS_FREERTOS=y

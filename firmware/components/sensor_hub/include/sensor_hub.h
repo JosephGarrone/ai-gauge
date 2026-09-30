@@ -97,6 +97,23 @@ typedef struct {
     int64_t timestamp_us; /**< esp_timer_get_time() at the sample. 0 if never sampled. */
 } sensor_hub_reading_t;
 
+/** The individual conversions behind the channels, for bench validation of a board. */
+typedef enum {
+    SENSOR_HUB_RAW_AIN0 = 0, /**< ADS1115 AIN0: MAP / 2 */
+    SENSOR_HUB_RAW_AIN1,     /**< ADS1115 AIN1: sensor 5V / 2 */
+    SENSOR_HUB_RAW_AIN2,     /**< ADS1115 AIN2: ignition / 6 */
+    SENSOR_HUB_RAW_AIN3,     /**< ADS1115 AIN3: thermocouple, +-0.256V range */
+    SENSOR_HUB_RAW_TMP,      /**< TMP1075 temperature register */
+    SENSOR_HUB_RAW_COUNT,
+} sensor_hub_raw_id_t;
+
+typedef struct {
+    int16_t  code;    /**< Last register value as read: ADS1115 counts, or the TMP1075 register. */
+    float    value;   /**< ADS1115: volts at the ADC pin, before undoing any divider. TMP1075: C. */
+    float    rate_hz; /**< Successful reads per second, over the last second. */
+    uint32_t count;   /**< Successful reads since startup. */
+} sensor_hub_raw_t;
+
 /** Everything the task publishes. Raw values are for the settings page's diagnostics. */
 typedef struct {
     sensor_hub_state_t   state;
@@ -114,6 +131,10 @@ typedef struct {
     const char *egt_fault;   /**< Why EGT is invalid, or NULL. Static string. */
     uint32_t i2c_errors;   /**< Failed transactions since startup. */
     uint32_t samples;      /**< MAP conversions since startup. */
+
+    sensor_hub_raw_t raw[SENSOR_HUB_RAW_COUNT];
+    uint8_t  i2c_found[16]; /**< Bitmap of 7-bit addresses that ACKed in the last bus scan. */
+    bool     scanned;       /**< i2c_found holds a completed scan. */
 } sensor_hub_snapshot_t;
 
 /**
@@ -174,6 +195,20 @@ esp_err_t sensor_hub_save_cal(void);
  * @param msg Filled with a one-line result for the user.
  */
 esp_err_t sensor_hub_zero_boost(char *msg, size_t msg_len);
+
+/**
+ * @brief Ask the sensor task to scan the whole bus for devices, once, at its next tick.
+ *
+ * The result lands in the snapshot's i2c_found. The task also scans once at startup. Costs a few
+ * tens of milliseconds of sampling, so it is for diagnostics, not for a timer.
+ */
+void sensor_hub_request_scan(void);
+
+/** @brief True if @p addr ACKed in the snapshot's last scan. */
+static inline bool sensor_hub_scan_found(const sensor_hub_snapshot_t *snap, uint8_t addr)
+{
+    return addr < 128 && (snap->i2c_found[addr >> 3] & (1u << (addr & 7))) != 0;
+}
 
 /** @brief Short user-facing word for a state, e.g. "online". */
 const char *sensor_hub_state_str(sensor_hub_state_t state);

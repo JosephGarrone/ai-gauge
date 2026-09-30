@@ -97,6 +97,58 @@ bool net_svc_has_credentials(void);
 /** @brief Human-readable form of a state, for the settings page. */
 const char *net_svc_state_str(net_svc_state_t state);
 
+/* ------------------------------------------------------------------ updates -------- */
+
+/*
+ * Firmware updates from the GitHub Releases of CONFIG_AI_GAUGE_UPDATE_REPO. See docs/networking.md,
+ * "Updates from GitHub", and ADR 0010.
+ */
+
+typedef enum {
+    NET_SVC_UPDATE_IDLE = 0,    /**< Not checked yet. */
+    NET_SVC_UPDATE_CHECKING,
+    NET_SVC_UPDATE_UP_TO_DATE,  /**< Also when no release has been published (latest is ""). */
+    NET_SVC_UPDATE_AVAILABLE,   /**< latest is newer than the running firmware. */
+    NET_SVC_UPDATE_DOWNLOADING, /**< progress is the download, 0-100. */
+    NET_SVC_UPDATE_INSTALLING,  /**< Writing flash; progress 0-100. */
+    NET_SVC_UPDATE_REBOOTING,
+    NET_SVC_UPDATE_FAILED,      /**< message says why. The running firmware is untouched. */
+} net_svc_update_state_t;
+
+#define NET_SVC_UPDATE_VERSION_LEN 32
+#define NET_SVC_UPDATE_MESSAGE_LEN 64
+
+typedef struct {
+    net_svc_update_state_t state;
+    char    latest[NET_SVC_UPDATE_VERSION_LEN];  /**< Newest release's version, "" if unknown. */
+    uint8_t progress;                            /**< Percent, while downloading or installing. */
+    char    message[NET_SVC_UPDATE_MESSAGE_LEN]; /**< Why it failed, or "". */
+} net_svc_update_status_t;
+
+/**
+ * @brief Look for a newer release, in the background.
+ *
+ * @return ESP_ERR_INVALID_STATE if there is no connection or an update is already under way.
+ */
+esp_err_t net_svc_update_check(void);
+
+/**
+ * @brief Download and install the newest release, in the background, then restart into it.
+ *
+ * The image is downloaded completely and checked before flash is touched, so a failed download
+ * leaves nothing changed. The new image must still confirm itself after startup, or the bootloader
+ * rolls back to this one.
+ *
+ * @return ESP_ERR_INVALID_STATE unless a check has found a newer release and nothing is under way.
+ */
+esp_err_t net_svc_update_install(void);
+
+/** @brief Current update state. Safe from any task. */
+void net_svc_update_get_status(net_svc_update_status_t *out);
+
+/** @brief Short word for a state, as `GET /api/update` reports it, e.g. "available". */
+const char *net_svc_update_state_str(net_svc_update_state_t state);
+
 /**
  * @brief Record which stored face is on screen, reported by `GET /api/status`.
  *

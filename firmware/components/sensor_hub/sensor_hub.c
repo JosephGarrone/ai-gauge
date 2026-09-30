@@ -38,6 +38,9 @@ static const char *TAG = "sensor_hub";
 
 #define ADS1115_ADDR 0x48
 #define TMP1075_ADDR 0x49
+/* The part's whole address range (1001 A2 A1 A0), searched if it is not at TMP1075_ADDR. */
+#define TMP1075_ADDR_FIRST 0x48
+#define TMP1075_ADDR_LAST  0x4F
 
 #define ADS_REG_CONVERSION 0x00
 #define ADS_REG_CONFIG     0x01
@@ -82,6 +85,11 @@ static const char *TAG = "sensor_hub";
 /* Readings older than this are shown invalid, so a stalled task cannot freeze the needle. */
 #define STALE_FAST_US (250 * 1000)
 #define STALE_SLOW_US (1500 * 1000)
+
+#define RATE_WINDOW_US   (1000 * 1000)
+#define SCAN_FIRST_ADDR  0x08 /* 0x00-0x07 and 0x78-0x7F are reserved by the I2C specification */
+#define SCAN_LAST_ADDR   0x77
+#define SCAN_TIMEOUT_MS  5
 
 /* ---------------------------------------------------------------- plausibility ---- */
 
@@ -162,15 +170,14 @@ static void cal_sanitise(sensor_hub_cal_t *c)
 /* ---------------------------------------------------------------- state ----------- */
 
 /*
- * Publication slot. The writer only ever fills the slot readers are *not* directed to, then
+ * Publication slots. The writer only ever fills the slot readers are *not* directed to, then
  * flips `latest`; each slot's sequence number catches the rare reader that was preempted long
  * enough for the writer to lap it. Neither side ever waits on the other.
+ *
+ * The snapshots themselves live in PSRAM (allocated by sensor_hub_start()): with the diagnostics
+ * they are a few hundred bytes each, and internal RAM is the binding constraint. The sequence
+ * numbers stay internal; they are only ever plainly loaded and stored, never read-modify-written.
  */
-typedef struct {
-    atomic_uint           seq;
-    sensor_hub_snapshot_t snap;
-} slot_t;
-
 static struct {
     i2c_master_bus_handle_t bus;
     i2c_master_dev_handle_t ads;
@@ -187,10 +194,12 @@ static struct {
     bool             cal_dirty;   /* UI task only */
     bool             cal_loaded;  /* app_main task, before the sensor task exists */
 
-    slot_t      slots[2];
-    atomic_uint latest;
-    atomic_bool started;
-    atomic_bool seen; /* a board has answered since startup */
+    sensor_hub_snapshot_t *snaps; /* [2], PSRAM */
+    atomic_uint            seq[2];
+    atomic_uint            latest;
+    atomic_bool            started;
+    atomic_bool            seen; /* a board has answered since startup */
+    atomic_bool            scan_requested;
 } s = {
     .cal_lock = portMUX_INITIALIZER_UNLOCKED,
 };
@@ -289,35 +298,33 @@ static esp_err_t ads_convert(int ain, int pga, int dr, float sps, int16_t *out)
 
 static void publish(const sensor_hub_snapshot_t *snap)
 {
-    unsigned idx  = atomic_load_explicit(&s.latest, memory_order_relaxed) ^ 1u;
-    slot_t  *slot = &s.slots[idx];
+    unsigned idx = atomic_load_explicit(&s.latest, memory_order_relaxed) ^ 1u;
 
-    unsigned seq = atomic_load_explicit(&slot->seq, memory_order_relaxed);
-    atomic_store_explicit(&slot->seq, seq + 1, memory_order_relaxed);
+    unsigned seq = atomic_load_explicit(&s.seq[idx], memory_order_relaxed);
+    atomic_store_explicit(&s.seq[idx], seq + 1, memory_order_relaxed);
     atomic_thread_fence(memory_order_release);
-    slot->snap = *snap;
-    atomic_store_explicit(&slot->seq, seq + 2, memory_order_release);
+    s.snaps[idx] = *snap;
+    atomic_store_explicit(&s.seq[idx], seq + 2, memory_order_release);
 
     atomic_store_explicit(&s.latest, idx, memory_order_release);
 }
 
 void sensor_hub_get_snapshot(sensor_hub_snapshot_t *out)
 {
-    for (int attempt = 0; attempt < 8; attempt++) {
-        unsigned idx  = atomic_load_explicit(&s.latest, memory_order_acquire);
-        slot_t  *slot = &s.slots[idx];
+    for (int attempt = 0; s.snaps != NULL && attempt < 8; attempt++) {
+        unsigned idx = atomic_load_explicit(&s.latest, memory_order_acquire);
 
-        unsigned before = atomic_load_explicit(&slot->seq, memory_order_acquire);
+        unsigned before = atomic_load_explicit(&s.seq[idx], memory_order_acquire);
         if (before & 1u) {
             continue;
         }
-        *out = slot->snap;
+        *out = s.snaps[idx];
         atomic_thread_fence(memory_order_acquire);
-        if (atomic_load_explicit(&slot->seq, memory_order_relaxed) == before) {
+        if (atomic_load_explicit(&s.seq[idx], memory_order_relaxed) == before) {
             return;
         }
     }
-    /* Lapped eight times in a row: report nothing rather than a torn copy. */
+    /* Not started, or lapped eight times in a row: report nothing rather than a torn copy. */
     memset(out, 0, sizeof(*out));
 }
 
@@ -344,7 +351,53 @@ typedef struct {
     bool  cj_valid;
     float cj_c;
     int64_t cj_us;
+
+    uint32_t raw_window_count[SENSOR_HUB_RAW_COUNT];
+    int64_t  raw_window_us;
 } task_state_t;
+
+static void note_raw(sensor_hub_snapshot_t *snap, sensor_hub_raw_id_t id, int16_t code, float value)
+{
+    sensor_hub_raw_t *r = &snap->raw[id];
+    r->code  = code;
+    r->value = value;
+    r->count++;
+}
+
+/* Reads per second per conversion, over whole windows, so the figure is steady enough to read. */
+static void update_rates(task_state_t *t, sensor_hub_snapshot_t *snap, int64_t now)
+{
+    if (t->raw_window_us == 0) {
+        t->raw_window_us = now;
+        return;
+    }
+    int64_t elapsed = now - t->raw_window_us;
+    if (elapsed < RATE_WINDOW_US) {
+        return;
+    }
+    for (int i = 0; i < SENSOR_HUB_RAW_COUNT; i++) {
+        uint32_t n = snap->raw[i].count - t->raw_window_count[i];
+        snap->raw[i].rate_hz   = (float)((double)n * 1e6 / (double)elapsed);
+        t->raw_window_count[i] = snap->raw[i].count;
+    }
+    t->raw_window_us = now;
+}
+
+/* Which addresses answer, for telling a missing part from one strapped to another address. */
+static void scan_bus(sensor_hub_snapshot_t *snap)
+{
+    memset(snap->i2c_found, 0, sizeof(snap->i2c_found));
+    int found = 0;
+    for (uint8_t addr = SCAN_FIRST_ADDR; addr <= SCAN_LAST_ADDR; addr++) {
+        if (i2c_master_probe(s.bus, addr, SCAN_TIMEOUT_MS) == ESP_OK) {
+            snap->i2c_found[addr >> 3] |= (uint8_t)(1u << (addr & 7));
+            ESP_LOGI(TAG, "scan: device at 0x%02x", addr);
+            found++;
+        }
+    }
+    snap->scanned = true;
+    ESP_LOGI(TAG, "scan: %d device(s) on the sensor bus", found);
+}
 
 static void note_ads_result(task_state_t *t, sensor_hub_snapshot_t *snap, esp_err_t err)
 {
@@ -373,7 +426,39 @@ static void note_tmp_result(task_state_t *t, sensor_hub_snapshot_t *snap, esp_er
     }
 }
 
-/* Look for whichever device is missing. Cheap: two address-only transactions. */
+/*
+ * The TMP1075 is strapped to 0x49, but the first assembled board's answers at 0x4F (bench scan,
+ * 2026-10-01). So after the expected address, look through the rest of the part's range and accept
+ * one only if the die ID proves it is a TMP1075: a strapping difference must not silently cost EGT,
+ * and nothing else on the bus may be mistaken for it.
+ */
+static bool tmp_try(uint8_t addr, bool require_id)
+{
+    if (i2c_master_probe(s.bus, addr, I2C_TIMEOUT_MS) != ESP_OK ||
+        i2c_master_device_change_address(s.tmp, addr, I2C_TIMEOUT_MS) != ESP_OK) {
+        return false;
+    }
+    uint16_t id = 0;
+    if (reg_read16(s.tmp, TMP_REG_DIEID, &id) != ESP_OK) {
+        return false;
+    }
+    if (id != TMP_DIEID) {
+        if (require_id) {
+            return false;
+        }
+        /* A TMP1075N has no ID register; anything else at 0x49 is a wiring surprise. */
+        ESP_LOGW(TAG, "device at 0x%02x has ID 0x%04x, expected 0x%04x; using it anyway", addr,
+                 id, TMP_DIEID);
+    }
+    if (addr != TMP1075_ADDR) {
+        ESP_LOGW(TAG, "TMP1075 answers at 0x%02x, not 0x%02x: check its address straps", addr,
+                 TMP1075_ADDR);
+    }
+    ESP_LOGI(TAG, "TMP1075 found at 0x%02x", addr);
+    return true;
+}
+
+/* Look for whichever device is missing. Cheap: a handful of address-only transactions. */
 static void probe(task_state_t *t)
 {
     if (!t->ads_ok && i2c_master_probe(s.bus, ADS1115_ADDR, I2C_TIMEOUT_MS) == ESP_OK) {
@@ -384,17 +469,16 @@ static void probe(task_state_t *t)
         }
     }
 
-    if (!t->tmp_ok && i2c_master_probe(s.bus, TMP1075_ADDR, I2C_TIMEOUT_MS) == ESP_OK) {
-        uint16_t id = 0;
-        if (reg_read16(s.tmp, TMP_REG_DIEID, &id) == ESP_OK) {
-            if (id != TMP_DIEID) {
-                /* A TMP1075N has no ID register; anything else at 0x49 is a wiring surprise. */
-                ESP_LOGW(TAG, "device at 0x%02x has ID 0x%04x, expected 0x%04x; using it anyway",
-                         TMP1075_ADDR, id, TMP_DIEID);
+    if (!t->tmp_ok) {
+        bool found = tmp_try(TMP1075_ADDR, false);
+        for (uint8_t addr = TMP1075_ADDR_FIRST; !found && addr <= TMP1075_ADDR_LAST; addr++) {
+            if (addr != TMP1075_ADDR && addr != ADS1115_ADDR) {
+                found = tmp_try(addr, true);
             }
+        }
+        if (found) {
             t->tmp_ok    = true;
             t->tmp_fails = 0;
-            ESP_LOGI(TAG, "TMP1075 found at 0x%02x", TMP1075_ADDR);
         }
     }
 
@@ -414,7 +498,10 @@ static void sample_map(task_state_t *t, sensor_hub_snapshot_t *snap, const senso
     }
     snap->samples++;
 
-    float v_sensor     = sensor_math_ads1115_volts(counts, 4.096f) * cal->map_div;
+    float v_pin = sensor_math_ads1115_volts(counts, 4.096f);
+    note_raw(snap, SENSOR_HUB_RAW_AIN0, counts, v_pin);
+
+    float v_sensor     = v_pin * cal->map_div;
     snap->map_sensor_v = v_sensor;
 
     const char *fault = NULL;
@@ -495,7 +582,9 @@ static void sample_supply(task_state_t *t, sensor_hub_snapshot_t *snap, const se
     if (err != ESP_OK) {
         return;
     }
-    float v = sensor_math_ads1115_volts(counts, 4.096f) * cal->supply_div;
+    float v_pin = sensor_math_ads1115_volts(counts, 4.096f);
+    note_raw(snap, SENSOR_HUB_RAW_AIN1, counts, v_pin);
+    float v = v_pin * cal->supply_div;
     t->supply_v    = t->supply_seen ? sensor_math_lowpass(t->supply_v, v, TICK_MS * SLOT_COUNT,
                                                           SUPPLY_TAU_MS)
                                     : v;
@@ -512,7 +601,9 @@ static void sample_ignition(task_state_t *t, sensor_hub_snapshot_t *snap,
     if (err != ESP_OK) {
         return;
     }
-    float v = sensor_math_ads1115_volts(counts, 4.096f) * cal->ignition_div;
+    float v_pin = sensor_math_ads1115_volts(counts, 4.096f);
+    note_raw(snap, SENSOR_HUB_RAW_AIN2, counts, v_pin);
+    float v = v_pin * cal->ignition_div;
     t->ignition_v    = t->ignition_seen ? sensor_math_lowpass(t->ignition_v, v,
                                                               TICK_MS * SLOT_COUNT, IGNITION_TAU_MS)
                                         : v;
@@ -532,6 +623,7 @@ static void sample_egt(task_state_t *t, sensor_hub_snapshot_t *snap, const senso
 
     float tc_v   = sensor_math_ads1115_volts(counts, 0.256f);
     snap->tc_uv  = tc_v * 1e6f;
+    note_raw(snap, SENSOR_HUB_RAW_AIN3, counts, tc_v);
 
     const char *fault = NULL;
     float       egt   = 0.0f;
@@ -572,6 +664,7 @@ static void sample_cold_junction(task_state_t *t, sensor_hub_snapshot_t *snap, i
         return;
     }
     float c     = sensor_math_tmp1075_celsius(raw);
+    note_raw(snap, SENSOR_HUB_RAW_TMP, (int16_t)raw, c);
     t->cj_valid = (c >= CJ_MIN_C && c <= CJ_MAX_C);
     t->cj_c     = c;
     t->cj_us    = now;
@@ -614,6 +707,11 @@ static void sensor_task(void *arg)
     for (;;) {
         int64_t now = esp_timer_get_time();
 
+        if (atomic_exchange(&s.scan_requested, false)) {
+            scan_bus(&snap);
+            now = esp_timer_get_time();
+        }
+
         if ((!t.ads_ok || !t.tmp_ok) && now >= t.next_probe_us) {
             probe(&t);
             t.next_probe_us = now + (int64_t)PROBE_EVERY_MS * 1000;
@@ -641,6 +739,7 @@ static void sensor_task(void *arg)
         }
 
         invalidate_missing(&t, &snap, now);
+        update_rates(&t, &snap, now);
 
         snap.ads1115_ok = t.ads_ok;
         snap.tmp1075_ok = t.tmp_ok;
@@ -746,6 +845,9 @@ esp_err_t sensor_hub_start(const sensor_hub_bus_t *bus)
 
     cal_load();
 
+    s.snaps = heap_caps_calloc(2, sizeof(*s.snaps), MALLOC_CAP_SPIRAM);
+    ESP_RETURN_ON_FALSE(s.snaps != NULL, ESP_ERR_NO_MEM, TAG, "snapshots");
+
     sensor_hub_snapshot_t empty = {.state = SENSOR_HUB_SEARCHING};
     publish(&empty);
 
@@ -817,6 +919,7 @@ esp_err_t sensor_hub_start(const sensor_hub_bus_t *bus)
         return ESP_ERR_NO_MEM;
     }
 
+    atomic_store(&s.scan_requested, true); /* once at startup, before the first sample */
     atomic_store(&s.started, true);
     ESP_LOGI(TAG, "sensor bus on I2C%d: SDA GPIO%d, SCL GPIO%d, ALERT GPIO%d, %" PRIu32 " Hz",
              bus->i2c_port, bus->sda_gpio, bus->scl_gpio, bus->alert_gpio, bus->scl_hz);
@@ -943,6 +1046,11 @@ esp_err_t sensor_hub_zero_boost(char *msg, size_t msg_len)
     snprintf(msg, msg_len, "Zeroed at %.1f kPa%s", (double)kpa,
              err == ESP_OK ? "" : " (not saved)");
     return ESP_OK;
+}
+
+void sensor_hub_request_scan(void)
+{
+    atomic_store(&s.scan_requested, true);
 }
 
 const char *sensor_hub_state_str(sensor_hub_state_t state)

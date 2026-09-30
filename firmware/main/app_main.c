@@ -444,7 +444,89 @@ static void on_telemetry(const char *channel, float value)
     taskEXIT_CRITICAL(&s_telemetry.lock);
 }
 
-/* Keeps the settings page's network line current. Runs on the LVGL task. */
+/*
+ * Firmware updates from the settings page. The firmware line is the control: a tap checks, and
+ * once a newer release is known, a tap arms the install and a second tap within a few seconds
+ * starts it. Two taps because installing restarts the gauge. Runs on the LVGL task.
+ */
+#define UPDATE_CONFIRM_MS 4000
+
+static int64_t s_update_armed_until_us;
+
+static void update_status_refresh(void)
+{
+    net_svc_update_status_t u;
+    net_svc_update_get_status(&u);
+    net_svc_status_t net;
+    net_svc_get_status(&net);
+
+    bool armed = esp_timer_get_time() < s_update_armed_until_us;
+    char text[96];
+
+    switch (u.state) {
+    case NET_SVC_UPDATE_CHECKING:
+        snprintf(text, sizeof(text), "Checking for updates...");
+        break;
+    case NET_SVC_UPDATE_UP_TO_DATE:
+        if (u.latest[0] == '\0') {
+            snprintf(text, sizeof(text), "No releases yet\nTap to check again");
+        } else {
+            snprintf(text, sizeof(text), "Up to date (latest %s)\nTap to check again", u.latest);
+        }
+        break;
+    case NET_SVC_UPDATE_AVAILABLE:
+        snprintf(text, sizeof(text), armed ? "Tap again to install %s" : "%s available\nTap to install",
+                 u.latest);
+        break;
+    case NET_SVC_UPDATE_DOWNLOADING:
+        snprintf(text, sizeof(text), "Downloading %s  %u%%", u.latest, (unsigned)u.progress);
+        break;
+    case NET_SVC_UPDATE_INSTALLING:
+        snprintf(text, sizeof(text), "Installing %s  %u%%", u.latest, (unsigned)u.progress);
+        break;
+    case NET_SVC_UPDATE_REBOOTING:
+        snprintf(text, sizeof(text), "Installed. Restarting...");
+        break;
+    case NET_SVC_UPDATE_FAILED:
+        snprintf(text, sizeof(text), "Update failed: %s\nTap to retry", u.message);
+        break;
+    case NET_SVC_UPDATE_IDLE:
+    default:
+        snprintf(text, sizeof(text), "Tap to check for updates");
+        break;
+    }
+
+    /* Nothing that needs the network can start without it; say so instead of "tap to ...". */
+    bool idle_state = u.state == NET_SVC_UPDATE_IDLE || u.state == NET_SVC_UPDATE_UP_TO_DATE ||
+                      u.state == NET_SVC_UPDATE_AVAILABLE || u.state == NET_SVC_UPDATE_FAILED;
+    if (idle_state && net.state != NET_SVC_CONNECTED) {
+        snprintf(text, sizeof(text), "Updates need WiFi");
+    }
+
+    app_ui_set_update_status(text);
+}
+
+static void on_firmware_tap(void)
+{
+    net_svc_update_status_t u;
+    net_svc_update_get_status(&u);
+
+    if (u.state == NET_SVC_UPDATE_AVAILABLE) {
+        if (esp_timer_get_time() < s_update_armed_until_us) {
+            s_update_armed_until_us = 0;
+            if (net_svc_update_install() != ESP_OK) {
+                ESP_LOGW(TAG, "update install refused");
+            }
+        } else {
+            s_update_armed_until_us = esp_timer_get_time() + (int64_t)UPDATE_CONFIRM_MS * 1000;
+        }
+    } else if (net_svc_update_check() != ESP_OK) {
+        ESP_LOGW(TAG, "update check refused (no connection, or busy)");
+    }
+    update_status_refresh();
+}
+
+/* Keeps the settings page's network and update lines current. Runs on the LVGL task. */
 static void network_status_timer_cb(lv_timer_t *t)
 {
     (void)t;
@@ -472,6 +554,7 @@ static void network_status_timer_cb(lv_timer_t *t)
     }
 
     app_ui_set_network_status(net_svc_state_str(net.state), detail);
+    update_status_refresh();
 }
 
 /* Runs on the LVGL task, from the settings page's confirmed "Reset network" button. */
@@ -666,6 +749,7 @@ void app_main(void)
     app_ui_set_gauge_list(list.count > 0 ? list.ids : NULL, list.count, loaded_id);
     app_ui_set_gauge_selected_cb(on_gauge_selected);
     app_ui_set_network_reset_cb(on_network_reset);
+    app_ui_set_firmware_tap_cb(on_firmware_tap);
 
     if (warning[0] != '\0') {
         ESP_LOGW(TAG, "%s", warning);

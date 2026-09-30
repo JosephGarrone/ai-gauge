@@ -9,6 +9,7 @@
 #include "net_svc_priv.h"
 
 #include <ctype.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,11 +22,13 @@
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "esp_timer.h"
 
 #include "gauge_store.h"
 #include "net_svc_editor_files.h"
+#include "sensor_hub.h"
 
 static const char *TAG = "net_svc_http";
 
@@ -470,27 +473,28 @@ _Static_assert(OTA_HEAD_BYTES <= OTA_CHUNK, "the image head must fit the first c
  * and rollback only catches one that crashes: a valid image for some other board would boot, never
  * confirm itself or never crash, and leave the gauge unrecoverable without a cable.
  */
-static bool ota_image_is_ours(const char *head, size_t len, char *why, size_t why_len)
+const esp_app_desc_t *net_svc_ota_image_desc(const uint8_t *head, size_t len, char *why,
+                                             size_t why_len)
 {
     if (len < OTA_HEAD_BYTES) {
         snprintf(why, why_len, "not a firmware image (too short)");
-        return false;
+        return NULL;
     }
 
     /* Read in place, not copied to this internal-RAM stack: the heap buffer and offset 32 align it. */
     const esp_app_desc_t *desc = (const esp_app_desc_t *)(head + OTA_DESC_OFFSET);
     if (desc->magic_word != ESP_APP_DESC_MAGIC_WORD) {
         snprintf(why, why_len, "not a firmware image (no app description)");
-        return false;
+        return NULL;
     }
 
     const esp_app_desc_t *self = esp_app_get_description();
     if (strncmp(desc->project_name, self->project_name, sizeof(desc->project_name)) != 0) {
         snprintf(why, why_len, "image is for project '%.32s', not '%.32s'", desc->project_name,
                  self->project_name);
-        return false;
+        return NULL;
     }
-    return true;
+    return desc;
 }
 
 static esp_err_t ota_post(httpd_req_t *req)
@@ -520,7 +524,7 @@ static esp_err_t ota_post(httpd_req_t *req)
     }
 
     char why[96];
-    if (!ota_image_is_ours(chunk, received, why, sizeof(why))) {
+    if (net_svc_ota_image_desc((const uint8_t *)chunk, received, why, sizeof(why)) == NULL) {
         free(chunk);
         ESP_LOGE(TAG, "OTA refused: %s", why);
         return send_json_error(req, "400 Bad Request", why);
@@ -580,6 +584,222 @@ static esp_err_t ota_post(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* ---------------------------------------------------- image write for GitHub updates ---- */
+
+typedef struct {
+    const uint8_t            *image;
+    size_t                    len;
+    net_svc_ota_progress_cb_t progress;
+    char                     *why;
+    size_t                    why_len;
+    esp_err_t                 result;
+    SemaphoreHandle_t         done;
+} write_job_t;
+
+/* Runs on the HTTP server task: its stack is internal RAM, which a flash write requires. */
+static void write_image_work(void *arg)
+{
+    write_job_t *job = arg;
+    job->result      = ESP_FAIL;
+
+    const esp_partition_t *target = esp_ota_get_next_update_partition(NULL);
+    if (target == NULL) {
+        snprintf(job->why, job->why_len, "no OTA partition");
+        xSemaphoreGive(job->done);
+        return;
+    }
+    if (job->len > target->size) {
+        snprintf(job->why, job->why_len, "image is larger than the partition");
+        xSemaphoreGive(job->done);
+        return;
+    }
+
+    ESP_LOGW(TAG, "update: writing %u bytes -> %s", (unsigned)job->len, target->label);
+
+    esp_ota_handle_t handle = 0;
+    esp_err_t        err    = esp_ota_begin(target, job->len, &handle);
+    for (size_t done = 0; err == ESP_OK && done < job->len;) {
+        size_t n = job->len - done;
+        if (n > OTA_CHUNK) {
+            n = OTA_CHUNK;
+        }
+        err = esp_ota_write(handle, job->image + done, n);
+        done += n;
+        if (job->progress != NULL) {
+            job->progress((uint8_t)(done * 100 / job->len));
+        }
+    }
+    if (err != ESP_OK) {
+        if (handle != 0) {
+            esp_ota_abort(handle);
+        }
+    } else {
+        /* Validates the image, its hash included, before it can ever be booted. */
+        err = esp_ota_end(handle);
+        if (err == ESP_OK) {
+            err = esp_ota_set_boot_partition(target);
+        }
+    }
+
+    if (err != ESP_OK) {
+        snprintf(job->why, job->why_len, "write failed: %s", esp_err_to_name(err));
+    }
+    job->result = err;
+    xSemaphoreGive(job->done);
+}
+
+esp_err_t net_svc_http_write_image(const uint8_t *image, size_t len,
+                                   net_svc_ota_progress_cb_t progress, char *why, size_t why_len)
+{
+    if (s_server == NULL) {
+        snprintf(why, why_len, "HTTP server not running");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    write_job_t job = {
+        .image    = image,
+        .len      = len,
+        .progress = progress,
+        .why      = why,
+        .why_len  = why_len,
+        .done     = xSemaphoreCreateBinary(),
+    };
+    if (job.done == NULL) {
+        snprintf(why, why_len, "out of memory");
+        return ESP_ERR_NO_MEM;
+    }
+
+    esp_err_t err = httpd_queue_work(s_server, write_image_work, &job);
+    if (err == ESP_OK) {
+        xSemaphoreTake(job.done, portMAX_DELAY);
+        err = job.result;
+    } else {
+        snprintf(why, why_len, "could not queue the write: %s", esp_err_to_name(err));
+    }
+    vSemaphoreDelete(job.done);
+    return err;
+}
+
+/* -------------------------------------------------------------- updates and sensors ---- */
+
+static esp_err_t update_get(httpd_req_t *req)
+{
+    char origin[ORIGIN_LEN];
+    allow_loopback_origin(req, origin, sizeof(origin));
+
+    net_svc_update_status_t u;
+    net_svc_update_get_status(&u);
+    const esp_app_desc_t *app = esp_app_get_description();
+
+    char latest[2 * NET_SVC_UPDATE_VERSION_LEN];
+    char message[2 * NET_SVC_UPDATE_MESSAGE_LEN];
+    json_escape(u.latest, latest, sizeof(latest));
+    json_escape(u.message, message, sizeof(message));
+
+    char body[320];
+    snprintf(body, sizeof(body),
+             "{\"state\":\"%s\",\"running\":\"%s\",\"latest\":\"%s\",\"progress\":%u,"
+             "\"message\":\"%s\",\"repo\":\"%s\"}",
+             net_svc_update_state_str(u.state), app ? app->version : "unknown", latest,
+             (unsigned)u.progress, message, CONFIG_AI_GAUGE_UPDATE_REPO);
+
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, body);
+}
+
+static esp_err_t update_command(httpd_req_t *req, esp_err_t (*command)(void))
+{
+    esp_err_t err = command();
+    if (err != ESP_OK) {
+        return send_json_error(req, "409 Conflict",
+                               "not now: no connection, nothing to install, or already busy");
+    }
+    httpd_resp_set_status(req, "202 Accepted");
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
+static esp_err_t update_check_post(httpd_req_t *req)
+{
+    return update_command(req, net_svc_update_check);
+}
+
+static esp_err_t update_install_post(httpd_req_t *req)
+{
+    return update_command(req, net_svc_update_install);
+}
+
+/*
+ * The sensor board's raw state, for validating one on the bench without looking at the dial. Same
+ * numbers as the settings page's raw view.
+ */
+static esp_err_t sensors_get(httpd_req_t *req)
+{
+    char origin[ORIGIN_LEN];
+    allow_loopback_origin(req, origin, sizeof(origin));
+
+    /* PSRAM: both the snapshot and the body are too big for this task's internal-RAM stack. */
+    const size_t           body_len = 2048;
+    char                  *body     = heap_caps_malloc(body_len, MALLOC_CAP_SPIRAM);
+    sensor_hub_snapshot_t *snap     = heap_caps_malloc(sizeof(*snap), MALLOC_CAP_SPIRAM);
+    if (body == NULL || snap == NULL) {
+        free(body);
+        free(snap);
+        return send_json_error(req, "500 Internal Server Error", "out of memory");
+    }
+    sensor_hub_get_snapshot(snap);
+
+    static const char *const raw_names[SENSOR_HUB_RAW_COUNT] = {"ain0", "ain1", "ain2", "ain3",
+                                                                "tmp1075"};
+    static const char *const ch_names[SENSOR_HUB_CH_COUNT] = {
+        "boost", "map", "egt", "ignition", "sensor_supply", "cold_junction"};
+
+    int n = snprintf(body, body_len,
+                     "{\"state\":\"%s\",\"ads1115\":%s,\"tmp1075\":%s,\"alert\":%s,"
+                     "\"i2c_errors\":%" PRIu32 ",\"map_samples\":%" PRIu32 ",\"raw\":{",
+                     sensor_hub_state_str(snap->state), snap->ads1115_ok ? "true" : "false",
+                     snap->tmp1075_ok ? "true" : "false", snap->alert_ok ? "true" : "false",
+                     snap->i2c_errors, snap->samples);
+    for (int i = 0; i < SENSOR_HUB_RAW_COUNT && n > 0 && (size_t)n < body_len; i++) {
+        const sensor_hub_raw_t *r = &snap->raw[i];
+        n += snprintf(body + n, body_len - (size_t)n,
+                      "%s\"%s\":{\"code\":%d,\"value\":%.6f,\"rate_hz\":%.1f,\"count\":%" PRIu32 "}",
+                      i ? "," : "", raw_names[i], r->code, (double)r->value, (double)r->rate_hz,
+                      r->count);
+    }
+    if (n > 0 && (size_t)n < body_len) {
+        n += snprintf(body + n, body_len - (size_t)n, "},\"channels\":{");
+    }
+    for (int i = 0; i < SENSOR_HUB_CH_COUNT && n > 0 && (size_t)n < body_len; i++) {
+        const sensor_hub_reading_t *c = &snap->ch[i];
+        n += snprintf(body + n, body_len - (size_t)n, "%s\"%s\":{\"value\":%.3f,\"valid\":%s}",
+                      i ? "," : "", ch_names[i], (double)c->value, c->valid ? "true" : "false");
+    }
+    if (n > 0 && (size_t)n < body_len) {
+        n += snprintf(body + n, body_len - (size_t)n,
+                      "},\"boost_fault\":\"%s\",\"egt_fault\":\"%s\",\"i2c_scan\":[",
+                      snap->boost_fault ? snap->boost_fault : "",
+                      snap->egt_fault ? snap->egt_fault : "");
+    }
+    bool first = true;
+    for (unsigned a = 0; snap->scanned && a < 128 && n > 0 && (size_t)n < body_len; a++) {
+        if (sensor_hub_scan_found(snap, (uint8_t)a)) {
+            n += snprintf(body + n, body_len - (size_t)n, "%s\"0x%02x\"", first ? "" : ",", a);
+            first = false;
+        }
+    }
+    if (n > 0 && (size_t)n < body_len) {
+        snprintf(body + n, body_len - (size_t)n, "]}");
+    }
+    free(snap);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    esp_err_t ret = httpd_resp_sendstr(req, body);
+    free(body);
+    return ret;
+}
+
 static esp_err_t root_get(httpd_req_t *req)
 {
     net_svc_status_t net;
@@ -616,7 +836,7 @@ static esp_err_t root_get(httpd_req_t *req)
      * PSRAM, not this task's internal-RAM stack: with an escaped SSID the page can pass 1KB, and a
      * body under the 4KB SPIRAM_MALLOC_ALWAYSINTERNAL threshold needs asking for explicitly.
      */
-    const size_t body_len = 1280;
+    const size_t body_len = 1536;
     char        *body     = heap_caps_malloc(body_len, MALLOC_CAP_SPIRAM);
     if (body == NULL) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
@@ -637,6 +857,9 @@ static esp_err_t root_get(httpd_req_t *req)
              "<li><code>GET /api/gauges</code></li>"
              "<li><code>GET|PUT|DELETE /api/config/&lt;id&gt;</code></li>"
              "<li><code>POST /api/ota</code></li>"
+             "<li><code>GET /api/sensors</code></li>"
+             "<li><code>GET /api/update</code>, <code>POST /api/update/check</code>, "
+             "<code>POST /api/update/install</code></li>"
              "</ul>"
              "<p style='color:#ffab00'>This interface has no authentication. Use it only on "
              "a network you trust.</p>",
@@ -742,7 +965,7 @@ esp_err_t net_svc_http_start(void)
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.uri_match_fn   = httpd_uri_match_wildcard; /* wildcard config routes */
-    cfg.max_uri_handlers = 12;
+    cfg.max_uri_handlers = 16;
     /*
      * The server reserves 3 of lwIP's sockets for itself, so this must stay well under
      * CONFIG_LWIP_MAX_SOCKETS or httpd_start() refuses to run. Four concurrent connections
@@ -766,6 +989,10 @@ esp_err_t net_svc_http_start(void)
         {.uri = "/editor*",          .method = HTTP_GET,    .handler = editor_get},
         {.uri = "/api/wifi",         .method = HTTP_POST,   .handler = wifi_post},
         {.uri = "/api/ota",          .method = HTTP_POST,   .handler = ota_post},
+        {.uri = "/api/sensors",      .method = HTTP_GET,    .handler = sensors_get},
+        {.uri = "/api/update",       .method = HTTP_GET,    .handler = update_get},
+        {.uri = "/api/update/check", .method = HTTP_POST,   .handler = update_check_post},
+        {.uri = "/api/update/install", .method = HTTP_POST, .handler = update_install_post},
     };
 
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {

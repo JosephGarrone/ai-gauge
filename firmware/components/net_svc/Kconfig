@@ -1,0 +1,19 @@
+menu "AI-Gauge updates"
+
+    config AI_GAUGE_UPDATE_REPO
+        string "GitHub repository that publishes firmware releases"
+        default "JosephGarrone/ai-gauge"
+        help
+            owner/name of the repository whose latest release the gauge updates from. The release
+            must carry ota.json and ai-gauge.bin, which release.yml attaches (docs/ci-release.md).
+            A fork that publishes its own releases changes this.
+
+    config AI_GAUGE_UPDATE_AUTO_CHECK
+        bool "Check for updates automatically while on WiFi"
+        default y
+        help
+            Look for a newer release a minute after connecting, then twice a day. Only checks:
+            installing always takes a confirmed tap on the settings page or POST /api/update/install,
+            because an install restarts the gauge.
+
+endmenu

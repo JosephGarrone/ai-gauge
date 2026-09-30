@@ -86,6 +86,7 @@ the architecture:
 | [0007](docs/adr/0007-face-editor-static-app-with-parser-port.md) | The face editor is a dependency-free static web app carrying a line-for-line JS port of the gauge XML parser, held to the C by a differential test in CI | Its device verdict must follow the firmware's forgiving rules exactly; no JS toolchain in a C repository |
 | [0008](docs/adr/0008-gauge-serves-face-editor.md) | The firmware embeds the gzipped editor and serves it at `/editor/`; CORS only for loopback origins | Same origin avoids CORS and mixed content; embedded, not on LittleFS, so OTA keeps editor and parser in step; a wildcard origin would let any site replace faces |
 | [0009](docs/adr/0009-sensor-hub-sampling-and-calibration.md) | `sensor_hub`: single-shot ADS1115 multiplexing (MAP 100 Hz, others 10 Hz) woken by ALERT/RDY; ratiometric boost; key-on auto-zero; type K via numerically inverted NIST reference function; calibration in NVS, edited through one picker in settings | The BSP owns `I2C_NUM_1`; a row per calibration value cost 24KB of internal RAM and stopped WiFi |
+| [0010](docs/adr/0010-github-release-updates.md) | Self-update from GitHub Releases: check `releases/latest/download/ota.json` automatically, install only on a confirmed tap; download whole to PSRAM, write on the HTTP task; mbedTLS in PSRAM | Flash writes need an internal-RAM stack and there is no room for another; the REST API is rate-limited; a gauge should not restart unasked |
 
 ---
 
@@ -156,7 +157,7 @@ config and then to the compiled-in face. All three paths are verified on hardwar
 
 **Bench power:** once WiFi starts, a front-panel USB port or hub can cut power to the board (dial flashes, goes black, COM port vanishes). Use a rear motherboard port.
 
-**Internal RAM is the binding constraint, not CPU.** After WiFi starts, only ~3KB of internal heap remains. The LVGL flush buffers are deliberately in internal DMA memory (`retarget_draw_buffers()` in `app_main.c`) because the BSP's PSRAM buffers forced a bounce copy on every flush and broke the display once WiFi ran. `DRAW_BUF_LINES` and the memory settings in `sdkconfig.defaults` are load-bearing: change them only with a hardware measurement. See [docs/performance.md](docs/performance.md).
+**Internal RAM is the binding constraint, not CPU.** After WiFi starts, ~15KB of internal heap remains (largest DMA block ~7.9KB), and that is only since lwIP/WiFi `.bss` moved to PSRAM (`CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY`). Before that it was ~3KB, and adding TLS dropped the largest DMA block to 448 B, which broke the panel at power-on (green/white noise). **Watch the largest DMA block in the boot log (`app_main: running`), not just the total.** The LVGL flush buffers are deliberately in internal DMA memory (`retarget_draw_buffers()` in `app_main.c`) because the BSP's PSRAM buffers forced a bounce copy on every flush and broke the display once WiFi ran. `DRAW_BUF_LINES` and the memory settings in `sdkconfig.defaults` are load-bearing: change them only with a hardware measurement. See [docs/performance.md](docs/performance.md).
 
 Two ways internal RAM leaks away unnoticed:
 - **Task stacks are internal RAM.** That includes LVGL's draw threads, the HTTP server and every `xTaskCreate()`. Size them from a measured high-water mark, not a default. WiFi's own startup needs ~48KB of internal DMA memory, and shrinking the draw-thread stacks is what made room for 6 static RX buffers.
@@ -174,9 +175,13 @@ still rendering intermittently leaves it short of RX buffers. Keep the pause.
 widgets before adding settings rows ([ADR 0009](docs/adr/0009-sensor-hub-sampling-and-calibration.md)).
 
 **Sensors:** `sensor_hub` drives the rear board on `I2C_NUM_0` (the BSP's bus is `I2C_NUM_1`).
-**It is built and runs on the display, but has never talked to a sensor board**: none has been
-assembled yet. Until a board answers, the needle shows the simulated sweep
-(`CONFIG_AI_GAUGE_SIMULATED_SOURCE`); after that, faults show as dashes.
+Until a board answers, the needle shows the simulated sweep (`CONFIG_AI_GAUGE_SIMULATED_SOURCE`);
+after that, faults show as dashes. **Tap the Sensors readout on the settings page for raw ADC
+codes, pin volts, reads/s and a bus scan** (also `GET /api/sensors`); that view is how a board is
+brought up. Bench status of the first assembled board: [docs/sensor-frontend.md](docs/sensor-frontend.md#verification).
+
+**Updates:** a `v*` tag publishes a release that every gauge on WiFi will offer to install
+([ADR 0010](docs/adr/0010-github-release-updates.md)). Tag only builds that have booted on a board.
 
 ### Measuring performance
 

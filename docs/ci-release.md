@@ -30,8 +30,15 @@ firmware's. See [config-app.md](config-app.md).
 ## `release.yml` — on a `v*` tag
 
 1. Same build.
-2. Attach every binary to a **GitHub Release**.
-3. Call `pages.yml` with the tag, so the flashing page serves the new firmware.
+2. Write `ota.json`: `{"version","tag","app","size","sha256"}` for `ai-gauge.bin`. This is what
+   gauges read to update themselves ([networking.md](networking.md#updates-from-github)). It goes
+   at the workspace root because the build container leaves `firmware/build` owned by root.
+3. Attach `ota.json` and every binary to a **GitHub Release**.
+4. Call `pages.yml` with the tag, so the flashing page serves the new firmware.
+
+**A tag is a release to every gauge.** Gauges on WiFi find it within 12 hours and offer it on
+the settings page. `/releases/latest/` skips releases marked as pre-releases, but `release.yml`
+does not mark any, so a `v1.2.0-rc1` tag is offered like any other.
 
 ## `pages.yml` — the GitHub Pages site
 

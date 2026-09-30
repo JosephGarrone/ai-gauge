@@ -220,7 +220,7 @@ Required:
 | MAP unplugged or shorted | Sensor output below 0.25V or above 4.85V | `boost` invalid, reason on settings |
 | Sensor supply collapsed | AIN1 × 2 outside 4.5–5.5V (TPS2553 limiting) | `boost` invalid when ratiometric |
 | Thermocouple open circuit | AIN3 above 60mV (R18 pulls it to saturation) | Channel invalid; readout shows dashes |
-| Cold-junction sensor missing | TMP1075 does not ACK at 0x49 | `egt` invalid; `boost` unaffected |
+| Cold-junction sensor missing | No TMP1075 at 0x49, nor any address 0x48–0x4F with die ID 0x7500 | `egt` invalid; `boost` unaffected |
 | Reading out of plausible range | Range check against the channel limits | Channel invalid; logged |
 | I2C bus error | Transaction returns an error | Retry with backoff; mark invalid after N failures |
 
@@ -268,6 +268,18 @@ The *Sensors* block above it shows live readings in native units (MAP kPa and co
 EGT and probe µV, cold junction, supply, ignition, the zero in use), plus any fault, so each
 value can be checked against a meter.
 
+**Raw view, for bringing up a board.** Tap the *Sensors* readout to switch it to the raw
+conversions, and tap again to switch back. For each of AIN0–AIN3 it shows the ADS1115 code, the
+voltage at the ADC pin (before the divider; AIN3 in mV), and reads per second over the last
+second. For the TMP1075 it shows the register and °C. It also lists every address that ACKed in a
+bus scan, the ALERT/RDY state and the I2C error count. Opening the view rescans the bus, as
+startup does, so a part that does not answer at its expected address shows where it is, if
+anywhere. The same data is at `GET /api/sensors` ([networking.md](networking.md#http-api)). It
+costs no widgets: it is the same label with different text, held in PSRAM.
+
+Expected rates with the schedule above: AIN0 ~100/s less whatever the slower slots take out of
+the tick, AIN1–AIN3 10/s each, TMP1075 2/s.
+
 ## Verification
 
 Record measured results here as the hardware is built.
@@ -281,6 +293,12 @@ Record measured results here as the hardware is built.
 - [ ] Verify AIN3 + TMP1075 → °C against ambient and boiling water
 - [ ] Confirm an unplugged probe reads 0x7FFF and a shorted J4 reads the cold-junction temperature
 - [ ] Confirm readings are stable with the engine running (electrical noise, ground offset)
-- [ ] Both devices answer at 0x48 / 0x49 and ALERT/RDY edges arrive (settings must not say "ALERT line silent")
+- [x] Both devices answer and ALERT/RDY edges arrive (2026-10-01, first assembled board, bench, no
+      12V). The ADS1115 is at 0x48. **The TMP1075 answers at 0x4F, not 0x49**, although the netlist
+      straps A2/A1 to GND and A0 to 3V3. Its die ID (0x7500) confirms the part, so the driver now
+      searches 0x48–0x4F for it. Check U6's A0–A2 pads on this board. ALERT ok, 0 I2C errors.
+- [x] Rates on the bench: AIN0 98.7/s, AIN1–AIN3 9–10/s, TMP1075 2.0/s. The cold junction read
+      25.06 °C (register 0x1910). With no probe, AIN3 reads 32767, which reports "Thermocouple open"
+- [ ] With 12V applied: the sensor 5V on AIN1 (it read 1 mV with no 12V), ignition on AIN2, and MAP
 - [x] Firmware on a display with no sensor board: bus comes up on I2C0, probes quietly, the
       simulated sweep continues, WiFi still starts (2026-09-22)

@@ -439,6 +439,7 @@ esp_err_t net_svc_start(const net_svc_callbacks_t *callbacks)
 
     start_mdns();
     net_svc_telemetry_start();
+    net_svc_update_start();
 
     s.started = true;
     ESP_LOGI(TAG, "started (%s)", net_svc_state_str(s.status.state));

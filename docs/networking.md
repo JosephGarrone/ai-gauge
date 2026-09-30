@@ -64,6 +64,10 @@ Served on port 80, at most four concurrent connections.
 | `OPTIONS` | `/api/config/<id>` | CORS preflight, answered for loopback origins only (below) |
 | `POST` | `/api/wifi` | Form-encoded `ssid` and `password`; used by the setup page |
 | `POST` | `/api/ota` | Raw application image as the body |
+| `GET` | `/api/sensors` | Sensor board state: per-input raw ADC code, pin voltage, reads/s and count; channel values; faults; last I2C bus scan |
+| `GET` | `/api/update` | `{"state","running","latest","progress","message","repo"}`, see [Updates from GitHub](#updates-from-github) |
+| `POST` | `/api/update/check` | Look for a newer release now (`202`; `409` with no connection or while busy) |
+| `POST` | `/api/update/install` | Install the release a check found (`202`; `409` if there is none) |
 | `GET` | `/editor/` | The face editor, built into the firmware image |
 
 `GET /api/config/<id>` returns a parsed summary; add `.xml` for the file itself. The file is
@@ -171,6 +175,35 @@ last value rather than going invalid. That belongs with the channel snapshot in 
   `not confirming this image: networking failed to start`. Before this, a build that lost WiFi
   confirmed itself 15s later and could only be recovered over USB.
 
+## Updates from GitHub
+
+Decided in [ADR 0010](adr/0010-github-release-updates.md). Code: `net_svc_update.c`.
+
+- **Source:** the latest release of `CONFIG_AI_GAUGE_UPDATE_REPO` (default
+  `JosephGarrone/ai-gauge`, which must stay public). `release.yml` attaches `ota.json`
+  (`version`, `tag`, `size`, `sha256`) next to `ai-gauge.bin`.
+- **Check:** `GET https://github.com/<repo>/releases/latest/download/ota.json`, following the
+  redirect to GitHub's asset host by hand. Not the REST API: that is rate-limited to 60 requests an
+  hour per address and returns tens of KB. A `404` means no release yet, which reads as up to date.
+  A version that is not `X.Y.Z` (a local build's SHA, CI's `0.0.0-dev+<sha>`) counts as older than
+  any release.
+- **When:** automatically a minute after boot if on WiFi, then every 12 hours
+  (`CONFIG_AI_GAUGE_UPDATE_AUTO_CHECK`), and on demand from the settings page or
+  `POST /api/update/check`. A check never installs anything.
+- **Install:** only on request, because it restarts the gauge: tap the firmware line on the
+  settings page twice within 4s, or `POST /api/update/install`. The image is downloaded whole into
+  PSRAM, must carry this project's name and exactly the version `ota.json` promised, and only then
+  is written. So a failed download changes nothing.
+- **The write runs on the HTTP server task**, via `httpd_queue_work()`. A flash write asserts that
+  the calling task's stack is in internal RAM (`spi_flash/cache_utils.c`), and the update task's
+  stack is in PSRAM. The HTTP task's 6KB internal stack already does the same writes for
+  `POST /api/ota`.
+- After that it is an ordinary OTA: `esp_ota_end()` validates the image and its hash, and the new
+  firmware must confirm itself after 15s or the bootloader rolls back.
+- **TLS** uses the ESP-IDF certificate bundle. mbedTLS allocates from PSRAM
+  (`CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC`); a handshake does not fit in the internal RAM left once
+  WiFi runs.
+
 ## Memory constraints
 
 Bringing WiFi up on this board is primarily a **memory** problem, not a CPU one. Internal SRAM
@@ -185,4 +218,9 @@ is recorded in [performance.md](performance.md) and [display-pipeline.md](displa
 - Settings-page controls to disable WiFi and to forget credentials (`net_svc_forget_credentials()`
   exists but is not wired to the UI).
 - Telemetry staleness.
-- Authentication, TLS and signed OTA images.
+- Authentication, TLS and signed OTA images. Updates from GitHub are fetched over verified TLS,
+  but the image itself is not signed: whoever can publish a release on the repository can update
+  every gauge that installs it.
+- `POST /api/update/install` needs no preflight either, so any web page can ask a gauge on the
+  viewer's network to install the latest official release. That can only install what the
+  repository published, and restarts the gauge.

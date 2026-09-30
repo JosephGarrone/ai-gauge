@@ -103,6 +103,23 @@ app_ui_tile_t app_ui_get_tile(void);
 void app_ui_set_network_status(const char *state, const char *detail);
 
 /**
+ * @brief Called when the user taps the firmware version line on the settings page.
+ *
+ * Runs on the LVGL task. The line is the update control: the owner decides what a tap means
+ * (check, confirm, install) and says so with app_ui_set_update_status().
+ */
+typedef void (*app_ui_firmware_tap_cb_t)(void);
+
+void app_ui_set_firmware_tap_cb(app_ui_firmware_tap_cb_t cb);
+
+/**
+ * @brief Set the update line shown under the firmware version, e.g. "Tap to check for updates".
+ *
+ * @param text One or two short lines; NULL or "" shows the version alone.
+ */
+void app_ui_set_update_status(const char *text);
+
+/**
  * @brief Show a warning on the settings page.
  *
  * Used for problems the user can act on but which must not stop the gauge -- a config that

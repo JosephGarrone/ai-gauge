@@ -39,12 +39,27 @@ jobs:
             cd build &&
             esptool.py --chip esp32s3 merge_bin -o ai-gauge-merged.bin @flash_args
 
+      # What a gauge reads to decide whether to update (net_svc_update.c). It fetches this through
+      # /releases/latest/download/ota.json, then downloads ai-gauge.bin from the tag named here.
+      # The version must equal the one compiled into the image, or the gauge refuses it. Written
+      # outside firmware/build, which the build container leaves owned by root.
+      - name: Write OTA manifest
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          size=$(stat -c %s firmware/build/ai-gauge.bin)
+          sha=$(sha256sum firmware/build/ai-gauge.bin | cut -d' ' -f1)
+          printf '{"version":"%s","tag":"%s","app":"ai-gauge.bin","size":%s,"sha256":"%s"}\n' \
+            "${VERSION}" "${GITHUB_REF_NAME}" "${size}" "${sha}" > ota.json
+          cat ota.json
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
+            ota.json
             firmware/build/ai-gauge-merged.bin
             firmware/build/ai-gauge.bin
             firmware/build/bootloader/bootloader.bin

@@ -71,6 +71,13 @@ static const char *TAG = "app_ui";
 #define DEG         "\xC2\xB0"
 
 /*
+ * Text for the labels that change every second. Held in PSRAM and handed to LVGL as static text:
+ * lv_label_set_text() would copy it into a malloc() under 4KB, which is internal RAM.
+ */
+#define SENSOR_TEXT_LEN   640
+#define FIRMWARE_TEXT_LEN 160
+
+/*
  * Sensor calibration, edited on the settings page with one picker and one -/+ pair rather than a
  * row per parameter. Measured: a row each cost 24KB of internal RAM (LVGL widgets are small
  * allocations, which land in internal RAM), enough to stop WiFi starting. A tap moves the value
@@ -175,7 +182,13 @@ static struct {
     app_ui_network_reset_cb_t on_network_reset;
 
     lv_obj_t *sensor_status_label;
+    char     *sensor_text; /**< PSRAM, SENSOR_TEXT_LEN */
+    bool      sensor_raw;  /**< Showing raw ADC diagnostics rather than the summary. */
     lv_obj_t *sensor_msg_label;
+
+    lv_obj_t              *firmware_label;
+    char                  *firmware_text; /**< PSRAM, FIRMWARE_TEXT_LEN */
+    app_ui_firmware_tap_cb_t on_firmware_tap;
     lv_obj_t *cal_dropdown;
     lv_obj_t *cal_value_label;
 
@@ -556,10 +569,67 @@ static int append(char *buf, size_t len, int used, const char *fmt, ...)
     return (n < 0) ? used : used + n;
 }
 
+/*
+ * Raw conversions for validating a board on the bench: the ADC code, the voltage at the pin (before
+ * any divider), and how many reads per second each input is actually getting. Tapping the readout
+ * switches here and rescans the bus, so a part that does not answer shows where, if anywhere, it is.
+ */
+static int format_sensor_raw(char *buf, size_t len, const sensor_hub_snapshot_t *snap)
+{
+    static const char *const names[SENSOR_HUB_RAW_COUNT] = {
+        [SENSOR_HUB_RAW_AIN0] = "AIN0 MAP",
+        [SENSOR_HUB_RAW_AIN1] = "AIN1 5V",
+        [SENSOR_HUB_RAW_AIN2] = "AIN2 IGN",
+        [SENSOR_HUB_RAW_AIN3] = "AIN3 TC",
+        [SENSOR_HUB_RAW_TMP]  = "TMP1075",
+    };
+
+    int n = append(buf, len, 0, "RAW  (tap for summary)");
+
+    for (int i = 0; i < SENSOR_HUB_RAW_COUNT; i++) {
+        const sensor_hub_raw_t *r = &snap->raw[i];
+        bool present = (i == SENSOR_HUB_RAW_TMP) ? snap->tmp1075_ok : snap->ads1115_ok;
+
+        n = append(buf, len, n, "\n%s  %.1f/s", names[i], (double)r->rate_hz);
+        if (r->count == 0) {
+            n = append(buf, len, n, "\n  %s", present ? "waiting" : "no reads");
+        } else if (i == SENSOR_HUB_RAW_TMP) {
+            n = append(buf, len, n, "\n  0x%04x  %.2f " DEG "C", (unsigned)(uint16_t)r->code,
+                       (double)r->value);
+        } else if (i == SENSOR_HUB_RAW_AIN3) {
+            n = append(buf, len, n, "\n  %d  %.3f mV", r->code, (double)(r->value * 1000.0f));
+        } else {
+            n = append(buf, len, n, "\n  %d  %.4f V", r->code, (double)r->value);
+        }
+        if (r->count != 0 && !present) {
+            n = append(buf, len, n, " (stale)");
+        }
+    }
+
+    n = append(buf, len, n, "\nBus:");
+    if (!snap->scanned) {
+        n = append(buf, len, n, " scanning");
+    } else {
+        int found = 0;
+        for (unsigned a = 0; a < 128; a++) {
+            if (sensor_hub_scan_found(snap, (uint8_t)a)) {
+                n = append(buf, len, n, " %02x", a);
+                found++;
+            }
+        }
+        if (found == 0) {
+            n = append(buf, len, n, " nothing answers");
+        }
+    }
+    n = append(buf, len, n, "\nALERT %s, I2C errors %" PRIu32,
+               !snap->ads1115_ok ? "--" : snap->alert_ok ? "ok" : "silent", snap->i2c_errors);
+    return n;
+}
+
 /* Live readings for calibration. Native units, so they compare directly with a DMM. */
 static void update_sensor_status(void)
 {
-    if (s.sensor_status_label == NULL) {
+    if (s.sensor_status_label == NULL || s.sensor_text == NULL) {
         return;
     }
 
@@ -567,68 +637,92 @@ static void update_sensor_status(void)
     sensor_hub_get_snapshot(&snap);
     const sensor_hub_reading_t *ch = snap.ch;
 
-    char buf[320];
-    int  n = append(buf, sizeof(buf), 0, "Board %s", sensor_hub_state_str(snap.state));
+    char        *buf = s.sensor_text;
+    const size_t len = SENSOR_TEXT_LEN;
+
+    if (s.sensor_raw) {
+        format_sensor_raw(buf, len, &snap);
+        lv_label_set_text_static(s.sensor_status_label, buf);
+        return;
+    }
+
+    int n = append(buf, len, 0, "Board %s", sensor_hub_state_str(snap.state));
 
     if (snap.state != SENSOR_HUB_ONLINE) {
 #if CONFIG_AI_GAUGE_SIMULATED_SOURCE
         if (snap.state == SENSOR_HUB_SEARCHING) {
-            n = append(buf, sizeof(buf), n, "\nNeedle is simulated");
+            n = append(buf, len, n, "\nNeedle is simulated");
         }
 #endif
-        lv_label_set_text(s.sensor_status_label, buf);
+        n = append(buf, len, n, "\nTap for raw readings");
+        lv_label_set_text_static(s.sensor_status_label, buf);
         return;
     }
 
     if (!snap.ads1115_ok) {
-        n = append(buf, sizeof(buf), n, "\nADC missing");
+        n = append(buf, len, n, "\nADC missing");
     }
     if (!snap.tmp1075_ok) {
-        n = append(buf, sizeof(buf), n, "\nCJ sensor missing");
+        n = append(buf, len, n, "\nCJ sensor missing");
     }
 
     if (ch[SENSOR_HUB_CH_MAP].valid) {
-        n = append(buf, sizeof(buf), n, "\nMAP %.1f kPa (%.3f V)",
+        n = append(buf, len, n, "\nMAP %.1f kPa (%.3f V)",
                    (double)ch[SENSOR_HUB_CH_MAP].value, (double)snap.map_sensor_v);
-        n = append(buf, sizeof(buf), n, "\nBoost %.1f kPa", (double)ch[SENSOR_HUB_CH_BOOST].value);
+        n = append(buf, len, n, "\nBoost %.1f kPa", (double)ch[SENSOR_HUB_CH_BOOST].value);
     } else if (snap.ads1115_ok) {
-        n = append(buf, sizeof(buf), n, "\nBoost: %s (%.3f V)",
+        n = append(buf, len, n, "\nBoost: %s (%.3f V)",
                    snap.boost_fault ? snap.boost_fault : "--", (double)snap.map_sensor_v);
     }
 
     if (ch[SENSOR_HUB_CH_EGT].valid) {
-        n = append(buf, sizeof(buf), n, "\nEGT %.0f " DEG "C (%.0f uV)",
+        n = append(buf, len, n, "\nEGT %.0f " DEG "C (%.0f uV)",
                    (double)ch[SENSOR_HUB_CH_EGT].value, (double)snap.tc_uv);
     } else if (snap.ads1115_ok || snap.tmp1075_ok) {
-        n = append(buf, sizeof(buf), n, "\nEGT: %s", snap.egt_fault ? snap.egt_fault : "--");
+        n = append(buf, len, n, "\nEGT: %s", snap.egt_fault ? snap.egt_fault : "--");
     }
     if (ch[SENSOR_HUB_CH_COLD_JUNCTION].valid) {
-        n = append(buf, sizeof(buf), n, "\nCold junction %.1f " DEG "C",
+        n = append(buf, len, n, "\nCold junction %.1f " DEG "C",
                    (double)ch[SENSOR_HUB_CH_COLD_JUNCTION].value);
     }
 
     if (snap.ads1115_ok) {
-        n = append(buf, sizeof(buf), n, "\nSupply %.2f V", (double)ch[SENSOR_HUB_CH_SENSOR_SUPPLY].value);
-        n = append(buf, sizeof(buf), n, "\nIgnition %.1f V", (double)ch[SENSOR_HUB_CH_IGNITION].value);
+        n = append(buf, len, n, "\nSupply %.2f V", (double)ch[SENSOR_HUB_CH_SENSOR_SUPPLY].value);
+        n = append(buf, len, n, "\nIgnition %.1f V", (double)ch[SENSOR_HUB_CH_IGNITION].value);
     }
 
-    n = append(buf, sizeof(buf), n, "\nZero %.1f kPa%s", (double)snap.baro_kpa,
+    n = append(buf, len, n, "\nZero %.1f kPa%s", (double)snap.baro_kpa,
                snap.auto_zeroed ? " (auto)" : "");
     if (snap.ads1115_ok && !snap.alert_ok) {
-        n = append(buf, sizeof(buf), n, "\nALERT line silent");
+        n = append(buf, len, n, "\nALERT line silent");
     }
     if (snap.i2c_errors > 0) {
-        n = append(buf, sizeof(buf), n, "\nI2C errors %" PRIu32, snap.i2c_errors);
+        n = append(buf, len, n, "\nI2C errors %" PRIu32, snap.i2c_errors);
     }
+    n = append(buf, len, n, "\nTap for raw readings");
     (void)n;
 
-    lv_label_set_text(s.sensor_status_label, buf);
+    lv_label_set_text_static(s.sensor_status_label, buf);
+}
+
+static void sensor_status_clicked_cb(lv_event_t *e)
+{
+    (void)e;
+    s.sensor_raw = !s.sensor_raw;
+    if (s.sensor_raw) {
+        sensor_hub_request_scan();
+    }
+    update_sensor_status();
 }
 
 static void build_sensor_section(lv_obj_t *col)
 {
     lv_obj_t *row         = add_row(col, "Sensors");
     s.sensor_status_label = add_value_label(row, "starting...", COLOR_VALUE);
+    s.sensor_text         = heap_caps_malloc(SENSOR_TEXT_LEN, MALLOC_CAP_SPIRAM);
+    /* Tapping the readout itself flips to the raw view: a toggle row would cost three widgets. */
+    lv_obj_add_flag(s.sensor_status_label, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s.sensor_status_label, sensor_status_clicked_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *zero_btn = lv_button_create(row);
     lv_obj_set_size(zero_btn, LV_PCT(100), SETTINGS_CONTROL_H);
@@ -718,6 +812,14 @@ static void status_timer_cb(lv_timer_t *t)
         lv_label_set_text_fmt(s.heap_label, "%u KB internal\n%u KB PSRAM",
                               (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
                               (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+    }
+}
+
+static void firmware_clicked_cb(lv_event_t *e)
+{
+    (void)e;
+    if (s.on_firmware_tap != NULL) {
+        s.on_firmware_tap();
     }
 }
 
@@ -852,10 +954,13 @@ static void build_settings_tile(lv_obj_t *tile, const gauge_config_t *cfg)
     lv_obj_t *heap_row = add_row(col, "Free memory");
     s.heap_label       = add_value_label(heap_row, "-", COLOR_VALUE);
 
-    /* --- firmware version --- */
+    /* --- firmware version, and updates: tapping the line is the control (see app_ui.h) --- */
     const esp_app_desc_t *desc    = esp_app_get_description();
     lv_obj_t             *ver_row = add_row(col, "Firmware");
-    add_value_label(ver_row, desc ? desc->version : "unknown", COLOR_VALUE);
+    s.firmware_label = add_value_label(ver_row, desc ? desc->version : "unknown", COLOR_VALUE);
+    s.firmware_text  = heap_caps_malloc(FIRMWARE_TEXT_LEN, MALLOC_CAP_SPIRAM);
+    lv_obj_add_flag(s.firmware_label, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s.firmware_label, firmware_clicked_cb, LV_EVENT_CLICKED, NULL);
 
     /* --- warnings, hidden unless there is something to say --- */
     s.warning_label = add_value_label(col, "", 0xffab00);
@@ -1080,6 +1185,29 @@ void app_ui_set_network_status(const char *state, const char *detail)
     } else {
         lv_label_set_text(s.network_label, state);
     }
+}
+
+void app_ui_set_firmware_tap_cb(app_ui_firmware_tap_cb_t cb)
+{
+    s.on_firmware_tap = cb;
+}
+
+void app_ui_set_update_status(const char *text)
+{
+    if (s.firmware_label == NULL || s.firmware_text == NULL) {
+        return;
+    }
+    const esp_app_desc_t *desc = esp_app_get_description();
+    char                  next[FIRMWARE_TEXT_LEN];
+    snprintf(next, sizeof(next), "%s%s%s", desc ? desc->version : "unknown",
+             (text != NULL && text[0] != '\0') ? "\n" : "", text != NULL ? text : "");
+
+    /* Called every second; redraw only on a change. */
+    if (lv_label_get_text(s.firmware_label) == s.firmware_text && strcmp(next, s.firmware_text) == 0) {
+        return;
+    }
+    memcpy(s.firmware_text, next, sizeof(next));
+    lv_label_set_text_static(s.firmware_label, s.firmware_text);
 }
 
 void app_ui_set_warning(const char *text)

@@ -3,6 +3,7 @@ idf_component_register(
         "net_svc.c"
         "net_svc_http.c"
         "net_svc_telemetry.c"
+        "net_svc_update.c"
     INCLUDE_DIRS
         "include"
     PRIV_INCLUDE_DIRS
@@ -14,6 +15,9 @@ idf_component_register(
         esp_netif
         esp_event
         esp_http_server
+        esp_http_client
+        mbedtls
+        sensor_hub
         esp_timer
         esp_app_format
         bootloader_support
