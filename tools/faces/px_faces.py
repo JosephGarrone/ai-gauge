@@ -18,23 +18,31 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 # ---------------------------------------------------------------- palette (obd-display ipc-*)
-OFF_WHITE = "#ebf0f2"  # IpcWhite: ring, pointers, numerals, caption
+OFF_WHITE = "#ebf0f2"  # IpcWhite: ring, pointers, numerals, readout
+MUTED = "#8f9aa0"      # caption: secondary text, a cool grey beside the off-white
 RED = "#ff3030"        # IpcRedBright: redline ring and pointers, alert
 AMBER = "#ffb000"      # IpcAmber: peak marker
 NEEDLE = "#17caff"     # NeedleGaugeViewModel's default needle colour
 CAP = "#07090b"        # pivot cap
-CAP_RIM = "#2b3339"    # the faint rim the cap shows under cluster lighting
+CAP_RIM = "#46525a"    # the rim the cap shows under cluster lighting; any darker is lost on black
 
 # ---------------------------------------------------------------- geometry, from the photo
 # Proportions are fractions of the ring's outer radius, measured on rpm-gauge-px3.jpg.
 RADIUS = 220                        # scale radius on the 466 px panel (safe area allows 225)
 BAND_W = 12                         # ring thickness, ~5.5% of radius
 GAP_DEG = 1.4                       # break in the ring at each half-major
-CAPTION_Y = 233 - 112               # "RPM x 1000" sits ~0.51 R above centre
+# The caption labels the readout from under it, not ~0.5 R above centre as on the tacho: the needle
+# spends most of its time sweeping the upper face, and a caption there is crossed constantly.
+READOUT_Y = 300                     # top edge of the 48 px number
+CAPTION_Y = 362                     # centre of the caption, just under the number
+PEAK_Y = 382                        # top edge of the peak value, under the caption
 TICK_GAP = 6                        # renderer: tick circle = band inner edge - 6 px
 
 # Pointer: an inward triangle hanging off the ring's inner edge (y = -TICK_GAP in the tick frame).
-POINTER = f"-7,{-TICK_GAP - 1} 7,{-TICK_GAP - 1} 0,{-TICK_GAP + 12}"
+# Narrow and deep, so it reads as an arrow and overhangs the ring's ends at min and max by little.
+POINTER = f"-6.5,{-TICK_GAP - 1} 6.5,{-TICK_GAP - 1} 0,{-TICK_GAP + 15}"
+# Minor graduation: a short bar hanging off the ring's inner edge, a third the pointer's depth.
+MINOR = f"-1.25,{-TICK_GAP - 1} 1.25,{-TICK_GAP - 1} 1.25,{-TICK_GAP + 5} -1.25,{-TICK_GAP + 5}"
 
 
 def needle_outline():
@@ -91,7 +99,7 @@ def num(v):
     return f"{v:.2f}".rstrip("0").rstrip(".")
 
 
-def face(gid, comment, channel, unit, vmax, major, red_from, caption, damping, fmt, label_font, label_r,
+def face(gid, comment, channel, unit, vmax, major, minor, red_from, caption, damping, fmt, label_font, label_r,
          builtin_needle=False):
     band_xml = "\n".join(
         f'    <band from="{num(a)}" to="{num(b)}" color="{c}" width="{BAND_W}"/>'
@@ -108,33 +116,36 @@ def face(gid, comment, channel, unit, vmax, major, red_from, caption, damping, f
 
   <face start-angle="225" sweep="270" background="#000000" radius="{RADIUS}">
 {band_xml}
-    <ticks major-every="{major}" minor-every="0" color="{OFF_WHITE}" band-color="true">
+    <ticks major-every="{major}" minor-every="{num(minor)}" color="{OFF_WHITE}" band-color="true">
       <major-shape>
         <polygon points="{POINTER}"/>
       </major-shape>
+      <minor-shape>
+        <polygon points="{MINOR}"/>
+      </minor-shape>
     </ticks>
     <labels every="{major}" font="{label_font}" color="{OFF_WHITE}" radius="{label_r}"/>
   </face>
 
 {needle_xml(builtin_needle)}
 
-  <title text="{caption}" y="{CAPTION_Y}" font="montserrat_20" color="{OFF_WHITE}"/>
-  <readout y="300" font="montserrat_48" format="{fmt}" color="{OFF_WHITE}"/>
+  <readout y="{READOUT_Y}" font="montserrat_48" format="{fmt}" color="{OFF_WHITE}"/>
+  <title text="{caption}" y="{CAPTION_Y}" font="montserrat_16" color="{MUTED}"/>
 
-  <peak color="{AMBER}" length="{BAND_W + 4}" width="5" font="montserrat_16" format="{fmt}"/>
+  <peak color="{AMBER}" length="{BAND_W + 4}" width="5" value-y="{PEAK_Y}" font="montserrat_16" format="{fmt}"/>
   <alert above="{num(red_from)}" flash-hz="2" color="{RED}"/>
 </gauge>
 """
 
 
 BOOST = dict(gid="boost", comment="Boost gauge, 0-30 PSI, redline from 26 as on the obd-display boost dial.",
-             channel="boost", unit="psi", vmax=30, major=5, red_from=26, caption="BOOST  PSI",
+             channel="boost", unit="psi", vmax=30, major=5, minor=1, red_from=26, caption="BOOST  PSI",
              damping="0.15", fmt="%.1f",
              # Numerals at ~0.8 R, as on the tacho, pulled in far enough to clear the pointers at 3
              # and 9 o'clock, where a number is set sideways to the radius.
              label_font="montserrat_32", label_r=172)
 EGT = dict(gid="egt", comment="Exhaust gas temperature gauge, 0-900 C, redline from 750.",
-           channel="egt", unit="C", vmax=900, major=150, red_from=750, caption="EGT  °C",
+           channel="egt", unit="C", vmax=900, major=150, minor=50, red_from=750, caption="EGT  °C",
            damping="0.25", fmt="%.0f",
            # Three-digit numbers: the tacho only ever has one, so a size down to keep the same clearance.
            label_font="montserrat_26", label_r=166)

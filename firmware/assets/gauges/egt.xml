@@ -17,10 +17,13 @@
     <band from="677.33" to="750" color="#ebf0f2" width="12"/>
     <band from="750" to="822.67" color="#ff3030" width="12"/>
     <band from="827.33" to="900" color="#ff3030" width="12"/>
-    <ticks major-every="150" minor-every="0" color="#ebf0f2" band-color="true">
+    <ticks major-every="150" minor-every="50" color="#ebf0f2" band-color="true">
       <major-shape>
-        <polygon points="-7,-7 7,-7 0,6"/>
+        <polygon points="-6.5,-7 6.5,-7 0,9"/>
       </major-shape>
+      <minor-shape>
+        <polygon points="-1.25,-7 1.25,-7 1.25,-1 -1.25,-1"/>
+      </minor-shape>
     </ticks>
     <labels every="150" font="montserrat_26" color="#ebf0f2" radius="166"/>
   </face>
@@ -30,14 +33,14 @@
       <polygon points="4.90,7.26 5.44,-35.56 8.35,-44.64 6.90,-71.85 7.66,-71.85 2.18,-179.27 1.45,-180 -1.45,-180 -2.18,-179.27 -7.66,-71.85 -6.90,-71.85 -8.35,-44.64 -5.44,-35.56 -4.90,7.26"/>
     </shape>
     <hub>
-      <circle r="17.5" color="#2b3339"/>
+      <circle r="17.5" color="#46525a"/>
       <circle r="16" color="#07090b"/>
     </hub>
   </needle>
 
-  <title text="EGT  °C" y="121" font="montserrat_20" color="#ebf0f2"/>
   <readout y="300" font="montserrat_48" format="%.0f" color="#ebf0f2"/>
+  <title text="EGT  °C" y="362" font="montserrat_16" color="#8f9aa0"/>
 
-  <peak color="#ffb000" length="16" width="5" font="montserrat_16" format="%.0f"/>
+  <peak color="#ffb000" length="16" width="5" value-y="382" font="montserrat_16" format="%.0f"/>
   <alert above="750" flash-hz="2" color="#ff3030"/>
 </gauge>

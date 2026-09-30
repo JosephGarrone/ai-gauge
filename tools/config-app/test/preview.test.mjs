@@ -111,12 +111,13 @@ test('band-color ticks take the colour of the band under them', () => {
     assert.equal(tickColor(m, 10), '#0000ff');
 });
 
-test('the PX boost face: segmented ring, red redline pointers, no minor ticks', () => {
+test('the PX boost face: segmented ring, red redline pointers, 1 psi graduations', () => {
     const m = face('boost.xml');
     const svg = renderFace(m, 'px');
     assert.equal(count(svg, /<path /g), 8, 'seven ring segments, one split at the redline');
     assert.equal(count(svg, /<use href="#px-major-tick"/g), 6, '0 to 25 in the ring colour');
     assert.equal(count(svg, /<use href="#px-major-tick-1"/g), 1, '30, past the redline at 26, in red');
     assert.equal(tickColor(m, 30), '#ff3030');
-    assert.equal(count(svg, /data-part="minor"/g), 0);
+    assert.equal(count(svg, /<use href="#px-minor-tick"/g), 26, '0 to 25, under the pointers as on the device');
+    assert.equal(count(svg, /<use href="#px-minor-tick-1"/g), 5, '26 to 30, in the redline');
 });
