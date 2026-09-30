@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_check.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -538,8 +539,8 @@ static void network_status_timer_cb(lv_timer_t *t)
 
     switch (net.state) {
     case NET_SVC_CONNECTED:
-        snprintf(detail, sizeof(detail), "%s\n%s  (%s.local)",
-                 net.ssid, net.ip, net.hostname);
+        /* A line each: the round panel is too narrow to wrap "ip (host.local)" gracefully. */
+        snprintf(detail, sizeof(detail), "%s\n%s\n%s.local", net.ssid, net.ip, net.hostname);
         break;
     case NET_SVC_AP_MODE:
         snprintf(detail, sizeof(detail), "Join '%s'\nthen open %s", net.ssid, net.ip);
@@ -556,6 +557,87 @@ static void network_status_timer_cb(lv_timer_t *t)
     app_ui_set_network_status(net_svc_state_str(net.state), detail);
     update_status_refresh();
 }
+
+/* ------------------------------------------------------------- remote control ---- */
+
+#if CONFIG_AI_GAUGE_REMOTE_CONTROL
+
+/* The HTTP task's side of GET /api/screenshot; app_ui renders on the LVGL task. */
+static esp_err_t on_screenshot(net_svc_image_t *out)
+{
+    app_ui_image_t img;
+    ESP_RETURN_ON_ERROR(app_ui_screenshot(&img), TAG, "screenshot");
+    *out = (net_svc_image_t){
+        .width  = img.width,
+        .height = img.height,
+        .stride = img.stride,
+        .rgb565 = img.rgb565,
+        .handle = img.handle,
+    };
+    return ESP_OK;
+}
+
+static void on_screenshot_release(net_svc_image_t *img)
+{
+    app_ui_image_t ui = {.handle = img->handle};
+    app_ui_screenshot_free(&ui);
+}
+
+static int32_t clamp_i32(int32_t v, int32_t lo, int32_t hi)
+{
+    return (v < lo) ? lo : (v > hi) ? hi : v;
+}
+
+#define GESTURE_TAP_MS   80
+#define GESTURE_LONG_MS  1000 /* comfortably past LVGL's 400 ms long-press threshold */
+#define GESTURE_SWIPE_MS 300
+
+/* POST /api/input: fill in the defaults, then play it. Blocks the HTTP task until it is done. */
+static esp_err_t on_gesture(const net_svc_gesture_t *g)
+{
+    const board_profile_t *board = board_profile_get();
+    const int32_t          w     = board->width_px;
+    const int32_t          h     = board->height_px;
+
+    app_ui_gesture_t ui = {
+        .x1 = g->has_start ? g->x1 : w / 2,
+        .y1 = g->has_start ? g->y1 : h / 2,
+    };
+    ui.x2 = ui.x1;
+    ui.y2 = ui.y1;
+
+    switch (g->type) {
+    case NET_SVC_GESTURE_TAP:
+        ui.duration_ms = g->ms ? g->ms : GESTURE_TAP_MS;
+        break;
+    case NET_SVC_GESTURE_LONG_PRESS:
+        ui.duration_ms = g->ms ? g->ms : GESTURE_LONG_MS;
+        break;
+    case NET_SVC_GESTURE_SWIPE:
+    default: {
+        ui.duration_ms = g->ms ? g->ms : GESTURE_SWIPE_MS;
+        /* A named swipe travels 60% of the panel, well past the tileview's threshold. */
+        const int32_t dx = w * 3 / 10, dy = h * 3 / 10;
+        switch (g->dir) {
+        case 'u': ui.y1 += dy; ui.y2 = ui.y1 - 2 * dy; break;
+        case 'd': ui.y1 -= dy; ui.y2 = ui.y1 + 2 * dy; break;
+        case 'l': ui.x1 += dx; ui.x2 = ui.x1 - 2 * dx; break;
+        case 'r': ui.x1 -= dx; ui.x2 = ui.x1 + 2 * dx; break;
+        default:  ui.x2 = g->x2; ui.y2 = g->y2; break;
+        }
+        break;
+    }
+    }
+
+    /* Keep every point on the panel: LVGL takes an off-screen point at face value. */
+    ui.x1 = clamp_i32(ui.x1, 0, w - 1);
+    ui.y1 = clamp_i32(ui.y1, 0, h - 1);
+    ui.x2 = clamp_i32(ui.x2, 0, w - 1);
+    ui.y2 = clamp_i32(ui.y2, 0, h - 1);
+    return app_ui_remote_gesture(&ui);
+}
+
+#endif /* CONFIG_AI_GAUGE_REMOTE_CONTROL */
 
 /* Runs on the LVGL task, from the settings page's confirmed "Reset network" button. */
 static void on_network_reset(void)
@@ -750,6 +832,11 @@ void app_main(void)
     app_ui_set_gauge_selected_cb(on_gauge_selected);
     app_ui_set_network_reset_cb(on_network_reset);
     app_ui_set_firmware_tap_cb(on_firmware_tap);
+#if CONFIG_AI_GAUGE_REMOTE_CONTROL
+    if (app_ui_remote_start() != ESP_OK) {
+        ESP_LOGW(TAG, "remote input unavailable");
+    }
+#endif
 
     if (warning[0] != '\0') {
         ESP_LOGW(TAG, "%s", warning);
@@ -812,6 +899,11 @@ void app_main(void)
     const net_svc_callbacks_t net_cb = {
         .on_config_changed = on_config_changed,
         .on_telemetry      = on_telemetry,
+#if CONFIG_AI_GAUGE_REMOTE_CONTROL
+        .screenshot         = on_screenshot,
+        .screenshot_release = on_screenshot_release,
+        .gesture            = on_gesture,
+#endif
     };
     bool net_ok = (net_svc_start(&net_cb) == ESP_OK);
     if (!net_ok) {

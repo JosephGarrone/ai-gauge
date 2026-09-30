@@ -249,9 +249,9 @@ edges are missed, the driver polls the OS bit instead.
 | `sensor_supply` | V | AIN1 × 2 |
 | `cold_junction` | °C | TMP1075 |
 
-**Calibration** is stored in NVS namespace `sensor_cal`, and is set on the settings page under
-*Calibration*: pick a parameter, then −/+. A tap moves one step, holding repeats, and the value
-is saved on release.
+**Calibration** is stored in NVS namespace `sensor_cal`, and is set under Settings → Calibrate
+([settings-ui.md](settings-ui.md)): ‹ › picks a parameter, then − or +. A tap moves one step,
+holding repeats, and the value is saved on release. *Zero boost now* is on the same page.
 
 | Parameter | Default | Use |
 |---|---|---|
@@ -264,11 +264,11 @@ is saved on release.
 | EGT offset | 0 °C | Trim against boiling water |
 | MAP / supply / ignition divider | 2.000 / 2.000 / 6.000 | Set to the DMM-measured ratio |
 
-The *Sensors* block above it shows live readings in native units (MAP kPa and connector volts,
+Settings → Sensors shows live readings in native units (MAP kPa and connector volts,
 EGT and probe µV, cold junction, supply, ignition, the zero in use), plus any fault, so each
 value can be checked against a meter.
 
-**Raw view, for bringing up a board.** Tap the *Sensors* readout to switch it to the raw
+**Raw view, for bringing up a board.** On Settings → Sensors, tap the readout to switch it to the raw
 conversions, and tap again to switch back. For each of AIN0–AIN3 it shows the ADS1115 code, the
 voltage at the ADC pin (before the divider; AIN3 in mV), and reads per second over the last
 second. For the TMP1075 it shows the register and °C. It also lists every address that ACKed in a

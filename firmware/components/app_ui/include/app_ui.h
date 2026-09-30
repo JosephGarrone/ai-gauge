@@ -8,11 +8,13 @@
  * The transition is the most expensive thing the UI does -- it necessarily redraws the whole
  * screen for the duration of the animation. See docs/display-pipeline.md.
  *
- * All functions must be called with the LVGL lock held (bsp_display_lock).
+ * All functions must be called with the LVGL lock held (bsp_display_lock), except the remote
+ * control ones, which say otherwise.
  */
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "esp_err.h"
 #include "lvgl.h"
@@ -118,6 +120,47 @@ void app_ui_set_firmware_tap_cb(app_ui_firmware_tap_cb_t cb);
  * @param text One or two short lines; NULL or "" shows the version alone.
  */
 void app_ui_set_update_status(const char *text);
+
+/* ------------------------------------------------------------ remote control ----- */
+
+/**
+ * A press at (x1, y1) that moves in a straight line to (x2, y2) over duration_ms, then releases.
+ * A tap or long press is one that does not move. Coordinates are screen pixels, the same as a
+ * screenshot's, whatever the rotation.
+ */
+typedef struct {
+    int32_t  x1, y1, x2, y2;
+    uint32_t duration_ms;
+} app_ui_gesture_t;
+
+typedef struct {
+    uint16_t       width, height;
+    uint32_t       stride; /**< Bytes per row. */
+    const uint8_t *rgb565; /**< Native little-endian RGB565. */
+    void          *handle; /**< For app_ui_screenshot_free(). */
+} app_ui_image_t;
+
+/** @brief Create the remote pointer device. On the LVGL task or under bsp_display_lock(). */
+esp_err_t app_ui_remote_start(void);
+
+/**
+ * @brief Play a gesture through the remote pointer and wait for it to finish.
+ *
+ * Call from any task *except* the LVGL task, which plays it. Returns ESP_ERR_INVALID_STATE while
+ * another gesture is playing. An animation the gesture starts, such as a tile swipe, may still be
+ * running on return.
+ */
+esp_err_t app_ui_remote_gesture(const app_ui_gesture_t *g);
+
+/**
+ * @brief Render the screen into a new PSRAM image, on the LVGL task, and wait for it.
+ *
+ * Call from any task except the LVGL task. Costs about one full-screen render (a dropped frame)
+ * and ~430KB of PSRAM until app_ui_screenshot_free().
+ */
+esp_err_t app_ui_screenshot(app_ui_image_t *out);
+
+void app_ui_screenshot_free(app_ui_image_t *img);
 
 /**
  * @brief Show a warning on the settings page.

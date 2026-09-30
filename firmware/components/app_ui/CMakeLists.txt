@@ -1,6 +1,8 @@
 idf_component_register(
     SRCS
         "app_ui.c"
+        "app_ui_remote.c"
+        "app_ui_settings.c"
     INCLUDE_DIRS
         "include"
     REQUIRES
@@ -13,6 +15,7 @@ idf_component_register(
         gauge_store
     PRIV_REQUIRES
         esp_app_format
+        esp_timer
         sensor_hub
         waveshare__esp32_s3_touch_amoled_1_75
 )

@@ -470,8 +470,21 @@ The frame rate held through the TLS check. At the 45 fps cap it read 47.6 fps be
 after, with a 2.1 ms mean render. **The 60 fps gate was not re-measured on this build**: the board's
 saved cap is 45.
 
-Still owed: power-on boot confirmed by hand, the 60 fps gate, and a full download-and-install of a
-release, which needs a release to exist.
+Still owed: power-on boot confirmed by hand, and a full download-and-install of a release, which
+needs a release to exist.
+
+**Remote control added (same day).** The remote pointer device cost ~550 B of internal RAM: 15,051 B
+free after startup, largest DMA block 7,424 B. The gate was then measured by setting the cap to 60
+through `POST /api/input` and returning to the dial, with nothing touching the gauge: **66.6–66.8
+fps, 2.0 ms mean render (max 2.6), 3.0% dirty**, over five windows. The cap was set back to 45
+afterwards. After ~10 screenshots, a dozen gestures and a TLS update check, the lowest internal
+free since boot was 9,403 B, and the lowest free `httpd` stack 3,708 B. A screenshot takes ~1.06 s
+end to end.
+
+**Paged settings (ADR 0011), same day.** Internal free after startup went from 15,051 B to
+**22,503 B**, and the largest DMA block from 7,424 B to **14,336 B**, because page widgets now exist
+only while their page is open. The lowest internal free after opening every page and driving
+controls over HTTP was 13,711 B. The dial was unchanged: 47.6 fps at the 45 cap, 2.2 ms render.
 
 ### Not yet measured
 - Scenarios 1, 3 and 6.

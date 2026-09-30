@@ -112,6 +112,8 @@ CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
 # (apply_fps_cap() in app_ui.c).
 CONFIG_LV_DEF_REFR_PERIOD=15
 CONFIG_LV_OBJ_STYLE_CACHE=y
+# GET /api/screenshot (app_ui_remote.c). Code only; nothing runs until a screenshot is asked for.
+CONFIG_LV_USE_SNAPSHOT=y
 
 # Fonts available to gauge configs -- see docs/gauge-config-schema.md.
 CONFIG_LV_FONT_MONTSERRAT_12=y

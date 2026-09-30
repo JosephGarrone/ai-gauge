@@ -800,6 +800,196 @@ static esp_err_t sensors_get(httpd_req_t *req)
     return ret;
 }
 
+/* ------------------------------------------------------------- remote control ---- */
+
+#if CONFIG_AI_GAUGE_REMOTE_CONTROL
+
+/*
+ * The screen as a BMP: RGB565 with BI_BITFIELDS, top-down (negative height). Browsers show it
+ * directly and it needs no encoder: a 66-byte header, then the pixels as LVGL rendered them.
+ */
+static esp_err_t screenshot_get(httpd_req_t *req)
+{
+    const net_svc_callbacks_t *cb = net_svc_get_callbacks();
+    if (cb->screenshot == NULL) {
+        return send_json_error(req, "404 Not Found", "screenshots unavailable");
+    }
+
+    net_svc_image_t img = {0};
+    esp_err_t       err = cb->screenshot(&img);
+    if (err != ESP_OK) {
+        return send_json_error(req, "503 Service Unavailable", esp_err_to_name(err));
+    }
+
+    const uint32_t row   = (uint32_t)img.width * 2;
+    const uint32_t pad   = (4 - row % 4) % 4;
+    const uint32_t bits  = (row + pad) * img.height;
+    const uint32_t off   = 14 + 40 + 12;
+    const uint32_t total = off + bits;
+
+    uint8_t h[66] = {'B', 'M'};
+#define PUT32(o, v) do { uint32_t v_ = (uint32_t)(v); h[o] = v_; h[o + 1] = v_ >> 8; \
+                         h[o + 2] = v_ >> 16; h[o + 3] = v_ >> 24; } while (0)
+    PUT32(2, total);
+    PUT32(10, off);
+    PUT32(14, 40);                           /* BITMAPINFOHEADER */
+    PUT32(18, img.width);
+    PUT32(22, -(int32_t)img.height);         /* top-down */
+    h[26] = 1;                               /* planes */
+    h[28] = 16;                              /* bits per pixel */
+    PUT32(30, 3);                            /* BI_BITFIELDS */
+    PUT32(34, bits);
+    PUT32(54, 0xF800);                       /* red mask */
+    PUT32(58, 0x07E0);                       /* green */
+    PUT32(62, 0x001F);                       /* blue */
+#undef PUT32
+
+    httpd_resp_set_type(req, "image/bmp");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    err = httpd_resp_send_chunk(req, (const char *)h, sizeof(h));
+
+    /* Straight from the PSRAM image. Rows are contiguous in the common case, so send them in bulk. */
+    static const uint8_t zeros[4] = {0};
+    if (pad == 0 && img.stride == row) {
+        const size_t block = 16 * 1024;
+        size_t       len   = (size_t)row * img.height;
+        for (size_t o = 0; err == ESP_OK && o < len; o += block) {
+            size_t n = (len - o < block) ? len - o : block;
+            err      = httpd_resp_send_chunk(req, (const char *)img.rgb565 + o, (ssize_t)n);
+        }
+    } else {
+        for (uint32_t y = 0; err == ESP_OK && y < img.height; y++) {
+            err = httpd_resp_send_chunk(req, (const char *)img.rgb565 + (size_t)y * img.stride,
+                                        (ssize_t)row);
+            if (err == ESP_OK && pad != 0) {
+                err = httpd_resp_send_chunk(req, (const char *)zeros, (ssize_t)pad);
+            }
+        }
+    }
+    if (err == ESP_OK) {
+        err = httpd_resp_send_chunk(req, NULL, 0);
+    }
+
+    if (cb->screenshot_release != NULL) {
+        cb->screenshot_release(&img);
+    }
+    return err;
+}
+
+/* An integer member of a flat JSON object. Enough for /api/input's few fields. */
+static bool json_int(const char *json, const char *key, int32_t *out)
+{
+    char pattern[24];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *p = strstr(json, pattern);
+    if (p == NULL) {
+        return false;
+    }
+    p += strlen(pattern);
+    while (*p == ' ' || *p == ':' || *p == '\t') {
+        p++;
+    }
+    char *end = NULL;
+    long  v   = strtol(p, &end, 10);
+    if (end == p) {
+        return false;
+    }
+    *out = (int32_t)v;
+    return true;
+}
+
+static bool json_str(const char *json, const char *key, char *out, size_t out_len)
+{
+    char pattern[24];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *p = strstr(json, pattern);
+    if (p == NULL) {
+        return false;
+    }
+    p += strlen(pattern);
+    while (*p == ' ' || *p == ':' || *p == '\t') {
+        p++;
+    }
+    if (*p++ != '"') {
+        return false;
+    }
+    size_t i = 0;
+    while (*p != '\0' && *p != '"' && i + 1 < out_len) {
+        out[i++] = *p++;
+    }
+    out[i] = '\0';
+    return true;
+}
+
+/*
+ * One gesture, played through the UI's remote pointer. Answers once the finger has lifted, so a
+ * screenshot straight after shows the result (allow ~0.5 s more for a tile swipe's animation).
+ *
+ *   {"type":"tap","x":233,"y":233}
+ *   {"type":"long_press","x":233,"y":233,"ms":1000}
+ *   {"type":"swipe","dir":"up"}                       from the centre; "up" opens settings
+ *   {"type":"swipe","x1":233,"y1":400,"x2":233,"y2":100,"ms":300}
+ */
+static esp_err_t input_post(httpd_req_t *req)
+{
+    const net_svc_callbacks_t *cb = net_svc_get_callbacks();
+    if (cb->gesture == NULL) {
+        return send_json_error(req, "404 Not Found", "remote input unavailable");
+    }
+
+    size_t len  = 0;
+    char  *body = read_body(req, &len);
+    if (body == NULL) {
+        return send_json_error(req, "400 Bad Request", "missing body");
+    }
+
+    char              type[16] = {0};
+    char              dir[8]   = {0};
+    net_svc_gesture_t g        = {0};
+    int32_t           ms       = 0;
+
+    json_str(body, "type", type, sizeof(type));
+    if (json_int(body, "ms", &ms) && ms > 0) {
+        g.ms = (uint32_t)ms;
+    }
+
+    bool ok = true;
+    if (strcmp(type, "tap") == 0 || strcmp(type, "long_press") == 0) {
+        g.type      = (type[0] == 't') ? NET_SVC_GESTURE_TAP : NET_SVC_GESTURE_LONG_PRESS;
+        g.has_start = json_int(body, "x", &g.x1) && json_int(body, "y", &g.y1);
+        ok          = g.has_start;
+    } else if (strcmp(type, "swipe") == 0) {
+        g.type      = NET_SVC_GESTURE_SWIPE;
+        g.has_start = json_int(body, "x1", &g.x1) && json_int(body, "y1", &g.y1);
+        if (json_str(body, "dir", dir, sizeof(dir))) {
+            g.dir = dir[0];
+            ok    = (g.dir == 'u' || g.dir == 'd' || g.dir == 'l' || g.dir == 'r');
+        } else {
+            ok = g.has_start && json_int(body, "x2", &g.x2) && json_int(body, "y2", &g.y2);
+        }
+    } else {
+        ok = false;
+    }
+    free(body);
+
+    if (!ok) {
+        return send_json_error(req, "400 Bad Request",
+                               "expected tap/long_press with x,y, or swipe with dir or x1,y1,x2,y2");
+    }
+
+    esp_err_t err = cb->gesture(&g);
+    if (err == ESP_ERR_INVALID_STATE) {
+        return send_json_error(req, "409 Conflict", "another gesture is playing");
+    }
+    if (err != ESP_OK) {
+        return send_json_error(req, "400 Bad Request", esp_err_to_name(err));
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
+#endif /* CONFIG_AI_GAUGE_REMOTE_CONTROL */
+
 static esp_err_t root_get(httpd_req_t *req)
 {
     net_svc_status_t net;
@@ -836,7 +1026,7 @@ static esp_err_t root_get(httpd_req_t *req)
      * PSRAM, not this task's internal-RAM stack: with an escaped SSID the page can pass 1KB, and a
      * body under the 4KB SPIRAM_MALLOC_ALWAYSINTERNAL threshold needs asking for explicitly.
      */
-    const size_t body_len = 1536;
+    const size_t body_len = 2048;
     char        *body     = heap_caps_malloc(body_len, MALLOC_CAP_SPIRAM);
     if (body == NULL) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
@@ -860,6 +1050,8 @@ static esp_err_t root_get(httpd_req_t *req)
              "<li><code>GET /api/sensors</code></li>"
              "<li><code>GET /api/update</code>, <code>POST /api/update/check</code>, "
              "<code>POST /api/update/install</code></li>"
+             "<li><a href=/api/screenshot style='color:#ff1744'>GET /api/screenshot</a>, "
+             "<code>POST /api/input</code></li>"
              "</ul>"
              "<p style='color:#ffab00'>This interface has no authentication. Use it only on "
              "a network you trust.</p>",
@@ -965,7 +1157,7 @@ esp_err_t net_svc_http_start(void)
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.uri_match_fn   = httpd_uri_match_wildcard; /* wildcard config routes */
-    cfg.max_uri_handlers = 16;
+    cfg.max_uri_handlers = 18;
     /*
      * The server reserves 3 of lwIP's sockets for itself, so this must stay well under
      * CONFIG_LWIP_MAX_SOCKETS or httpd_start() refuses to run. Four concurrent connections
@@ -993,6 +1185,10 @@ esp_err_t net_svc_http_start(void)
         {.uri = "/api/update",       .method = HTTP_GET,    .handler = update_get},
         {.uri = "/api/update/check", .method = HTTP_POST,   .handler = update_check_post},
         {.uri = "/api/update/install", .method = HTTP_POST, .handler = update_install_post},
+#if CONFIG_AI_GAUGE_REMOTE_CONTROL
+        {.uri = "/api/screenshot",   .method = HTTP_GET,    .handler = screenshot_get},
+        {.uri = "/api/input",        .method = HTTP_POST,   .handler = input_post},
+#endif
     };
 
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {

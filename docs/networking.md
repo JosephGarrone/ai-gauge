@@ -68,6 +68,8 @@ Served on port 80, at most four concurrent connections.
 | `GET` | `/api/update` | `{"state","running","latest","progress","message","repo"}`, see [Updates from GitHub](#updates-from-github) |
 | `POST` | `/api/update/check` | Look for a newer release now (`202`; `409` with no connection or while busy) |
 | `POST` | `/api/update/install` | Install the release a check found (`202`; `409` if there is none) |
+| `GET` | `/api/screenshot` | The screen as a 466×466 RGB565 BMP, see [Remote control](#remote-control) |
+| `POST` | `/api/input` | Play a tap, long press or swipe (JSON body), see [Remote control](#remote-control) |
 | `GET` | `/editor/` | The face editor, built into the firmware image |
 
 `GET /api/config/<id>` returns a parsed summary; add `.xml` for the file itself. The file is
@@ -190,8 +192,8 @@ Decided in [ADR 0010](adr/0010-github-release-updates.md). Code: `net_svc_update
 - **When:** automatically a minute after boot if on WiFi, then every 12 hours
   (`CONFIG_AI_GAUGE_UPDATE_AUTO_CHECK`), and on demand from the settings page or
   `POST /api/update/check`. A check never installs anything.
-- **Install:** only on request, because it restarts the gauge: tap the firmware line on the
-  settings page twice within 4s, or `POST /api/update/install`. The image is downloaded whole into
+- **Install:** only on request, because it restarts the gauge: tap the Firmware card on
+  Settings → System twice within 4s, or `POST /api/update/install`. The image is downloaded whole into
   PSRAM, must carry this project's name and exactly the version `ota.json` promised, and only then
   is written. So a failed download changes nothing.
 - **The write runs on the HTTP server task**, via `httpd_queue_work()`. A flash write asserts that
@@ -203,6 +205,29 @@ Decided in [ADR 0010](adr/0010-github-release-updates.md). Code: `net_svc_update
 - **TLS** uses the ESP-IDF certificate bundle. mbedTLS allocates from PSRAM
   (`CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC`); a handshake does not fit in the internal RAM left once
   WiFi runs.
+
+## Remote control
+
+For driving and inspecting the UI without touching the gauge, by a person or an agent debugging it.
+Built in with `CONFIG_AI_GAUGE_REMOTE_CONTROL` (default on). Client:
+`tools/remote/gauge_remote.py HOST shot out.png | tap X Y | long X Y | swipe up | swipe X1 Y1 X2 Y2`.
+
+- **`GET /api/screenshot`**: `lv_snapshot_take()` of the active screen, rendered on the LVGL task
+  (`app_ui_remote.c`) while the HTTP task waits. The result is sent as a top-down RGB565
+  `BI_BITFIELDS` BMP, 434,378 bytes, in ~1 s. It costs one full-screen render, so don't poll it
+  while measuring performance. It shows **what LVGL drew, not what reached the panel**: a
+  flush or DMA fault, such as green-and-white noise, does not appear in it.
+- **`POST /api/input`**, coordinates in screenshot pixels whatever the rotation:
+  - `{"type":"tap","x":233,"y":233}` (80 ms)
+  - `{"type":"long_press","x":233,"y":233,"ms":1000}`
+  - `{"type":"swipe","dir":"up"}` (from the centre across 60% of the panel; `up` opens settings)
+  - `{"type":"swipe","x1":233,"y1":400,"x2":233,"y2":100,"ms":300}`
+
+  It is played through a second LVGL pointer device, the same path a finger takes, so scrolling
+  and momentum behave as they would on the glass. It answers once the press is released; allow
+  ~0.5 s more for a tile animation before a screenshot. `409` while another gesture is playing.
+- A fast swipe flings a settings scroll. To move by a controlled amount, use a slow one
+  (`ms` ≥ 1500).
 
 ## Memory constraints
 
@@ -221,6 +246,9 @@ is recorded in [performance.md](performance.md) and [display-pipeline.md](displa
 - Authentication, TLS and signed OTA images. Updates from GitHub are fetched over verified TLS,
   but the image itself is not signed: whoever can publish a release on the repository can update
   every gauge that installs it.
+- Remote control lets anyone on the network see the screen and operate it, including settings
+  and "Reset network". `POST /api/input` needs no preflight, so a web page can send gestures too,
+  blind. Turn off `CONFIG_AI_GAUGE_REMOTE_CONTROL` for builds where that matters.
 - `POST /api/update/install` needs no preflight either, so any web page can ask a gauge on the
   viewer's network to install the latest official release. That can only install what the
   repository published, and restarts the gauge.

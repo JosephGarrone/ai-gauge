@@ -11,7 +11,7 @@
 | `gauge_render` | Build the LVGL dial from a `gauge_config_t`: pre-rendered face, needle sprite, readouts, alerts. |
 | `sensor_hub` | Own `I2C_NUM_0`; drive ADS1115 and TMP1075 (EGT linearisation + cold-junction compensation); scale, filter and publish readings; own the sensor calibration in NVS. Pure maths in `sensor_math.c`, host-tested. See [ADR 0009](adr/0009-sensor-hub-sampling-and-calibration.md). |
 | `app_settings` | NVS-backed user settings (active gauge, brightness, rotation, FPS badge). |
-| `app_ui` | Tileview screens: the dial and the swipe-up settings page. |
+| `app_ui` | Tileview screens: the dial, and the swipe-up settings tile (`app_ui_settings.c`, [settings-ui.md](settings-ui.md)). Also remote screenshots and gestures (`app_ui_remote.c`). |
 | `net_svc` | WiFi provisioning, HTTP server, mDNS, telemetry ingest, OTA. |
 
 Dependency direction is strictly one-way:

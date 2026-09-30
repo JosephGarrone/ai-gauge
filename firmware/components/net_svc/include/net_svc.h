@@ -56,9 +56,41 @@ typedef void (*net_svc_config_changed_cb_t)(const char *id, bool deleted);
  */
 typedef void (*net_svc_telemetry_cb_t)(const char *channel, float value);
 
+/** A screen image for `GET /api/screenshot`. */
+typedef struct {
+    uint16_t       width, height;
+    uint32_t       stride; /**< Bytes per row. */
+    const uint8_t *rgb565; /**< Native little-endian RGB565. */
+    void          *handle; /**< Owner's, for release. */
+} net_svc_image_t;
+
+typedef enum {
+    NET_SVC_GESTURE_TAP = 0,
+    NET_SVC_GESTURE_LONG_PRESS,
+    NET_SVC_GESTURE_SWIPE,
+} net_svc_gesture_type_t;
+
+/** A gesture from `POST /api/input`, in screenshot pixels. */
+typedef struct {
+    net_svc_gesture_type_t type;
+    int32_t  x1, y1;   /**< Where the press starts. */
+    int32_t  x2, y2;   /**< Swipe only: where it ends, unless dir is set. */
+    char     dir;      /**< Swipe only: 'u', 'd', 'l', 'r' (finger direction) or 0. */
+    bool     has_start;/**< x1/y1 were given; otherwise the owner picks (e.g. the centre). */
+    uint32_t ms;       /**< Duration; 0 for the type's default. */
+} net_svc_gesture_t;
+
 typedef struct {
     net_svc_config_changed_cb_t on_config_changed;
     net_svc_telemetry_cb_t      on_telemetry;
+
+    /*
+     * Remote control (CONFIG_AI_GAUGE_REMOTE_CONTROL). Called on the HTTP task; the owner does the
+     * LVGL work on its own task and blocks until it is done. NULL disables the endpoint.
+     */
+    esp_err_t (*screenshot)(net_svc_image_t *out);
+    void      (*screenshot_release)(net_svc_image_t *img);
+    esp_err_t (*gesture)(const net_svc_gesture_t *g);
 } net_svc_callbacks_t;
 
 /**

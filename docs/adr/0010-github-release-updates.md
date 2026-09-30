@@ -25,7 +25,7 @@ Three board facts constrain how:
    `sha256`). Then download `ai-gauge.bin` from that tag, so the manifest and the image always
    belong together.
 2. **Check automatically; install only on request.** A check runs a minute after boot and every
-   12 hours while on WiFi. Installing takes two taps on the settings page's firmware line, or
+   12 hours while on WiFi. Installing takes two taps on the firmware card (Settings → System since ADR 0011), or
    `POST /api/update/install`.
 3. **Download whole into PSRAM, then write.** The update task has its stack in PSRAM and never
    touches flash. Once the image has been checked, it goes to the **HTTP server task** through

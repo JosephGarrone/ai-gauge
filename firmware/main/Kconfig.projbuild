@@ -23,4 +23,13 @@ config AI_GAUGE_BENCH_TRANSITION
 
         Leave this off for normal use: it makes the display unusable.
 
+config AI_GAUGE_REMOTE_CONTROL
+    bool "Screenshots and touch gestures over HTTP"
+    default y
+    help
+        GET /api/screenshot returns the screen as a BMP, and POST /api/input plays a tap, long
+        press or swipe, so the UI can be driven and inspected without touching the gauge
+        (docs/networking.md). Unauthenticated like the rest of the API: anyone on the network can
+        see and operate the screen. Turn it off for a build that should not allow that.
+
 endmenu

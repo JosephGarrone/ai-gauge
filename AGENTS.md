@@ -45,6 +45,7 @@ future sessions. Propagate them — do not let them decay.**
 | [docs/gauge-config-schema.md](docs/gauge-config-schema.md) | The gauge XML schema (normative) |
 | [docs/gauge-faces.md](docs/gauge-faces.md) | The shipped faces: PX Ranger style, its sources, generator (`tools/faces/px_faces.py`) |
 | [docs/gauge-xml-interface.md](docs/gauge-xml-interface.md) | Authoring guide for the web app: format, rendering model, upload API. Update with the schema |
+| [docs/settings-ui.md](docs/settings-ui.md) | The on-device settings UI: round layout, pages, rules for changing it, screenshots |
 | [docs/config-app.md](docs/config-app.md) | The face editor (M7): structure, firmware parity testing, Pages publishing, device-upload status |
 | [docs/sensor-frontend.md](docs/sensor-frontend.md) | ADS1115/TMP1075 wiring, scaling and thermocouple maths, 12V conditioning |
 | [docs/rear-pcb.md](docs/rear-pcb.md) | Rear PCB plan (planning only): 12V input and daisy chain, sensor connectors, 45mm outline |
@@ -86,6 +87,7 @@ the architecture:
 | [0007](docs/adr/0007-face-editor-static-app-with-parser-port.md) | The face editor is a dependency-free static web app carrying a line-for-line JS port of the gauge XML parser, held to the C by a differential test in CI | Its device verdict must follow the firmware's forgiving rules exactly; no JS toolchain in a C repository |
 | [0008](docs/adr/0008-gauge-serves-face-editor.md) | The firmware embeds the gzipped editor and serves it at `/editor/`; CORS only for loopback origins | Same origin avoids CORS and mixed content; embedded, not on LittleFS, so OTA keeps editor and parser in step; a wildcard origin would let any site replace faces |
 | [0009](docs/adr/0009-sensor-hub-sampling-and-calibration.md) | `sensor_hub`: single-shot ADS1115 multiplexing (MAP 100 Hz, others 10 Hz) woken by ALERT/RDY; ratiometric boost; key-on auto-zero; type K via numerically inverted NIST reference function; calibration in NVS, edited through one picker in settings | The BSP owns `I2C_NUM_1`; a row per calibration value cost 24KB of internal RAM and stopped WiFi |
+| [0011](docs/adr/0011-round-paged-settings.md) | Settings as a round home screen (brightness arc, 3×2 buttons) plus one page per topic, built on open and deleted on close; night-safe palette; back to the dial after 30 s idle | Pages that exist only while open saved ~7KB of internal RAM; a long scrolling list suited neither a round panel nor an A-pillar |
 | [0010](docs/adr/0010-github-release-updates.md) | Self-update from GitHub Releases: check `releases/latest/download/ota.json` automatically, install only on a confirmed tap; download whole to PSRAM, write on the HTTP task; mbedTLS in PSRAM | Flash writes need an internal-RAM stack and there is no room for another; the REST API is rate-limited; a gauge should not restart unasked |
 
 ---
@@ -118,7 +120,7 @@ firmware/      The ESP-IDF project
   main/        Entry point and screen wiring
   components/  board_profile, gauge_config, gauge_shape, gauge_render, sensor_hub, app_settings, net_svc
   assets/      Contents of the LittleFS storage partition
-tools/         Host-side tooling: host tests, web installer, config-app (the face editor)
+tools/         Host-side tooling: host tests, web installer, config-app (the face editor), remote (screenshots/gestures)
 .github/       CI: build artifacts on every push, releases + browser flashing on tags
 ```
 
@@ -176,9 +178,15 @@ widgets before adding settings rows ([ADR 0009](docs/adr/0009-sensor-hub-samplin
 
 **Sensors:** `sensor_hub` drives the rear board on `I2C_NUM_0` (the BSP's bus is `I2C_NUM_1`).
 Until a board answers, the needle shows the simulated sweep (`CONFIG_AI_GAUGE_SIMULATED_SOURCE`);
-after that, faults show as dashes. **Tap the Sensors readout on the settings page for raw ADC
-codes, pin volts, reads/s and a bus scan** (also `GET /api/sensors`); that view is how a board is
-brought up. Bench status of the first assembled board: [docs/sensor-frontend.md](docs/sensor-frontend.md#verification).
+after that, faults show as dashes. **Settings → Sensors, then tap the readout, for raw ADC codes,
+pin volts, reads/s and a bus scan** (also `GET /api/sensors`); that view is how a board is brought
+up. Bench status of the first assembled board: [docs/sensor-frontend.md](docs/sensor-frontend.md#verification).
+
+**Seeing and driving the UI without hands:** `tools/remote/gauge_remote.py HOST shot out.png`, then
+`tap X Y`, `long X Y` or `swipe up|down|X1 Y1 X2 Y2` in screenshot pixels
+([networking.md](docs/networking.md#remote-control)). Screenshots show what LVGL drew, not the
+panel, so a flush fault (green/white noise) needs the serial log. A screenshot drops a frame, so
+don't take them while measuring.
 
 **Updates:** a `v*` tag publishes a release that every gauge on WiFi will offer to install
 ([ADR 0010](docs/adr/0010-github-release-updates.md)). Tag only builds that have booted on a board.
