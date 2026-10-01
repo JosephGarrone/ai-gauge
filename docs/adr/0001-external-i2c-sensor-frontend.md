@@ -42,7 +42,7 @@ Read both sensors over a **second I2C bus** (`I2C_NUM_0`; the BSP owns `I2C_NUM_
 | Device | Address | Channel |
 |---|---|---|
 | ADS1115 (16-bit ADC) | 0x48 | `boost`; AIN3 carries the raw thermocouple voltage for `egt` |
-| TMP1075 (cold-junction sensor) | 0x49 | `egt` cold-junction compensation |
+| TMP1075 (cold-junction sensor) | 0x49 by design, 0x4F on the assembled board | `egt` cold-junction compensation |
 
 > **Amended 2026-09-21:** the EGT path was originally an MCP9600 (K-type + CJC in one part,
 > 0x67). It cost about $10 of a board's parts. The thermocouple now goes into the ADS1115's

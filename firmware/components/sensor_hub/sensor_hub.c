@@ -10,7 +10,8 @@
  * Addresses and channel wiring are from the fabricated netlist
  * (pcb/map-and-egt-daughterboard/production/netlist.ipc): ADS1115 ADDR to GND = 0x48,
  * TMP1075 A2 A1 A0 = GND GND 3V3 = 0x49; AIN0 MAP/2, AIN1 sensor 5V/2, AIN2 ignition/6,
- * AIN3 thermocouple.
+ * AIN3 thermocouple. The assembled board's TMP1075 answers at 0x4F instead (see TMP1075_ADDR).
+
  */
 
 #include "sensor_hub.h"
@@ -37,7 +38,12 @@ static const char *TAG = "sensor_hub";
 /* ---------------------------------------------------------------- devices --------- */
 
 #define ADS1115_ADDR 0x48
-#define TMP1075_ADDR 0x49
+/*
+ * Where the assembled board's TMP1075 answers (bench scan, 2026-10-01), so it is tried first. The
+ * netlist and layout strap it to 0x49 (A0 high only); 0x4F means the part reads A2 and A1 high too.
+ * docs/sensor-frontend.md#verification.
+ */
+#define TMP1075_ADDR 0x4F
 /* The part's whole address range (1001 A2 A1 A0), searched if it is not at TMP1075_ADDR. */
 #define TMP1075_ADDR_FIRST 0x48
 #define TMP1075_ADDR_LAST  0x4F
@@ -427,10 +433,10 @@ static void note_tmp_result(task_state_t *t, sensor_hub_snapshot_t *snap, esp_er
 }
 
 /*
- * The TMP1075 is strapped to 0x49, but the first assembled board's answers at 0x4F (bench scan,
- * 2026-10-01). So after the expected address, look through the rest of the part's range and accept
- * one only if the die ID proves it is a TMP1075: a strapping difference must not silently cost EGT,
- * and nothing else on the bus may be mistaken for it.
+ * The netlist straps the TMP1075 to 0x49, but the assembled board's answers at 0x4F, so neither
+ * address can be relied on. After TMP1075_ADDR, look through the rest of the part's range and
+ * accept one only if the die ID proves it is a TMP1075: a strapping difference must not silently
+ * cost EGT, and nothing else on the bus may be mistaken for it.
  */
 static bool tmp_try(uint8_t addr, bool require_id)
 {
@@ -446,12 +452,12 @@ static bool tmp_try(uint8_t addr, bool require_id)
         if (require_id) {
             return false;
         }
-        /* A TMP1075N has no ID register; anything else at 0x49 is a wiring surprise. */
+        /* A TMP1075N has no ID register; anything else at TMP1075_ADDR is a wiring surprise. */
         ESP_LOGW(TAG, "device at 0x%02x has ID 0x%04x, expected 0x%04x; using it anyway", addr,
                  id, TMP_DIEID);
     }
     if (addr != TMP1075_ADDR) {
-        ESP_LOGW(TAG, "TMP1075 answers at 0x%02x, not 0x%02x: check its address straps", addr,
+        ESP_LOGW(TAG, "TMP1075 answers at 0x%02x, not the assembled board's 0x%02x", addr,
                  TMP1075_ADDR);
     }
     ESP_LOGI(TAG, "TMP1075 found at 0x%02x", addr);

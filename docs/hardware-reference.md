@@ -30,6 +30,11 @@ Upstream sources (read these before changing anything here):
 | RST | 39 |
 | **TE** (tearing effect) | **13** |
 
+The BSP's init table sets brightness to full (`0x51`=`0xFF`) and ends with display on (`0x29`),
+before anything has been written to panel memory. Over QSPI a command is sent as opcode `0x02` in
+bits 31–24 and the DCS command in bits 15–8 (`tx_param()` in `esp_lcd_co5300_spi.c`). The firmware
+holds display-on back until its first frame: `firmware/main/panel_gate.c`, [boot-splash.md](boot-splash.md).
+
 ## Touch — CST9217
 
 | Signal | GPIO / Address |

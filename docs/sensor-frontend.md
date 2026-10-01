@@ -30,7 +30,7 @@ harness cannot take down the touchscreen.
 | Address | Device | Channel |
 |---|---|---|
 | 0x48 | ADS1115 | `boost`, and the raw thermocouple voltage for `egt` (AIN3) |
-| 0x49 | TMP1075 | Cold-junction temperature for `egt` |
+| 0x4F | TMP1075 | Cold-junction temperature for `egt`. Strapped for 0x49 in the design; the assembled board answers at 0x4F ([verification](#verification)) |
 
 Both are address-strappable if they clash with something added later.
 
@@ -151,7 +151,7 @@ J4 T− ── GND
 | Thermocouple type | K |
 | ADC input | AIN3 single-ended, PGA ±0.256V → 7.8125µV/count ≈ 0.19°C |
 | Range | 0.256V is far beyond K-type's 54.9mV at 1372°C, so any real EGT fits |
-| Cold junction | TMP1075 at 0x49 (A0 high): 12-bit, 0.0625°C/LSB, ±1°C max |
+| Cold junction | TMP1075 at 0x4F on the assembled board (0x49 by design): 12-bit, 0.0625°C/LSB, ±1°C max |
 | Open probe | R18 pulls AIN3 to 3V3 → the reading saturates at 0x7FFF |
 
 No clamp diode on AIN3. The other inputs have BAV99 clamps, but the upper diode's leakage into
@@ -220,7 +220,7 @@ Required:
 | MAP unplugged or shorted | Sensor output below 0.25V or above 4.85V | `boost` invalid, reason on settings |
 | Sensor supply collapsed | AIN1 × 2 outside 4.5–5.5V (TPS2553 limiting) | `boost` invalid when ratiometric |
 | Thermocouple open circuit | AIN3 above 60mV (R18 pulls it to saturation) | Channel invalid; readout shows dashes |
-| Cold-junction sensor missing | No TMP1075 at 0x49, nor any address 0x48–0x4F with die ID 0x7500 | `egt` invalid; `boost` unaffected |
+| Cold-junction sensor missing | No TMP1075 at 0x4F, nor any address 0x48–0x4E with die ID 0x7500 | `egt` invalid; `boost` unaffected |
 | Reading out of plausible range | Range check against the channel limits | Channel invalid; logged |
 | I2C bus error | Transaction returns an error | Retry with backoff; mark invalid after N failures |
 
@@ -295,8 +295,10 @@ Record measured results here as the hardware is built.
 - [ ] Confirm readings are stable with the engine running (electrical noise, ground offset)
 - [x] Both devices answer and ALERT/RDY edges arrive (2026-10-01, first assembled board, bench, no
       12V). The ADS1115 is at 0x48. **The TMP1075 answers at 0x4F, not 0x49**, although the netlist
-      straps A2/A1 to GND and A0 to 3V3. Its die ID (0x7500) confirms the part, so the driver now
-      searches 0x48–0x4F for it. Check U6's A0–A2 pads on this board. ALERT ok, 0 I2C errors.
+      straps A2/A1 to GND and A0 to 3V3, and the layout matches (U6 pads 5 and 6 on GND, pad 7 on
+      3V3). So the part reads A2 and A1 high: most likely pads 5/6 are not reaching ground on this
+      board. Its die ID (0x7500) confirms the part. The firmware now expects 0x4F, as built, and
+      still searches 0x48–0x4F, so a board strapped as designed also works. ALERT ok, 0 I2C errors.
 - [x] Rates on the bench: AIN0 98.7/s, AIN1–AIN3 9–10/s, TMP1075 2.0/s. The cold junction read
       25.06 °C (register 0x1910). With no probe, AIN3 reads 32767, which reports "Thermocouple open"
 - [ ] With 12V applied: the sensor 5V on AIN1 (it read 1 mV with no 12V), ignition on AIN2, and MAP

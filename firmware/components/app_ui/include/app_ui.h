@@ -42,6 +42,22 @@ typedef enum {
  */
 esp_err_t app_ui_create(const gauge_config_t *cfg, const board_profile_t *board);
 
+/**
+ * @brief Put the boot splash up on the top layer and start its animation (docs/boot-splash.md).
+ *
+ * Call once, before app_ui_create(), which then builds the dial underneath it. The splash hands
+ * over to the dial once its animation is complete and app_ui_splash_release() has been called, or
+ * after 5 s of waiting for that. A tap skips the animation. A failure leaves nothing on screen.
+ */
+esp_err_t app_ui_splash_show(void);
+
+/**
+ * @brief Let the boot splash hand over to the dial as soon as its animation allows.
+ *
+ * Safe from any task, without the LVGL lock.
+ */
+void app_ui_splash_release(void);
+
 /** @brief The gauge on the dial tile, so a value source can drive it. NULL before create. */
 gauge_render_t *app_ui_get_gauge(void);
 

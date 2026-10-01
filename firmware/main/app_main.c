@@ -38,6 +38,7 @@
 #include "gauge_render.h"
 #include "gauge_store.h"
 #include "net_svc.h"
+#include "panel_gate.h"
 #include "sensor_hub.h"
 
 static const char *TAG = "app_main";
@@ -52,6 +53,8 @@ static const char *TAG = "app_main";
 
 /* Pause between the UI coming up and WiFi claiming its internal memory (see app_main()). */
 #define NET_START_SETTLE_MS 1000
+/* Longest the boot splash waits for the rear board's first ADC conversion (see app_main()). */
+#define FIRST_READING_MAX_MS 1000
 
 /* A telemetry value older than this no longer overrides the local sources. */
 #define TELEMETRY_FRESH_US (1000 * 1000)
@@ -761,6 +764,42 @@ static void ui_watchdog_start(void)
 
 /* ------------------------------------------------------------------- startup -------- */
 
+/* Runs after every refresh; only the first does anything. */
+static void first_frame_cb(lv_event_t *e)
+{
+    (void)e;
+    panel_gate_open();
+}
+
+/*
+ * Wait, briefly, until the rear board's ADC has produced a conversion. The first probe runs on the
+ * sensor task's first tick, a second before this is called, so by now SEARCHING means no board
+ * (the bench, or a fault): nothing to wait for. ONLINE with no samples yet is the only case that
+ * waits. The cap stops a board that answers but never converts from holding the splash up.
+ */
+static void wait_for_first_reading(void)
+{
+    sensor_hub_snapshot_t *snap = heap_caps_malloc(sizeof(*snap), MALLOC_CAP_SPIRAM);
+    if (snap == NULL) {
+        return;
+    }
+    int64_t start = esp_timer_get_time();
+    for (;;) {
+        sensor_hub_get_snapshot(snap);
+        if (snap->state != SENSOR_HUB_ONLINE || snap->samples > 0) {
+            break;
+        }
+        if (esp_timer_get_time() - start >= (int64_t)FIRST_READING_MAX_MS * 1000) {
+            ESP_LOGW(TAG, "sensor board online but no ADC reading after %d ms", FIRST_READING_MAX_MS);
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    ESP_LOGI(TAG, "sensors %s (%" PRIu32 " MAP samples) after %" PRId64 " ms wait",
+             sensor_hub_state_str(snap->state), snap->samples, (esp_timer_get_time() - start) / 1000);
+    free(snap);
+}
+
 void app_main(void)
 {
     ESP_LOGW(TAG, "reset reason: %s", reset_reason_str(esp_reset_reason()));
@@ -815,6 +854,13 @@ void app_main(void)
 
     /* Before anything draws, and before WiFi claims its share of internal memory. */
     retarget_draw_buffers(board);
+
+    /* Covers the UI build below, and hands over to the dial when its animation ends. */
+    if (app_ui_splash_show() != ESP_OK) {
+        ESP_LOGW(TAG, "no boot splash; going straight to the dial");
+    }
+    /* The panel stays dark until this first frame is on it, instead of flashing white. */
+    lv_display_add_event_cb(lv_display_get_default(), first_frame_cb, LV_EVENT_REFR_READY, NULL);
 
     int64_t t0 = esp_timer_get_time();
     err = app_ui_create(s_active_cfg, board);
@@ -892,7 +938,8 @@ void app_main(void)
      * Wait for the first frames first. Measured: starting WiFi ~80ms after the UI unlock failed
      * intermittently ("Expected to init 6 rx buffer, actual is 5") -- the first full-screen
      * render's transient allocations were still live. Audio initialisation used to supply this
-     * pause by accident; since it was removed, the pause is explicit.
+     * pause by accident; since it was removed, the pause is explicit. The boot splash is up by
+     * now, but only its underline is moving, so frames are as small as the needle's.
      */
     vTaskDelay(pdMS_TO_TICKS(NET_START_SETTLE_MS));
 
@@ -909,6 +956,14 @@ void app_main(void)
     if (!net_ok) {
         ESP_LOGE(TAG, "networking failed to start; the gauge continues without it");
     }
+
+    /*
+     * The splash hands over to the dial once the sensors are reading, so the gauge opens on live
+     * values. Not before WiFi has initialised either: the hand-over redraws the whole screen,
+     * which must not overlap WiFi claiming its buffers (above).
+     */
+    wait_for_first_reading();
+    app_ui_splash_release();
 
     /* Last thing at startup: arm the delayed confirmation (see ota_confirm_timer_cb). */
     const esp_timer_create_args_t confirm_args = {.callback = ota_confirm_timer_cb, .name = "ota_confirm"};

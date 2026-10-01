@@ -119,6 +119,8 @@ thing the UI does — see the worst-case analysis in
 ## Startup
 
 1. `bsp_display_start()` — brings up the QSPI panel, touch, and the LVGL port.
+   The boot splash goes up straight after, over everything built below it, and the panel is only
+   switched on once that first frame is drawn ([boot-splash.md](boot-splash.md)).
 2. Mount LittleFS on the `storage` partition. A failure here is non-fatal.
 3. `app_settings` loads from NVS; defaults on first boot.
 4. `gauge_store` loads the active gauge XML from LittleFS. If it is missing or malformed the
@@ -130,6 +132,7 @@ thing the UI does — see the worst-case analysis in
    buffers ([ADR 0009](adr/0009-sensor-hub-sampling-and-calibration.md)).
 8. `net_svc` starts last — nothing in the display path waits on the network. Inside it, the HTTP
    server starts before WiFi initialises, for the memory reason in [performance.md](performance.md).
+9. Once the ADC has a reading, the splash is released to hand over to the dial.
 
 Allocation order is load-bearing on this board: long-lived internal allocations first, WiFi last.
 

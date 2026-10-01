@@ -6,7 +6,7 @@ board**, which is at fabrication.
 ## Context
 
 The rear sensor board ([rear-pcb.md](../rear-pcb.md), fabricated from
-`pcb/map-and-egt-daughterboard/`) puts one ADS1115 (0x48) and one TMP1075 (0x49) on the header's
+`pcb/map-and-egt-daughterboard/`) puts one ADS1115 (0x48) and one TMP1075 (0x49 by design, 0x4F as assembled) on the header's
 I2C pins. The ADC's four inputs carry MAP ÷ 2, the sensor's 5V supply ÷ 2, ignition ÷ 6 and the
 raw thermocouple. The firmware has to turn that into `boost` and `egt` channels without disturbing
 a render loop that already has almost no internal RAM to spare.

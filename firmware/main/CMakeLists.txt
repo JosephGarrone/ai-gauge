@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "app_main.c"
+        "panel_gate.c"
     INCLUDE_DIRS
         "."
     REQUIRES
@@ -16,4 +17,8 @@ idf_component_register(
         nvs_flash
         esp_timer
         app_update
+        esp_lcd
 )
+
+# panel_gate.c holds the BSP's display-on command back until the first frame (docs/boot-splash.md).
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_lcd_panel_io_tx_param")

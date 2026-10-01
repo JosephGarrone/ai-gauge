@@ -170,7 +170,7 @@ beside J4** on the same ground pour: it measures the thermocouple's cold junctio
 | 4 | GND | GND | |
 | 5 | A2 | GND | |
 | 6 | A1 | GND | |
-| 7 | A0 | 3V3 | A2 A1 A0 = 0 0 1 → **0x49** (datasheet Table 7-2); 0x48 is the ADS1115 |
+| 7 | A0 | 3V3 | A2 A1 A0 = 0 0 1 → **0x49** (datasheet Table 7-2); 0x48 is the ADS1115. The first assembled board answers at **0x4F** ([sensor-frontend.md](sensor-frontend.md#verification)) |
 | 8 | V+ | 3V3 | C18 100nF to GND |
 
 ### D3–D5 — Nexperia BAV99 (SOT-23)
@@ -296,7 +296,7 @@ assumed:
 - **The sensor bus runs at 100 kHz.** Both devices would allow 400 kHz; 100 kHz is kept
   because the bus leaves the board through the header.
 - **GPIO18 carries only the ADS1115 ALERT/RDY.** The TMP1075's ALERT is left unconnected.
-- **EGT is computed in firmware**: AIN3 at ±0.256V, plus the TMP1075 (0x49) cold-junction
+- **EGT is computed in firmware**: AIN3 at ±0.256V, plus the TMP1075 (0x49 by design, 0x4F as built) cold-junction
   temperature, through the NIST K-type polynomials. The procedure is in
   [sensor-frontend.md](sensor-frontend.md). AIN3 saturating at 0x7FFF means an open probe.
 - **Boost uses a ratio.** The MAP sensor is ratiometric, so `AIN0 / AIN1` measures the sensor

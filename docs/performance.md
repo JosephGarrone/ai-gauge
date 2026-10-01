@@ -486,6 +486,33 @@ end to end.
 only while their page is open. The lowest internal free after opening every page and driving
 controls over HTTP was 13,711 B. The dial was unchanged: 47.6 fps at the 45 cap, 2.2 ms render.
 
+### Boot splash
+
+ADR 0012 ([boot-splash.md](boot-splash.md)), 2026-10-01, ESP32-S3 rev v0.2, frame cap 45 fps,
+`boost` face with the simulated sweep running under the splash. `gauge_perf` reports the splash's
+whole window as `[boot splash]` when it ends.
+
+| Measurement | Result |
+|---|---|
+| Splash window (~3 s, sweep plus brightness hand-over) | **46.8 fps**, dirty 5.0% mean, render 4.36 ms mean, 46.3 ms max (the first full-screen frame) |
+| The same window with an opacity fade instead (rejected) | 42.3 fps overall; the fade itself ~75 ms a frame (~13 fps), visibly stepped |
+| Dial afterwards | 47.6 fps, 2.1 ms render, unchanged |
+| Internal free / largest DMA block after startup | 22,439 B / 14,336 B, the same as without the splash |
+| PSRAM free before the UI is built | 6,056 KB, against 6,505 KB without the splash: `.rodata` is copied to PSRAM (XIP) |
+| Splash on screen / WiFi starting, from reset (first version, WiFi held until the splash had gone) | 2.6 s / 6.8 s (WiFi was 3.8 s without the splash) |
+
+**Released on the first ADC reading instead, with the panel held dark until the first frame**, same
+day, rear board attached, three boots, all identical within a few ms:
+
+| Measurement | Result |
+|---|---|
+| Panel switched on | 2.745 s from reset, 67 ms after the UI build |
+| WiFi static RX buffers | 6 of 6 on every boot, initialised at 3.77 s with the splash still up |
+| ADC at release | ~100 MAP samples; no wait needed |
+| Splash window | 44.7 to 45.1 fps at the 45 cap, render 5.0 ms mean, 56.6 ms max (the first frame) |
+| Internal free at `running` (splash still up) | 21,455 B, largest DMA block 13,312 B |
+| Internal free once the splash has gone (`/api/status`, 15 s uptime) | 26,743 B; lowest since boot 19,227 B |
+
 ### Not yet measured
 - Scenarios 1, 3 and 6.
 - Scenario 2 with a custom needle shape (above).

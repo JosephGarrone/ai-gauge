@@ -45,6 +45,7 @@ future sessions. Propagate them — do not let them decay.**
 | [docs/gauge-config-schema.md](docs/gauge-config-schema.md) | The gauge XML schema (normative) |
 | [docs/gauge-faces.md](docs/gauge-faces.md) | The shipped faces: PX Ranger style, its sources, generator (`tools/faces/px_faces.py`) |
 | [docs/gauge-xml-interface.md](docs/gauge-xml-interface.md) | Authoring guide for the web app: format, rendering model, upload API. Update with the schema |
+| [docs/boot-splash.md](docs/boot-splash.md) | The boot splash (obd-display's, recut round): generator `tools/splash/make_splash.py`, timing, costs |
 | [docs/settings-ui.md](docs/settings-ui.md) | The on-device settings UI: round layout, pages, rules for changing it, screenshots |
 | [docs/config-app.md](docs/config-app.md) | The face editor (M7): structure, firmware parity testing, Pages publishing, device-upload status |
 | [docs/sensor-frontend.md](docs/sensor-frontend.md) | ADS1115/TMP1075 wiring, scaling and thermocouple maths, 12V conditioning |
@@ -89,6 +90,7 @@ the architecture:
 | [0009](docs/adr/0009-sensor-hub-sampling-and-calibration.md) | `sensor_hub`: single-shot ADS1115 multiplexing (MAP 100 Hz, others 10 Hz) woken by ALERT/RDY; ratiometric boost; key-on auto-zero; type K via numerically inverted NIST reference function; calibration in NVS, edited through one picker in settings | The BSP owns `I2C_NUM_1`; a row per calibration value cost 24KB of internal RAM and stopped WiFi |
 | [0011](docs/adr/0011-round-paged-settings.md) | Settings as a round home screen (brightness arc, 3×2 buttons) plus one page per topic, built on open and deleted on close; night-safe palette; back to the dial after 30 s idle | Pages that exist only while open saved ~7KB of internal RAM; a long scrolling list suited neither a round panel nor an A-pillar |
 | [0010](docs/adr/0010-github-release-updates.md) | Self-update from GitHub Releases: check `releases/latest/download/ota.json` automatically, install only on a confirmed tap; download whole to PSRAM, write on the HTTP task; mbedTLS in PSRAM | Flash writes need an internal-RAM stack and there is no room for another; the REST API is rate-limited; a gauge should not restart unasked |
+| [0012](docs/adr/0012-boot-splash.md) | Boot splash is a generated RGB565 image in flash on `lv_layer_top()`, underline swept under the tag line, handed to the dial by a panel-brightness dip once WiFi has initialised and the ADC reads; panel kept dark until the first frame (`main/panel_gate.c`) | An opacity fade measured ~13 fps; embedded data costs PSRAM (~440 KB) because `.rodata` is XIP-copied there; the BSP turns the panel on before anything is drawn |
 
 ---
 
@@ -120,7 +122,7 @@ firmware/      The ESP-IDF project
   main/        Entry point and screen wiring
   components/  board_profile, gauge_config, gauge_shape, gauge_render, sensor_hub, app_settings, net_svc
   assets/      Contents of the LittleFS storage partition
-tools/         Host-side tooling: host tests, web installer, config-app (the face editor), remote (screenshots/gestures)
+tools/         Host-side tooling: host tests, web installer, config-app (the face editor), remote (screenshots/gestures), splash
 .github/       CI: build artifacts on every push, releases + browser flashing on tags
 ```
 

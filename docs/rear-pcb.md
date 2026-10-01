@@ -206,7 +206,7 @@ The original idea was a DIP switch choosing which sensor's value reaches the ESP
 architecture there is nothing to switch:
 
 - **Both sensors share one I2C bus** on header pins 6/7, at different addresses (ADS1115 `0x48`,
-  TMP1075 `0x49`). The firmware reads both on every cycle over the same two wires.
+  TMP1075 `0x49` by design; the assembled board answers at `0x4F`). The firmware reads both on every cycle over the same two wires.
 - **The ALERT line** (pin 8) is open-drain and driven only by the ADS1115.
 - **Which value the gauge shows is already configuration**: `<source channel="boost">` or
   `<source channel="egt">` in the face XML ([gauge-config-schema.md](gauge-config-schema.md)).
