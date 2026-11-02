@@ -302,17 +302,19 @@ Changes made, DRC clean afterwards (the two J6 silk-clipped-by-edge warnings wer
   of relying on thermal spokes in the pour.
 - **+5V layer changes** now use two 0.8/0.4 vias at each end of the B.Cu run, as the rule above says.
 
-Suggested, not done (placement changes, decide with the layout owner):
+Part moves (2026-11-02, second pass), DRC: no errors, nothing unconnected:
 
-- **U6 is ~24mm from J4.** It is the thermocouple's cold-junction sensor and should sit beside J4
-  (see J4 above). Moving it means rerouting SDA/SCL/3V3 to the right-hand side.
-- **R2/R3 sit at U2, ~27mm from U1's FB pin**, so the high-impedance FB node runs the length of the
-  board on B.Cu. Putting the divider beside U1 and running the +5V sense line instead is the usual
-  layout; the current one does sense the voltage at U2, which is its one advantage.
-- **The MAP divider and filter (R5–R7, C11, D3) sit beside the buck**, and C11 is ~25mm from U4's
-  AIN0. A filter cap at the ADC pin would reject what the long run picks up.
-- **The ignition tap J1.2→TH1** loops over J2 because the battery pass-through (pin 1) sits between
-  them. It carries one board's current, so it is only untidy, not a problem.
+- **H2 centred on the ESP header** (x = 166.5, the midpoint of J6 pins 1 and 8).
+- **U6 and its decoupler C18 moved beside J4**, so the cold-junction sensor shares J4's corner and
+  ground; a via under U6 ties its ground pins to the plane. R9/R10 moved to where R2/R3 were.
+- **FB divider R2/R3 beside U1** (FB node ~8mm, was ~27mm); R2 senses +5V from the B.Cu trunk.
+  R6 and D3 shifted to make room.
+- **C11 at U4's AIN0 pin**; the I2C pull-ups R14-R16 shifted 2mm left for it.
+- **Ignition tap** now runs J1.2 straight under J1.1 to TH1 instead of looping over J2.
+- I2C, ALERT, 3V3, AIN0, AIN1 and the divider nets were rerouted by script; the bottom-layer
+  ground pour's duplicate UUID from the first pass was fixed.
+- **Still to tidy:** silkscreen. Moved parts left ~22 silk warnings (reference designators over
+  pads or each other, the `EGT` label now under U6, R14/R15/U6/C18 refs at the board edge).
 
 ## Open questions
 
