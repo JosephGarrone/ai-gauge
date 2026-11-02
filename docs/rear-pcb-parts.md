@@ -35,9 +35,9 @@ the BOM and placement files and fitted after assembly.
 
 | Ref | Part | Manufacturer | LCSC | KiCad symbol | KiCad footprint |
 |---|---|---|---|---|---|
-| J1, J2 | B4B-PH-K-S, **hand-soldered** | JST | C131334 | `Connector_Generic:Conn_01x04` | `Connector_JST:JST_PH_B4B-PH-K_1x04_P2.00mm_Vertical` |
-| J3 | B3B-PH-K-S, **hand-soldered** | JST | C131339 | `Connector_Generic:Conn_01x03` | `Connector_JST:JST_PH_B3B-PH-K_1x03_P2.00mm_Vertical` |
-| J4 | B2B-PH-K-S, **hand-soldered** | JST | C131337 | `Connector_Generic:Conn_01x02` | `Connector_JST:JST_PH_B2B-PH-K_1x02_P2.00mm_Vertical` |
+| J1, J2 | B04B-PASK(LF)(SN), **hand-soldered** | JST | — | `Connector_Generic:Conn_01x04` | `Connector_JST:JST_PH_B4B-PH-K_1x04_P2.00mm_Vertical` |
+| J3 | B03B-PASK(LF)(SN), **hand-soldered** | JST | — | `Connector_Generic:Conn_01x03` | `Connector_JST:JST_PH_B3B-PH-K_1x03_P2.00mm_Vertical` |
+| J4 | B02B-PASK(LF)(SN), **hand-soldered** | JST | — | `Connector_Generic:Conn_01x02` | `Connector_JST:JST_PH_B2B-PH-K_1x02_P2.00mm_Vertical` |
 | J6 | 1×8 header, 2.54mm, **hand-soldered** | generic | — | `Connector:Conn_01x08_Pin` | `Connector_PinHeader_2.54mm:PinHeader_1x08_P2.54mm_Vertical` |
 | TH1 (F1) | BSMD1812-150-33V | BHFUSE | C883154 | `Device:Thermistor_PTC` | `Resistor_SMD:R_1812_4532Metric` |
 | D1 | SMBJ24CA | — | C78416 | `Device:D_TVS` | `Diode_SMD:D_SMB` |
@@ -234,7 +234,8 @@ Same pinout as the BAT54S it replaced. The KiCad symbol `Diode:BAV99` uses the s
 
 Positions follow the owner's "left to right" definition: the leftmost wire, looking from the plug
 side while inserting, with the locating tabs up. Before fixing the footprints, confirm once with a
-real PH header that position 1 lands on JST's circuit-1 pin (Q3).
+real PA header that position 1 lands on JST's circuit-1 pin (Q3). The PA headers use KiCad's
+JST PH footprints, whose copper is identical ([rear-pcb.md](rear-pcb.md)).
 
 ## Nets
 
@@ -327,6 +328,7 @@ assumed:
 - BHFUSE [BSMD1812](https://www.lcsc.com/product-detail/C883154.html) (LCSC C883154)
 - Bourns
   [SRP7028A](https://www.bourns.com/docs/Product-Datasheets/SRP7028A.pdf)
-- JST [PH connector](https://www.jst-mfg.com/product/pdf/eng/ePH.pdf)
+- JST [PA family catalogue](https://www.jst-mfg.com/product/pdf/jpn/PA-F.pdf) (Japanese; the English
+  `ePA.pdf` link is dead). Product page: https://www.jst-mfg.com/product/index.php?series=189
 - KiCad [footprint](https://gitlab.com/kicad/libraries/kicad-footprints) and
   [symbol](https://gitlab.com/kicad/libraries/kicad-symbols) libraries

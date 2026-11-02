@@ -107,12 +107,18 @@ is the ceiling.
 
 **"Left to right" is defined** (project owner): looking from the plug side as it is pushed into
 the socket, with the locating tabs facing up, position 1 is the leftmost wire. The same definition
-applies to J3 and J4. Which JST pin number position 1 lands on is checked once with a real PH
+applies to J3 and J4. Which JST pin number position 1 lands on is checked once with a real PA
 header, which carries JST's circuit-1 mark, during the Q3 measurement. The footprint follows that check.
 
-**Connector family: JST PH (2.0mm pitch) is assumed but not confirmed.** JST XH (2.5mm) and ZH
-(1.5mm) look alike. Measure the pitch across all four pins with calipers: PH ≈ 6.0mm, XH ≈
-7.5mm, ZH ≈ 4.5mm.
+**Connector family: JST PA (2.0mm pitch), top entry** (project owner, 2026-11-02), replacing the
+XA (2.5mm) headers the v0.1 board was laid out with. Parts: **B04B-PASK(LF)(SN)**,
+**B03B-PASK(LF)(SN)** and **B02B-PASK(LF)(SN)**, all without the locating boss. In JST's PA naming
+`B…B-PASK` is the top-entry header, `S…B-PASK-2` the side-entry one, and `-1` adds a boss that needs
+a 1.1mm hole. KiCad ships no PA footprints; the stock **JST PH** vertical footprints are used
+because their copper matches JST's PA layout (2.0mm pitch, φ0.7 holes). Their outline is 0.8mm
+shallower than a PA body (4.5 vs 5.3mm), so leave that margin behind J1–J4 when moving parts.
+Do not fit the `-1` (bossed) variants: the PH footprints have no boss hole. Mating housing:
+PAP-0nV-S, contacts SPHD-001T-P0.5 (AWG#26–22).
 
 ### Daisy chain
 
@@ -120,7 +126,8 @@ J1 and J2 are the same connector, wired **pin-for-pin in parallel**. Either can 
 All pass-through current flows through board-level copper and connector contacts:
 
 - The first board in a chain carries **the current of every gauge after it**. JST's catalogue
-  rates PH contacts at 2A. Keep the chain's total under that, and fuse the vehicle feed at or
+  rates PA contacts at 3A with AWG#22 wire; the chain stays budgeted at 2A, which the Chain_12V
+  traces are sized for. Keep the chain's total under that, and fuse the vehicle feed at or
   below it. At the full 1.5A-at-5V target, each gauge draws about 0.74A from 12V, so one chain
   carries about two gauges at full load. More fit at typical loads.
 - Pass-through copper traces are sized for the full chain current, not one gauge.
@@ -218,7 +225,7 @@ A switch would be justified only if each sensor used its own analogue wire, like
 pin, which [ADR 0001](adr/0001-external-i2c-sensor-frontend.md) rules out.
 
 **Decided: J3 is always powered**, through its current limit, on every board (R8). An EGT gauge
-simply leaves J3 unplugged. The PH header's pins sit inside a plastic shroud, and a short on the
+simply leaves J3 unplugged. The PA header's pins sit inside a plastic shroud, and a short on the
 sensor 5V trips the limit, not the display supply. So a live, unused connector costs nothing,
 where a jumper would make boards non-identical.
 
@@ -236,14 +243,14 @@ ADS1115 inputs are now in use.
 | Largest square inside it | ≈31.8mm × 31.8mm |
 | Stack-up | 2-layer, 1.6mm (proposal) |
 
-Approximate footprint widths for JST PH top-entry headers, from `2.0mm × (pins − 1) + ~4mm`
-(confirm against the JST drawing):
+JST PA top-entry header bodies are `2.0mm × (pins − 1) + 4mm` wide, 5.3mm deep and 7.7mm tall
+above the board (JST PA catalogue, p.8):
 
-| Part | Approx. width | Qty |
+| Part | Width | Qty |
 |---|---|---|
-| 4-pin (J1, J2) | ~10mm | 2 |
-| 3-pin (J3) | ~8mm | 1 |
-| 2-pin (J4) | ~6mm | 1 |
+| 4-pin (J1, J2) | 10mm | 2 |
+| 3-pin (J3) | 8mm | 1 |
+| 2-pin (J4) | 6mm | 1 |
 
 Four connectors total ~34mm of edge. The circumference is ~141mm, so they fit around the edge
 with the wires leaving outward. Top-entry vs side-entry depends on how much depth there is behind
@@ -285,7 +292,7 @@ vias wherever a power net changes layer.
 | # | Question | Blocks |
 |---|---|---|
 | Q1 | ~~Header pin order~~ **Resolved:** pins 6/7/8 = GPIO16/17/18 | — |
-| Q3 | ~~JRP connector family~~ **Resolved:** JST PH assumed (matches the owner's recollection) | — |
+| Q3 | ~~JRP connector family~~ **Resolved:** JST PA, top entry (owner, 2026-11-02) | — |
 | Q4 | ~~"Left to right"~~ **Resolved:** leftmost wire, looking from the plug side while inserting, locating tabs up | — |
 | Q5 | ~~EGT probe polarity~~ **Not a PCB question:** J4 is marked + and −; the probe's leads are identified when the harness is made (see *Verification*) | — |
 | Q6 | ~~Display current~~ **Resolved:** design target 1.5A at 5V (owner); U2's rating is the ceiling | — |
@@ -296,7 +303,7 @@ handled directly by the project owner during layout. Q7 (speaker) is out of scop
 ## Verification
 
 - [x] Q1: header pins 6/7/8 = GPIO16/17/18 (confirmed by project owner; matches the upstream schematic)
-- [ ] Before ordering: plug a JRP lead into a real PH header and confirm position 1 lands on JST's
+- [ ] Before ordering: plug a JRP lead into a real PA header and confirm position 1 lands on JST's
   circuit-1 pin. If J3 is laid out backwards, the MAP sensor gets 5V and GND swapped
 - [ ] Harness: identify the EGT probe's + and − leads (type K negative is magnetic) and wire them to
   J4's + and −. Optionally check for tip-to-sheath continuity (grounded probe → consider fitting C16)
