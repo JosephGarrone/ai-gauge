@@ -280,12 +280,39 @@ Defined in the KiCad project and assigned by net-name patterns. Widths are for J
 | Chain_12V | `Net-(J1-Pin_1..3)`: battery, ignition, spare pass-through | 1.0 | 0.3 | 0.8/0.4 | Whole daisy chain, up to 2A |
 | Power_12V | `/IGN` (after the fuse), `/VIN_P` | 0.8 | 0.3 | 0.8/0.4 | ~0.9A, 3A until the fuse trips; sees surges |
 | SW | `/SW` | 1.0 | 0.3 | none (rule) | ~3.8A peak; keep it short and on one layer |
-| Power_5V | `/+5V`, `/+5V_ESP` | 0.8 | 0.2 | 0.8/0.4 | 1.5A display feed |
+| Power_5V | `/+5V` | 0.8 | 0.2 | 0.8/0.4 | 1.5A display feed |
+| Power_5V_Smaller | `/+5V_ESP` | 0.5 | 0.2 | 0.8/0.4 | Same current, but has to fit U2's SC-70 pins; runs are a few mm |
 | Power_Low | `/+3V3`, `/+5V_SNS` | 0.4 | 0.2 | 0.6/0.3 | ≤150mA |
 | Analog | `/TC+`, `/TC_IN`, `Net-(U4-AIN?)` | 0.25 | 0.2 | 0.6/0.3 | Kept ≥1.5mm from `SW` (rule) |
 
 GND stays in Default and is carried by fills on both layers, stitched with vias. Use two or more
 vias wherever a power net changes layer.
+
+### Routing review (2026-11-02)
+
+Changes made, DRC clean afterwards (the two J6 silk-clipped-by-edge warnings were there before):
+
+- **B.Cu GND pour added.** Only F.Cu had one, so the bottom layer was bare and every B.Cu signal
+  (FB, AIN0, AIN1, TC_IN, +3V3, +5V) had no reference plane; the TVS and connector returns had to
+  wind around the chain tracks through the F.Cu pour. 47 new stitching vias tie the pours together
+  on a 3mm grid, kept out of courtyards, plus vias at C1/C2, C4/C5, C6 and D1 grounds.
+- **U1 exposed pad**: six 0.6/0.3 thermal vias and a solid (not thermal-relief) zone connection;
+  D1's ground pad is solid too, so a surge has a low-inductance path to both planes.
+- **Chain GND**: a 1.0mm track now joins J1.4 and J2.4 like the other three chain pins, instead
+  of relying on thermal spokes in the pour.
+- **+5V layer changes** now use two 0.8/0.4 vias at each end of the B.Cu run, as the rule above says.
+
+Suggested, not done (placement changes, decide with the layout owner):
+
+- **U6 is ~24mm from J4.** It is the thermocouple's cold-junction sensor and should sit beside J4
+  (see J4 above). Moving it means rerouting SDA/SCL/3V3 to the right-hand side.
+- **R2/R3 sit at U2, ~27mm from U1's FB pin**, so the high-impedance FB node runs the length of the
+  board on B.Cu. Putting the divider beside U1 and running the +5V sense line instead is the usual
+  layout; the current one does sense the voltage at U2, which is its one advantage.
+- **The MAP divider and filter (R5–R7, C11, D3) sit beside the buck**, and C11 is ~25mm from U4's
+  AIN0. A filter cap at the ADC pin would reject what the long run picks up.
+- **The ignition tap J1.2→TH1** loops over J2 because the battery pass-through (pin 1) sits between
+  them. It carries one board's current, so it is only untidy, not a problem.
 
 ## Open questions
 
