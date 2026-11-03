@@ -269,6 +269,16 @@ Layout priorities:
    hot-to-solder parts where an iron can reach, or assemble the PCB first and solder the header
    last.
 
+### 3D renders
+
+KiCad 10 renders of the layout as of 2026-11-03 (`kicad-cli pcb render --quality high --floor`):
+[iso](rear-pcb/render-iso.png), [top](rear-pcb/render-top.png),
+[bottom](rear-pcb/render-bottom.png). L1 renders as bare pads because KiCad has no model for the
+Bourns SRP7028A. U1 uses the stock `HSOP-8-1EP_3.9x4.9mm_P1.27mm_EP2.41x3.1mm.step`, because the
+stock footprint's own model path names a file that doesn't exist.
+
+![Rear PCB, iso view](rear-pcb/render-iso.png)
+
 ### Net classes
 
 Defined in the KiCad project and assigned by net-name patterns. Widths are for JLCPCB 2-layer
