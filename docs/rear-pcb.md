@@ -271,7 +271,8 @@ Layout priorities:
 
 ### 3D renders
 
-KiCad 10 renders of the layout as of 2026-11-03 (`kicad-cli pcb render --quality high --floor`):
+KiCad 10 renders of the layout as of 2026-11-03 (`kicad-cli pcb render --quality high --floor`;
+the top view was re-rendered after the silkscreen tidy, the iso views predate it):
 [iso](rear-pcb/render-iso.png), [top](rear-pcb/render-top.png),
 [bottom](rear-pcb/render-bottom.png), [underside iso](rear-pcb/render-iso-bottom.png). J6, the
 8-pin header, is soldered from the underside with its body below the board, so its footprint stays
@@ -326,8 +327,13 @@ Part moves (2026-11-02, second pass), DRC: no errors, nothing unconnected:
 - **Ignition tap** now runs J1.2 straight under J1.1 to TH1 instead of looping over J2.
 - I2C, ALERT, 3V3, AIN0, AIN1 and the divider nets were rerouted by script; the bottom-layer
   ground pour's duplicate UUID from the first pass was fixed.
-- **Still to tidy:** silkscreen. Moved parts left ~22 silk warnings (reference designators over
-  pads or each other, the `EGT` label now under U6, R14/R15/U6/C18 refs at the board edge).
+- **Silkscreen tidied (2026-11-03).** References and the `EGT` label moved clear of pads, other
+  silk and the board edge; the crowded R2-R6 and U6 refs are 0.8mm text (the board minimum).
+  DRC's only warnings are the two J6 outline segments clipped by the edge, as before.
+- **Zone fill fixed (2026-11-03).** The previous pass refilled the pours without the project's
+  netclasses, so 12V, chain and SW copper sat 0.2mm from ground instead of 0.3mm (53 DRC
+  errors), and the +5V sense via was 0.6/0.3 instead of 0.8/0.4. Both corrected; refill from
+  KiCad or with the project loaded, never from a scratch copy.
 
 ## Open questions
 
