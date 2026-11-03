@@ -273,7 +273,10 @@ Layout priorities:
 
 KiCad 10 renders of the layout as of 2026-11-03 (`kicad-cli pcb render --quality high --floor`):
 [iso](rear-pcb/render-iso.png), [top](rear-pcb/render-top.png),
-[bottom](rear-pcb/render-bottom.png). L1 renders as bare pads because KiCad has no model for the
+[bottom](rear-pcb/render-bottom.png), [underside iso](rear-pcb/render-iso-bottom.png). J6, the
+8-pin header, is soldered from the underside with its body below the board, so its footprint stays
+on F.Cu (the pinout is correct as placed) and only its 3D model is flipped (offset z −1.6mm,
+rotated 180° about Y). L1 renders as bare pads because KiCad has no model for the
 Bourns SRP7028A. U1 uses the stock `HSOP-8-1EP_3.9x4.9mm_P1.27mm_EP2.41x3.1mm.step`, because the
 stock footprint's own model path names a file that doesn't exist.
 
