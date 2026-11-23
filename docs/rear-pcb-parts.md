@@ -5,9 +5,9 @@ entering the schematic in KiCad. Pin numbers come from the manufacturers' datash
 *Sources*); where a value is an engineering choice rather than a datasheet requirement, it is
 marked **(choice)**.
 
-> **Status: planning.** Nothing has been drawn in KiCad, ordered, built or measured. Confirm each
-> footprint against its datasheet drawing before ordering boards, and resolve the open questions
-> in [rear-pcb.md](rear-pcb.md#open-questions) first.
+> **Status: v0.2 laid out, not yet ordered.** v0.1 (XA connectors) was built and its I2C side
+> bench-tested; its power stage has not yet had 12V applied. The KiCad schematic is the source of
+> truth; the SVG sheets below are the original plan and may lag it.
 
 ## Sheets
 
@@ -38,6 +38,7 @@ the BOM and placement files and fitted after assembly.
 | J1, J2 | B04B-PASK(LF)(SN), **hand-soldered** | JST | — | `Connector_Generic:Conn_01x04` | `Connector_JST:JST_PH_B4B-PH-K_1x04_P2.00mm_Vertical` |
 | J3 | B03B-PASK(LF)(SN), **hand-soldered** | JST | — | `Connector_Generic:Conn_01x03` | `Connector_JST:JST_PH_B3B-PH-K_1x03_P2.00mm_Vertical` |
 | J4 | B02B-PASK(LF)(SN), **hand-soldered** | JST | — | `Connector_Generic:Conn_01x02` | `Connector_JST:JST_PH_B2B-PH-K_1x02_P2.00mm_Vertical` |
+| TP1–TP6 | Bare 1.5mm test pads (IGN, +5V, 3V3, SDA, SCL, GND); not a part | — | — | `Connector:TestPoint` | `TestPoint:TestPoint_Pad_D1.5mm` |
 | J6 | 1×8 header, 2.54mm, **hand-soldered** | generic | — | `Connector:Conn_01x08_Pin` | `Connector_PinHeader_2.54mm:PinHeader_1x08_P2.54mm_Vertical` |
 | TH1 (F1) | BSMD1812-150-33V | BHFUSE | C883154 | `Device:Thermistor_PTC` | `Resistor_SMD:R_1812_4532Metric` |
 | D1 | SMBJ24CA | — | C78416 | `Device:D_TVS` | `Diode_SMD:D_SMB` |
@@ -51,6 +52,7 @@ the BOM and placement files and fitted after assembly.
 | D3–D5 | BAV99 | Nexperia | C2500 | `Diode:BAV99` | `Package_TO_SOT_SMD:SOT-23` |
 | C1 | 10µF, X5R, 50V | Murata | C440198 | `Device:C` | `Capacitor_SMD:C_0805_2012Metric` |
 | C2 | 100nF, X7R, 100V | Samsung | C28233 | `Device:C` | `Capacitor_SMD:C_0805_2012Metric` |
+| C19 | 100nF, X7R, 0603 | Yageo | C14663 | `Device:C` | `Capacitor_SMD:C_0603_1608Metric` |
 | C3, C9, C16, C18 | 100nF, X7R, 50V | Yageo | C49678 | `Device:C` | `Capacitor_SMD:C_0805_2012Metric` |
 | C4–C6 | 22µF, X5R, 25V | Samsung | C45783 | `Device:C` | `Capacitor_SMD:C_0805_2012Metric` |
 | C7, C10 | 1µF, X7R, 50V | Samsung | C28323 | `Device:C` | `Capacitor_SMD:C_0805_2012Metric` |
@@ -66,6 +68,10 @@ the BOM and placement files and fitted after assembly.
 | R12 | 20k | UNI-ROYAL | C4328 | `Device:R` | `Resistor_SMD:R_0805_2012Metric` |
 | R14, R15 | 4.7k | UNI-ROYAL | C17673 | `Device:R` | `Resistor_SMD:R_0805_2012Metric` |
 | R18 | 1M | UNI-ROYAL | C17514 | `Device:R` | `Resistor_SMD:R_0805_2012Metric` |
+
+To have JLCPCB fit the PA headers instead, give J1–J4 these LCSC numbers and include them in the
+BOM: B04B-PASK(LF)(SN) **C265078**, B03B-PASK(LF)(SN) **C158048**, B02B-PASK(LF)(SN) **C158050**.
+The `-1` (bossed) variants have different numbers (C495722, C160286, C398555); do not use them.
 
 Most passives, SS210 and BAV99 are JLCPCB **Basic** parts, which have no per-part setup fee.
 Those values were chosen from the Basic range, so R1–R4 and C1 differ from the datasheet
@@ -153,7 +159,7 @@ TPS2552 and TPS2553 share this package but **differ in EN polarity**. This table
 | 5 | AIN1 | AIN1 | Sensor supply ÷ 2 |
 | 6 | AIN2 | AIN2 | Ignition ÷ 6 |
 | 7 | AIN3 | TC_IN | Thermocouple via R17; no clamp diode |
-| 8 | VDD | 3V3 | C16 100nF to GND |
+| 8 | VDD | 3V3 | C19 100nF beside the chip; C16 100nF where 3V3 enters from J6 |
 | 9 | SDA | SDA | |
 | 10 | SCL | SCL | |
 
@@ -198,7 +204,7 @@ Same pinout as the BAT54S it replaced. The KiCad symbol `Diode:BAV99` uses the s
 | C9 | +5V | GND | |
 | C10 | +5V_SNS | GND | |
 | C11 / C12 / C13 | AIN0 / AIN1 / AIN2 | GND | |
-| C16, C18 | 3V3 | GND | U4 and U6 decoupling |
+| C16, C18, C19 | 3V3 | GND | 3V3 entry (C16), U6 (C18) and U4 (C19) decoupling |
 | C14 | TC+ | TC− | Across the probe |
 | C17 | TC_IN | GND | AIN3 filter |
 | R1 | RT | GND | |
@@ -244,13 +250,13 @@ JST PH footprints, whose copper is identical ([rear-pcb.md](rear-pcb.md)).
 | BATT | J1.1, J2.1 |
 | AUX | J1.3, J2.3 |
 | IGN | J1.2, J2.2, F1.1 |
-| IGN_F | F1.2, D1.1, D2.A, R11.1 |
+| IGN_F | F1.2, D1.1, D2.A, R11.1, TP1 |
 | VIN_P | D2.K, C1, C2, U1.2 (EN), U1.3 (VIN) |
 | RT | U1.4, R1 |
 | BOOT | U1.7, C3 |
 | SW | U1.8, C3, L1.1 |
 | FB | U1.5, R2, R3 |
-| +5V | L1.2, C4, C5, C6, R2, U2.1, U3.1, U3.3, C9 |
+| +5V | L1.2, C4, C5, C6, R2, U2.1, U3.1, U3.3, C9, TP2 |
 | VBUS_OUT | U2.3, U2.6, C7, J6.1 |
 | ILIM | U3.5, R4 |
 | +5V_SNS | U3.6, C10, J3.3, R8 |
@@ -260,13 +266,13 @@ JST PH footprints, whose copper is identical ([rear-pcb.md](rear-pcb.md)).
 | AIN1 | R10, C12, D4.3, U4.5 |
 | AIN2 | R13, C13, D5.3, U4.6 |
 | TC_IN | R17, C17, U4.7 |
-| 3V3 | J6.3, U4.8, U6.7, U6.8, C16, C18, D3.2, D4.2, D5.2, R14, R15, R16, R18 |
-| SDA | J6.6, U4.9, U6.1, R14 |
-| SCL | J6.7, U4.10, U6.2, R15 |
+| 3V3 | J6.3, U4.8, U6.7, U6.8, C16, C18, C19, TP3, D3.2, D4.2, D5.2, R14, R15, R16, R18 |
+| SDA | J6.6, U4.9, U6.1, R14, TP4 |
+| SCL | J6.7, U4.10, U6.2, R15, TP5 |
 | ALERT | J6.8, U4.2, R16 |
 | TC+ | J4.2, C14.1, R17, R18 |
 | TC− | J4.1, C14.2 — tied to GND |
-| GND | J1.4, J2.4, J3.1, J6.2, D1.2, C1–C7, C9–C13, C16 (pin 2), R1, R3, R4, R6, R9, R12, U1.1, U1.EP, U2.2, U2.4, U2.5, U3.2, U4.1, U4.3, U6.4, U6.5, U6.6, C17, C18, J4.1, D3.1, D4.1, D5.1 |
+| GND | J1.4, J2.4, J3.1, J6.2, D1.2, C1–C7, C9–C13, C16 (pin 2), R1, R3, R4, R6, R9, R12, U1.1, U1.EP, U2.2, U2.4, U2.5, U3.2, U4.1, U4.3, U6.4, U6.5, U6.6, C17, C18, C19, TP6, J4.1, D3.1, D4.1, D5.1 |
 | No connect | U1.6, U3.4, U6.3, J6.4, J6.5 |
 
 ## Design values
@@ -306,10 +312,21 @@ assumed:
 - **Two new readings are free:** the sensor supply (AIN1, also a harness-fault indicator: it
   collapses if U3 limits) and ignition voltage (AIN2).
 
+## Test pads and I2C expansion
+
+TP1–TP6 are bare pads on the top side, labelled on the silkscreen: IGN (after the fuse), +5V,
+3V3, SDA, SCL and GND. They are for bring-up probing, and TP3–TP6 are also the board's only
+expansion point: a second ADS1115 (for battery voltage, say) can be wired to them at address
+0x4A or 0x4B. 0x48 is U4, and 0x49 is U6's designed address (0x4F as built). No connector was
+added: no GPIO is free, the board has no room for one, and the bus is the only thing worth
+extending.
+
 ## Before ordering
 
 - Resolve the open questions in [rear-pcb.md](rear-pcb.md#open-questions): JRP connector family
   and the pin-1 check (Q3), EGT probe polarity (Q5), display current (Q6).
+- Apply 12V to a v0.1 board from a current-limited bench supply first: v0.2's power stage is the
+  same circuit.
 - Check the KiCad pad numbering of U1's exposed pad against its symbol.
 - Bench-test U2 with USB plugged into the display while the board is powered, and confirm no
   current flows back into the buck.

@@ -5,9 +5,10 @@ vehicle 12V, powers the display, carries the sensor front-end from
 [sensor-frontend.md](sensor-frontend.md), and passes power on to the next gauge. One design
 serves both the boost and the EGT gauge.
 
-> **Status: planning.** Nothing here has been drawn, built or measured. Facts about the display
-> board are marked with where they came from. Everything else is a proposal until the
-> *Verification* list says otherwise. Do not describe any of this as working.
+> **Status: v0.2 laid out, ready to order (2026-11-23).** v0.1 (JST XA connectors) was built; its
+> I2C side works on the bench, but its power stage has never had 12V applied. Facts about the display
+> board are marked with where they came from. Nothing is verified until the *Verification* list
+> says so.
 
 ## Requirements
 
@@ -271,8 +272,8 @@ Layout priorities:
 
 ### 3D renders
 
-KiCad 10 renders of the layout as of 2026-11-03 (`kicad-cli pcb render --quality high --floor`;
-the top view was re-rendered after the silkscreen tidy, the iso views predate it):
+KiCad 10 renders (`kicad-cli pcb render --quality high --floor`). Top and bottom are v0.2
+(2026-11-23); the iso views are from 2026-11-03 and predate the test pads and C19:
 [iso](rear-pcb/render-iso.png), [top](rear-pcb/render-top.png),
 [bottom](rear-pcb/render-bottom.png), [underside iso](rear-pcb/render-iso-bottom.png). J6, the
 8-pin header, is soldered from the underside with its body below the board, so its footprint stays
@@ -335,6 +336,28 @@ Part moves (2026-11-02, second pass), DRC: no errors, nothing unconnected:
   errors), and the +5V sense via was 0.6/0.3 instead of 0.8/0.4. Both corrected; refill from
   KiCad or with the project loaded, never from a scratch copy.
 
+### Pre-order review (2026-11-23, v0.2)
+
+DRC with schematic parity: no errors, nothing unconnected, no parity issues; the only warnings are
+the two J6 silk segments clipped by the edge. ERC: no errors and one accepted warning (U2's ST
+pin, an open-collector output, is tied to GND as its datasheet says, and the GND net carries a
+PWR_FLAG; the project's pin map rates that pair a warning rather than an error).
+
+- **Silkscreen:** `V0.2` and the date; `B I G` between J1 and J2 (battery, ignition, ground, at
+  pins 1, 2 and 4); `+` and `-` over J4's T+ and T− pins; a pin legend on the bottom side.
+- **C19** (100nF 0603) beside U4, feeding pin 8 through a via onto the B.Cu 3V3 track. C16 stays
+  where 3V3 enters from J6; it had been U4's only decoupler, about 8mm of track away.
+- **Test pads TP1–TP6** (IGN, +5V, 3V3, SDA, SCL, GND), labelled. TP3–TP6 double as the I2C
+  expansion point ([rear-pcb-parts.md](rear-pcb-parts.md#test-pads-and-i2c-expansion)).
+- **U6:** a track joins A1 (pad 6) to A2 (pad 5), so A1 no longer relies on the pour alone. v0.1
+  answers at 0x4F, as if A1 and A2 were not grounded; check continuity from those pads to GND on
+  a v0.1 board.
+- **PWR_FLAGs** on GND, +3V3 and +5V, which cleared ERC's three "power pin not driven" errors.
+- **Not changed:** C1/C2 stay 4–5mm from U1's VIN pin. Moving them closer means moving H1.
+- **Production files** regenerated with the Fabrication Toolkit (`production/` is gitignored, so
+  they exist only where they were generated). J1–J4 and J6 stay hand-soldered and out of the BOM;
+  the LCSC numbers to have JLCPCB fit the PA headers are in [rear-pcb-parts.md](rear-pcb-parts.md#bill-of-materials).
+
 ## Open questions
 
 | # | Question | Blocks |
@@ -351,8 +374,11 @@ handled directly by the project owner during layout. Q7 (speaker) is out of scop
 ## Verification
 
 - [x] Q1: header pins 6/7/8 = GPIO16/17/18 (confirmed by project owner; matches the upstream schematic)
+- [x] The JRP leads use JST PA plugs (project owner, 2026-11-23)
 - [ ] Before ordering: plug a JRP lead into a real PA header and confirm position 1 lands on JST's
   circuit-1 pin. If J3 is laid out backwards, the MAP sensor gets 5V and GND swapped
+- [ ] Before ordering, ideally: 12V from a current-limited bench supply on a v0.1 board. Its power
+  stage (fuse, TVS, reverse-polarity diode, buck, U2) is the same circuit as v0.2's
 - [ ] Harness: identify the EGT probe's + and − leads (type K negative is magnetic) and wire them to
   J4's + and −. Optionally check for tip-to-sheath continuity (grounded probe → consider fitting C16)
 - [ ] Daisy chain: two boards, measure the drop across the first board at full chain current
