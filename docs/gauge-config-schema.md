@@ -243,7 +243,7 @@ completes: under 7 times a second at 30 s with the default width, and under 2 at
 | `line-width` | int | `3` | The trace |
 | `color` | colour | `#17caff` | The trace. The baseline is this at 30% |
 | `fill` | colour | none | Fills under the trace. Omit it for a line only, which reads best at a glance |
-| `alert-marks` | bool | `true` | A dashed line, in the alert's colour, at each `above` alert inside the range |
+| `alert-marks` | bool | `true` | A dashed line, in the alert's colour, at the first `above` alert inside the range (the redline, when alerts are listed highest first) |
 
 Omit the element for no strip. Keep it within about 200 × 50 px: that is the size it was budgeted at.
 

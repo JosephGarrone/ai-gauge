@@ -52,7 +52,7 @@ test('alerts flash at the configured rate', () => {
     assert.equal(needleAlertColor(m, steady), '#d50000');
 });
 
-test('alert handover keeps the first alert for the needle, as the firmware does', () => {
+test('alert handover moves the needle to the new alert, as the firmware does', () => {
     const m = face('boost.xml');
     m.source.damping = 0;
     m.alerts = [
@@ -62,8 +62,22 @@ test('alert handover keeps the first alert for the needle, as the firmware does'
     const st = createSim(m);
     stepSim(m, st, 30, 16);
     stepSim(m, st, 0, 16);
-    assert.equal(needleAlertColor(m, st), '#ff0000');
+    assert.equal(needleAlertColor(m, st), '#0000ff');
     assert.equal(readoutColor(m, st), '#0000ff');
+});
+
+test('stepped zones: steady yellow and orange, flashing red', () => {
+    const m = face('egt.xml');
+    m.source.damping = 0;
+    const st = createSim(m);
+    stepSim(m, st, 400, 16);
+    assert.equal(needleAlertColor(m, st), m.alerts.find((a) => a.above === 380).color);
+    stepSim(m, st, 460, 16);
+    assert.equal(needleAlertColor(m, st), m.alerts.find((a) => a.above === 440).color);
+    assert.equal(st.flashPeriod, 0, 'orange is steady');
+    stepSim(m, st, 520, 16);
+    assert.equal(needleAlertColor(m, st), m.alerts.find((a) => a.above === 500).color);
+    assert.ok(st.flashPeriod > 0, 'red flashes');
 });
 
 test('face renders ticks, labels and titles', () => {

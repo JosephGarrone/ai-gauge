@@ -238,6 +238,7 @@ export function renderTrend(m) {
             if (a.above === null || a.above <= m.source.min || a.above >= m.source.max) continue;
             const ay = Math.round(yOf(a.above));
             out += `<line x1="${x}" y1="${ay}" x2="${x + w - 1}" y2="${ay}" stroke="${a.color}" stroke-width="2" stroke-dasharray="6 6"/>`;
+            break; // the first (highest-priority) alert only, as gauge_render.c does
         }
     }
     const [hx, hy] = pts[pts.length - 1];

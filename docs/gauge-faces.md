@@ -56,6 +56,10 @@ What was carried over, measured on the photo as fractions of the ring's outer ra
   is smaller than the numerals except that optional peak figure.
 - **A sparkline** (`<trend>`, 200 × 50 px at y 378) fills the gap under the dial: the reading over
   the last 30/60/120 s across the face's range, with the redline dashed.
+- **EGT zones** (2026-11-27, the owner's limits): yellow from 380 °C, orange from 440, red above
+  500, on the ring and pointers and as alerts. Yellow and orange are steady; red flashes. The
+  needle, readout and icon take the zone's colour. Ring colours are dimmed to 80% like the
+  redline; alerts are full brightness.
 - **Dimmed static artwork, against AMOLED burn-in** (2026-11-27). The ring, pointers and numerals
   are `#b0b4b6`, 75% of the cluster's `#ebf0f2`, and the redline ring `#cc2626`, 80% of `#ff3030`.
   Those pixels never move, so they wear while the black around them does not; the needle and

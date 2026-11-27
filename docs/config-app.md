@@ -77,12 +77,12 @@ cases to `test/corpus.mjs`. See *Adding to the schema* in
 Geometry that the firmware rounds (tick and needle endpoints to whole pixels, band angles to whole
 degrees) is rounded the same way.
 
-### A firmware quirk the preview reproduces
+### Alert handover
 
-When one alert hands over to another without the value ever clearing both (possible with damping
-0), `evaluate_alerts()` returns early: the needle keeps the first alert's colour and flash rate
-while the readout switches to the second alert's colour. The preview does the same, so it matches
-the gauge. It is probably unintended; it has not been fixed or filed.
+When one alert hands over to another without the value clearing both, as EGT's stepped zones do
+(yellow, orange, red), the needle, icon, readout and flash rate all move to the new alert. Before
+2026-11-27 `evaluate_alerts()` returned early and the needle kept the first alert's colour; that
+was fixed in the firmware and the preview together.
 
 ## Uploading to a gauge
 

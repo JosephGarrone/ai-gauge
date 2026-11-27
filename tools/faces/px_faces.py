@@ -32,6 +32,12 @@ MUTED = "#8f9aa0"      # caption: secondary text, a cool grey beside the off-whi
 # turns the alert colour, flashing with the needle, while an alert is active.
 TELLTALE_GREEN = "#1fb24a"
 RED = "#ff3030"        # IpcRedBright: redline ring and pointers, alert
+YELLOW = "#ffd000"     # EGT caution zone
+ORANGE = "#ff8a00"     # EGT warning zone
+# Zone colours for the ring are dimmed like ART (static artwork wears the AMOLED); the alerts,
+# which colour the moving needle, readout and icon, stay at full brightness.
+YELLOW_ART = "#cca600"
+ORANGE_ART = "#cc6e00"
 AMBER = "#ffb000"      # IpcAmber: peak marker
 NEEDLE = "#17caff"     # NeedleGaugeViewModel's default needle colour
 CAP = "#07090b"        # pivot cap
@@ -185,20 +191,42 @@ def needle_xml(builtin):
   </needle>"""
 
 
-def bands(vmin, vmax, major, red_from):
-    """Ring segments between half-majors, parted by GAP_DEG, split where the redline starts."""
+def bands(vmin, vmax, major, zones):
+    """
+    Ring segments between half-majors, parted by GAP_DEG, split where each zone starts.
+
+    zones: [(from, ring colour)], ascending; below the first is ART. The schema allows 8 bands, so
+    when the zones push past that, the half-major gaps nearest a zone boundary are dropped first:
+    a colour change already breaks the ring there.
+    """
     sweep = 270.0
     gap = GAP_DEG / 2 * (vmax - vmin) / sweep   # half the gap, in value units
-    edges = [vmin] + [vmin + major * (i + 0.5) for i in range(int((vmax - vmin) / major))] + [vmax]
-    out = []
-    for a, b in zip(edges, edges[1:]):
-        lo = a if a == vmin else a + gap
-        hi = b if b == vmax else b - gap
-        if lo < red_from < hi:
-            out += [(lo, red_from, ART), (red_from, hi, RED_ART)]
-        else:
-            out.append((lo, hi, RED_ART if lo >= red_from else ART))
-    assert len(out) <= 8, "the schema allows 8 bands"
+    halves = [vmin + major * (i + 0.5) for i in range(int((vmax - vmin) / major))]
+    starts = [z for z, _ in zones]
+
+    def colour_at(v):
+        c = ART
+        for z, zc in zones:
+            if v >= z:
+                c = zc
+        return c
+
+    def build(edges_mid):
+        edges = [vmin] + edges_mid + [vmax]
+        out = []
+        for a, b in zip(edges, edges[1:]):
+            lo = a if a == vmin else a + gap
+            hi = b if b == vmax else b - gap
+            cuts = [lo] + [z for z in starts if lo < z < hi] + [hi]
+            out += [(x, y, colour_at(x)) for x, y in zip(cuts, cuts[1:])]
+        return out
+
+    mid = list(halves)
+    out = build(mid)
+    while len(out) > 8:
+        nearest = min(mid, key=lambda h: min(abs(h - z) for z in starts))
+        mid.remove(nearest)
+        out = build(mid)
     return out
 
 
@@ -206,11 +234,15 @@ def num(v):
     return f"{v:.2f}".rstrip("0").rstrip(".")
 
 
-def face(gid, comment, channel, unit, vmax, major, minor, red_from, caption, icon, damping, fmt, label_font,
-         label_r, builtin_needle=False):
+def face(gid, comment, channel, unit, vmax, major, minor, zones, alerts, caption, icon, damping, fmt,
+         label_font, label_r, builtin_needle=False):
     band_xml = "\n".join(
         f'    <band from="{num(a)}" to="{num(b)}" color="{c}" width="{BAND_W}"/>'
-        for a, b, c in bands(0, vmax, major, red_from))
+        for a, b, c in bands(0, vmax, major, zones))
+    # The first alert that holds wins, so the highest threshold goes first.
+    alert_xml = "\n".join(
+        f'  <alert above="{num(above)}" flash-hz="{hz}" color="{c}"/>'
+        for above, c, hz in sorted(alerts, key=lambda a: -a[0]))
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!--
   {comment}
@@ -245,19 +277,22 @@ def face(gid, comment, channel, unit, vmax, major, minor, red_from, caption, ico
 
   <peak color="{AMBER}" length="{BAND_W + 4}" width="5" value-y="{PEAK_Y}" font="montserrat_20" format="{fmt}"/>
   <trend y="{TREND_Y}" width="{TREND_W}" height="{TREND_H}" line-width="3" color="{NEEDLE}"/>
-  <alert above="{num(red_from)}" flash-hz="2" color="{RED}"/>
+{alert_xml}
 </gauge>
 """
 
 
 BOOST = dict(gid="boost", comment="Boost gauge, 0-30 PSI, redline from 26 as on the obd-display boost dial.",
-             channel="boost", unit="psi", vmax=30, major=5, minor=1, red_from=26, caption="PSI", icon=TURBO_ICON,
+             channel="boost", unit="psi", vmax=30, major=5, minor=1, zones=[(26, RED_ART)], alerts=[(26, RED, 2)], caption="PSI", icon=TURBO_ICON,
              damping="0.15", fmt="%.0f",
              # Numerals at ~0.8 R, as on the tacho, pulled in far enough to clear the pointers at 3
              # and 9 o'clock, where a number is set sideways to the radius.
              label_font="montserrat_32", label_r=172)
-EGT = dict(gid="egt", comment="Exhaust gas temperature gauge, 0-900 C, redline from 750.",
-           channel="egt", unit="C", vmax=900, major=150, minor=50, red_from=750, caption="°C", icon=EGT_ICON,
+EGT = dict(gid="egt", comment="Exhaust gas temperature gauge, 0-900 C: yellow from 380, orange from 440, red above 500.",
+           channel="egt", unit="C", vmax=900, major=150, minor=50, # Caution from 380, warning from 440, and red above 500 °C:
+           # steady yellow and orange, flashing red.
+           zones=[(380, YELLOW_ART), (440, ORANGE_ART), (500, RED_ART)],
+           alerts=[(380, YELLOW, 0), (440, ORANGE, 0), (500, RED, 2)], caption="°C", icon=EGT_ICON,
            damping="0.25", fmt="%.0f",
            # Three-digit numbers: the tacho only ever has one, so a size down to keep the same clearance.
            label_font="montserrat_26", label_r=166)

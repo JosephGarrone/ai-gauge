@@ -37,10 +37,10 @@ export function stepSim(m, st, raw, dtMs) {
     // Peak-hold follows the undamped (but clamped) value.
     if (m.peak && (st.peak === null || target > st.peak)) st.peak = target;
 
-    // evaluate_alerts(): only a change between "some alert" and "none" does anything.
+    // evaluate_alerts(): a change of alert, including a handover from one to the next.
     const idx = m.alerts.findIndex((a) => firing(a, st.displayed));
     const active = idx >= 0;
-    if (active !== st.alertActive) {
+    if (idx !== st.activeIdx || active !== st.alertActive) {
         st.alertActive = active;
         st.activeIdx = idx;
         const hz = active ? m.alerts[idx].flashHz : 0;

@@ -1313,7 +1313,11 @@ static void trend_draw_cb(lv_event_t *e)
         lv_draw_image(layer, &img, &a);
     }
 
-    /* The alert thresholds, dashed, over the fill and under the trace. */
+    /*
+     * The first `above` alert in the range, dashed, over the fill and under the trace. Alerts are
+     * listed highest-priority first, so that is the redline; stepped zones below it (EGT's yellow
+     * and orange) would stack lines a few pixels apart, which reads as noise at a glance.
+     */
     if (c->trend.alert_marks) {
         for (uint8_t i = 0; i < c->alert_count; i++) {
             const gauge_alert_t *al = &c->alerts[i];
@@ -1329,6 +1333,7 @@ static void trend_draw_cb(lv_event_t *e)
             ln.p1         = (lv_point_precise_t){.x = a.x1, .y = y};
             ln.p2         = (lv_point_precise_t){.x = a.x2, .y = y};
             lv_draw_line(layer, &ln);
+            break;
         }
     }
 
@@ -1556,8 +1561,13 @@ static void evaluate_alerts(gauge_render_t *g)
         }
     }
 
+    /*
+     * Act on a change of alert, not only on "some alert" against "none": stepped zones (EGT's
+     * yellow, orange, red) hand over from one alert to the next without clearing in between, and
+     * the needle, icon and flash rate must follow. Before 2026-11-27 only the readout did.
+     */
     bool active = (idx >= 0);
-    if (active == g->alert_active) {
+    if (idx == g->active_alert_idx && active == g->alert_active) {
         return;
     }
     g->alert_active = active;
