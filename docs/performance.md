@@ -513,10 +513,24 @@ day, rear board attached, three boots, all identical within a few ms:
 | Internal free at `running` (splash still up) | 21,455 B, largest DMA block 13,312 B |
 | Internal free once the splash has gone (`/api/status`, 15 s uptime) | 26,743 B; lowest since boot 19,227 B |
 
+### The glance-sized dial, 2026-11-27
+
+[ADR 0014](adr/0014-glanceable-burn-in-aware-dial.md): 80 px digits-only readout, `<trend>`
+sparkline (60 s window), dimmed artwork. Board on USB at the desk, rear sensor board attached,
+simulated sweep driving the EGT face, WiFi trying to connect, nobody touching the screen:
+
+| Window | fps | Dirty | Render |
+|---|---|---|---|
+| Steady state, 5 s windows over ~40 s | **66.4–66.9** | 5.1–5.2% (max box 24,616 px) | 3.36–3.41 ms mean, 6.9 ms max |
+| A window with one full-screen repaint in it | 66.4 | 5.4% (max 217,156 px) | 3.50 ms mean, 37.0 ms max |
+
+The full-screen repaint is what a pixel-shift step costs: one long frame, no change to the window's
+rate. Internal free at `running`: 20,771 B, largest DMA block 12,800 B. Below the 13.2% / 5.9 ms of
+the original gate because whole-number readouts change less often than `%.1f` ones.
+
 ### Not yet measured
-- The 2026-11-27 dial changes ([ADR 0014](adr/0014-glanceable-burn-in-aware-dial.md)): the
-  80 px readout, the trend strip repainting at 30 s, and a pixel-shift step. The gauge was in the car
-  when they were built.
+- A pixel-shift step on its own, and the trend at its 30 s window (the measurement below used the
+  60 s default).
 - Scenarios 1, 3 and 6.
 - Scenario 2 with a custom needle shape (above).
 
