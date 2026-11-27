@@ -375,8 +375,10 @@ handled directly by the project owner during layout. Q7 (speaker) is out of scop
 
 - [x] Q1: header pins 6/7/8 = GPIO16/17/18 (confirmed by project owner; matches the upstream schematic)
 - [x] The JRP leads use JST PA plugs (project owner, 2026-11-23)
-- [ ] Before ordering: plug a JRP lead into a real PA header and confirm position 1 lands on JST's
-  circuit-1 pin. If J3 is laid out backwards, the MAP sensor gets 5V and GND swapped
+- [x] Pin 1 orientation: v0.1 (XA) wired correctly in the car, and the PA/PH footprints keep its
+  placement and rotation (180°) with pin 1 in the same spot, so v0.2 inherits it (owner, 2026-11-27)
+- [ ] Mounting holes H1–H3 have not been checked against the display or housing; the owner adapts
+  the 3D-printed parts to the board (2026-11-27)
 - [ ] Before ordering, ideally: 12V from a current-limited bench supply on a v0.1 board. Its power
   stage (fuse, TVS, reverse-polarity diode, buck, U2) is the same circuit as v0.2's
 - [ ] Harness: identify the EGT probe's + and − leads (type K negative is magnetic) and wire them to
