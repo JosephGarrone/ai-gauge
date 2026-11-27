@@ -246,7 +246,7 @@ typedef struct {
         gauge_color_t color;         /**< The trace. */
         bool          has_fill;      /**< False: a line only, no fill (the default). */
         gauge_color_t fill;          /**< Under the trace. */
-        bool          alert_marks;   /**< A dashed line at each `above` alert, in its colour. */
+        bool          alert_colors;  /**< The trace takes the colour of the alert its value would fire. */
     } trend;
 
     /* --- <alert> --- */

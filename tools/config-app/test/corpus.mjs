@@ -102,7 +102,7 @@ export const CASES = {
 `,
     peak: doc('<peak color="#00ff00" length="30" width="6" show-value="false" value-y="380" format="%.0f" prefix="MAX "/>'),
     barePeak: doc('<peak/>'),
-    trend: doc('<trend x="120" y="380" width="220" height="40" line-width="2" color="#00ff00" fill="#003300" alert-marks="false"/>'),
+    trend: doc('<trend x="120" y="380" width="220" height="40" line-width="2" color="#00ff00" fill="#003300" alert-colors="false"/>'),
     bareTrend: doc('<trend/>'),
     icon: doc('<icon x="200" y="170" color="#8f9aa0"><circle r="15"/><circle r="11" color="#000000"/><polygon points="0,-15 22,-15 22,-8 0,-8"/></icon>'),
     iconRepeated: doc('<icon y="10"><circle r="3"/></icon><icon y="20"/><icon><polygon points="0,0 1,0"/></icon>'),
@@ -246,7 +246,7 @@ export function randomDocuments(count, seed = 1) {
         () => `<readout ${attrs([['x', num], ['y', num], ['font', font], ['format', fmt], ['prefix', text], ['suffix', text], ['color', colour]])}/>`,
         () => `<peak ${attrs([['color', colour], ['length', num], ['width', num], ['show-value', bool], ['value-y', num], ['font', font], ['format', fmt], ['prefix', text]])}/>`,
         () => (r() < 0.3 ? `<icon ${attrs([['x', num], ['y', num], ['color', colour]])}/>` : `<icon ${attrs([['x', num], ['y', num], ['color', colour]])}>${part()}${part()}</icon>`),
-        () => `<trend ${attrs([['x', num], ['y', num], ['width', num], ['height', num], ['line-width', num], ['color', colour], ['fill', colour], ['alert-marks', bool]])}/>`,
+        () => `<trend ${attrs([['x', num], ['y', num], ['width', num], ['height', num], ['line-width', num], ['color', colour], ['fill', colour], ['alert-colors', bool]])}/>`,
         () => `<alert ${attrs([['above', num], ['below', num], ['color', colour], ['flash-hz', num], ['chime', bool]])}/>`,
         () => pick(['<!-- note -->', '<unknown a="1"/>', slot('hub'), part(), '</needle>', '</ticks>']),
     ];

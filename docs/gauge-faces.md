@@ -55,7 +55,8 @@ What was carried over, measured on the photo as fractions of the ring's outer ra
   (centre 342), and the peak figure, when the user turns it on, 20 px at y 356. Nothing on the dial
   is smaller than the numerals except that optional peak figure.
 - **A sparkline** (`<trend>`, 200 × 50 px at y 378) fills the gap under the dial: the reading over
-  the last 30/60/120 s across the face's range, with the redline dashed.
+  the last 30/60/120 s across the face's range, its line coloured by zone (cyan, then yellow,
+  orange or red where the reading was in that zone).
 - **EGT zones** (2026-11-27, the owner's limits): yellow from 380 °C, orange from 440, red above
   500, on the ring and pointers and as alerts. Yellow and orange are steady; red flashes. The
   needle, readout and icon take the zone's colour. Ring colours are dimmed to 80% like the

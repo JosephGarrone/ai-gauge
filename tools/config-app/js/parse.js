@@ -603,7 +603,7 @@ function parseTrend(r, tag, m) {
     t.height = r.px(tag, 'height', t.height, 'trend');
     t.lineWidth = r.px(tag, 'line-width', t.lineWidth, 'trend');
     t.color = r.color(tag, 'color', t.color, 'trend color');
-    t.alertMarks = r.bool(tag, 'alert-marks') ?? t.alertMarks;
+    t.alertColors = r.bool(tag, 'alert-colors') ?? t.alertColors;
     t.fill = r.color(tag, 'fill', t.fill, 'trend fill');
     // One column per pixel, in a buffer sized for the panel.
     if (t.width < LIMITS.trendMinPx) {

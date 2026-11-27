@@ -137,7 +137,8 @@ struct gauge_render_t {
     uint32_t       trend_col_ms;
     uint32_t       trend_col_start;
     uint8_t       *trend_fill_cov;  /**< PSRAM, trend_w x trend_h. NULL: no fill (the default). */
-    uint8_t       *trend_line_cov;  /**< PSRAM, trend_w x trend_h. */
+    uint8_t       *trend_line_buf;  /**< PSRAM, RGB565A8: the trace's colours, then its coverage. */
+    uint8_t       *trend_line_cov;  /**< The coverage plane inside trend_line_buf. */
     lv_image_dsc_t trend_fill_img;
     lv_image_dsc_t trend_line_img;
     lv_color_t     trend_fill_color;
@@ -1238,7 +1239,25 @@ static void cov_span(uint8_t *cov, int32_t w, int32_t h, int32_t x, float y0, fl
 }
 
 /*
- * Rebuild both masks from the ring. Newest column at the right edge. ~10 KB of writes per mask,
+ * The trace's colour at a value: the first alert that would fire there (EGT's yellow, orange or
+ * red zone), or the trace colour. Same order as evaluate_alerts(), so it matches the needle.
+ */
+static uint16_t trend_color_at(const gauge_render_t *g, float v)
+{
+    const gauge_config_t *c = &g->cfg;
+    if (c->trend.alert_colors) {
+        for (uint8_t i = 0; i < c->alert_count; i++) {
+            const gauge_alert_t *a = &c->alerts[i];
+            if ((a->has_above && v > a->above) || (a->has_below && v < a->below)) {
+                return lv_color_to_u16(to_lv(a->color));
+            }
+        }
+    }
+    return lv_color_to_u16(to_lv(c->trend.color));
+}
+
+/*
+ * Rebuild the trace (and fill) from the ring. Newest column at the right edge. ~30 KB of writes,
  * at most a few times a second: far cheaper than drawing 200 primitives per repaint.
  */
 static void trend_rasterise(gauge_render_t *g)
@@ -1270,6 +1289,12 @@ static void trend_rasterise(gauge_render_t *g)
         float lo = have_prev ? fminf(prev_y, y) : y;
         float hi = have_prev ? fmaxf(prev_y, y) : y;
         cov_span(g->trend_line_cov, w, h, x, lo - hw, hi + hw);
+        /* Each column of the trace in its value's zone colour. */
+        uint16_t  col = trend_color_at(g, v);
+        uint16_t *rgb = (uint16_t *)g->trend_line_buf;
+        for (int32_t yy = 0; yy < h; yy++) {
+            rgb[yy * w + x] = col;
+        }
         prev_y    = y;
         have_prev = true;
 
@@ -1313,33 +1338,11 @@ static void trend_draw_cb(lv_event_t *e)
         lv_draw_image(layer, &img, &a);
     }
 
-    /*
-     * The first `above` alert in the range, dashed, over the fill and under the trace. Alerts are
-     * listed highest-priority first, so that is the redline; stepped zones below it (EGT's yellow
-     * and orange) would stack lines a few pixels apart, which reads as noise at a glance.
-     */
-    if (c->trend.alert_marks) {
-        for (uint8_t i = 0; i < c->alert_count; i++) {
-            const gauge_alert_t *al = &c->alerts[i];
-            if (!al->has_above || al->above <= c->source.min || al->above >= c->source.max) {
-                continue;
-            }
-            int32_t y = a.y1 + (int32_t)lroundf(trend_y(g, al->above));
-            lv_draw_line_dsc_init(&ln);
-            ln.color      = to_lv(al->color);
-            ln.width      = 2;
-            ln.dash_width = 6;
-            ln.dash_gap   = 6;
-            ln.p1         = (lv_point_precise_t){.x = a.x1, .y = y};
-            ln.p2         = (lv_point_precise_t){.x = a.x2, .y = y};
-            lv_draw_line(layer, &ln);
-            break;
-        }
-    }
-
-    img.src     = &g->trend_line_img;
-    img.recolor = to_lv(c->trend.color);
-    lv_draw_image(layer, &img, &a);
+    /* The trace carries its own colours (RGB565A8), so no recolour. */
+    lv_draw_image_dsc_t line;
+    lv_draw_image_dsc_init(&line);
+    line.src = &g->trend_line_img;
+    lv_draw_image(layer, &line, &a);
 
     /* The newest reading, as a dot the eye can find at a glance. */
     if (g->trend_head_valid) {
@@ -1422,7 +1425,8 @@ static void trend_create(gauge_render_t *g, lv_obj_t *parent)
     }
 
     g->trend_cols     = heap_caps_malloc(sizeof(float) * (size_t)w, MALLOC_CAP_SPIRAM);
-    g->trend_line_cov = heap_caps_malloc((size_t)w * h, MALLOC_CAP_SPIRAM);
+    g->trend_line_buf = heap_caps_calloc((size_t)w * h, 3, MALLOC_CAP_SPIRAM);
+    g->trend_line_cov = (g->trend_line_buf != NULL) ? g->trend_line_buf + (size_t)w * h * 2 : NULL;
     if (c->trend.has_fill) {
         g->trend_fill_cov = heap_caps_malloc((size_t)w * h, MALLOC_CAP_SPIRAM);
     }
@@ -1444,7 +1448,10 @@ static void trend_create(gauge_render_t *g, lv_obj_t *parent)
         g->trend_fill_color = to_lv(c->trend.fill);
         trend_init_img(&g->trend_fill_img, g->trend_fill_cov, w, h);
     }
-    trend_init_img(&g->trend_line_img, g->trend_line_cov, w, h);
+    trend_init_img(&g->trend_line_img, g->trend_line_buf, w, h);
+    g->trend_line_img.header.cf     = LV_COLOR_FORMAT_RGB565A8;
+    g->trend_line_img.header.stride = (uint32_t)(w * 2);
+    g->trend_line_img.data_size     = (uint32_t)(w * h * 3);
 
     g->trend = lv_obj_create(parent);
     if (g->trend == NULL) {
@@ -1860,7 +1867,7 @@ void gauge_render_destroy(gauge_render_t *g)
     free(g->raster_acc);
     free(g->trend_cols);
     free(g->trend_fill_cov);
-    free(g->trend_line_cov);
+    free(g->trend_line_buf);
     free(g->face_buf);
     free(g);
 }

@@ -196,7 +196,7 @@ export function serializeGauge(m) {
             ['line-width', t.lineWidth],
             ['color', t.color],
             ['fill', t.fill],
-            ['alert-marks', 'false', !t.alertMarks],
+            ['alert-colors', 'false', !t.alertColors],
         ])}/>`);
     }
 

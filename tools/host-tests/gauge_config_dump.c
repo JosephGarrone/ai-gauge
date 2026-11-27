@@ -268,7 +268,7 @@ static void dump(const gauge_config_t *c)
         } else {
             printf("null");
         }
-        printf(",\"alertMarks\":%s}", c->trend.alert_marks ? "true" : "false");
+        printf(",\"alertColors\":%s}", c->trend.alert_colors ? "true" : "false");
     } else {
         printf("null");
     }

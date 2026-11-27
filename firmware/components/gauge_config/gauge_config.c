@@ -495,7 +495,7 @@ void gauge_config_set_defaults(gauge_config_t *cfg)
     cfg->trend.height_px     = 50;
     cfg->trend.line_width_px = 3;
     cfg->trend.color         = (gauge_color_t){0x17, 0xca, 0xff};
-    cfg->trend.alert_marks   = true;
+    cfg->trend.alert_colors   = true;
 }
 
 /* --------------------------------------------------------------- element parsers ---- */
@@ -933,7 +933,7 @@ static void parse_trend(const xml_tag_t *tag, gauge_config_t *cfg)
     attr_px(tag, "height", &cfg->trend.height_px, &cfg->warning_count);
     attr_px(tag, "line-width", &cfg->trend.line_width_px, &cfg->warning_count);
     attr_color(tag, "color", &cfg->trend.color, &cfg->warning_count);
-    attr_bool(tag, "alert-marks", &cfg->trend.alert_marks);
+    attr_bool(tag, "alert-colors", &cfg->trend.alert_colors);
 
     const char *val;
     size_t      len;

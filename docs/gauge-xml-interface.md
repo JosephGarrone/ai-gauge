@@ -283,7 +283,7 @@ A sparkline of recent readings. Omit it and there is none. The history length is
 | `line-width` | int | `3` | |
 | `color` | colour | `#17caff` | Trace; the baseline is this at 30% |
 | `fill` | colour | none | Fill under the trace; omit for a line only |
-| `alert-marks` | bool | `true` | Dashed line at the first `above` alert strictly inside the range |
+| `alert-colors` | bool | `true` | Colour each column of the trace by the first alert that holds at its value; `false` keeps `color` throughout |
 
 ### `<alert>` — 0–4
 

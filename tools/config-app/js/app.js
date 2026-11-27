@@ -660,7 +660,7 @@ const INSPECTORS = {
             row(
                 form.color('Trace', () => t().color, (v) => { t().color = v; }),
                 form.color('Fill', () => t().fill, (v) => { t().fill = v; }, { optional: true, inherited: () => '#000000', help: 'Unticked: a line only, which reads best at a glance.' })),
-            form.checkbox('Mark the alert thresholds', () => t().alertMarks, (v) => { t().alertMarks = v; }),
+            form.checkbox('Colour the line by alert zone', () => t().alertColors, (v) => { t().alertColors = v; }),
         ];
     },
 

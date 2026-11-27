@@ -544,18 +544,18 @@ static void test_trend(void)
     CHECK(cfg.trend.present && cfg.trend.x == INT16_MIN && cfg.trend.y == INT16_MIN, "auto position");
     CHECK(cfg.trend.width_px == 200 && cfg.trend.height_px == 50 && cfg.trend.line_width_px == 3,
           "default size");
-    CHECK(!cfg.trend.has_fill && cfg.trend.alert_marks, "derived fill, marks on");
+    CHECK(!cfg.trend.has_fill && cfg.trend.alert_colors, "no fill, alert colours on");
     CHECK(cfg.warning_count == 0, "unexpected warnings: %u", cfg.warning_count);
 
     CHECK(gauge_config_parse("<gauge version=\"1\" id=\"t\"><source channel=\"c\" min=\"0\" "
                              "max=\"10\"/><trend x=\"120\" y=\"380\" width=\"220\" height=\"40\" "
                              "line-width=\"2\" color=\"#00ff00\" fill=\"#003300\" "
-                             "alert-marks=\"false\"/></gauge>", 0, &cfg) == GAUGE_CONFIG_OK,
+                             "alert-colors=\"false\"/></gauge>", 0, &cfg) == GAUGE_CONFIG_OK,
           "trend should parse");
     CHECK(cfg.trend.x == 120 && cfg.trend.y == 380 && cfg.trend.width_px == 220 &&
               cfg.trend.height_px == 40 && cfg.trend.line_width_px == 2, "geometry");
     CHECK(cfg.trend.has_fill && cfg.trend.fill.g == 0x33, "fill");
-    CHECK(!cfg.trend.alert_marks, "alert-marks=false");
+    CHECK(!cfg.trend.alert_colors, "alert-colors=false");
 
     /* Too small or too wide is clamped, and counted. */
     CHECK(gauge_config_parse("<gauge version=\"1\" id=\"t\"><source channel=\"c\" min=\"0\" "

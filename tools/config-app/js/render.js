@@ -209,7 +209,7 @@ function mixBlack(hex, pct) {
 
 /*
  * The sparkline strip, with a made-up history: the device fills it from live readings, so the
- * preview shows the shape it will take, across the face's own range, with the alert marks.
+ * preview shows the shape it will take, across the face's own range, with the trace coloured by alert zone.
  */
 export function renderTrend(m) {
     if (!m.trend) return '';
@@ -227,22 +227,28 @@ export function renderTrend(m) {
         const u = i / Math.max(1, w - 1);
         const f = 0.1 + 0.45 * Math.exp(-(((u - 0.35) / 0.08) ** 2)) + 0.65 * Math.exp(-(((u - 0.78) / 0.07) ** 2)) +
             0.35 * Math.exp(-(((u - 1) / 0.05) ** 2));
-        pts.push([x + i, yOf(m.source.min + Math.min(1, f) * span)]);
+        const v = m.source.min + Math.min(1, f) * span;
+        pts.push([x + i, yOf(v), v]);
     }
+    // trend_color_at(): the first alert that would fire at the value, else the trace colour.
+    const colorAt = (v) => (t.alertColors ? m.alerts.find((a) => (a.above !== null && v > a.above) ||
+        (a.below !== null && v < a.below))?.color : null) ?? t.color;
     const line = pts.map(([px, py]) => `${n(px)},${n(py)}`).join(' ');
     let out = `<g data-section="trend">` +
         `<line x1="${x}" y1="${y + h - 1}" x2="${x + w - 1}" y2="${y + h - 1}" stroke="${mixBlack(t.color, 30)}" stroke-width="2"/>` +
         (t.fill ? `<polygon points="${x},${y + h} ${line} ${x + w - 1},${y + h}" fill="${t.fill}"/>` : '');
-    if (t.alertMarks) {
-        for (const a of m.alerts) {
-            if (a.above === null || a.above <= m.source.min || a.above >= m.source.max) continue;
-            const ay = Math.round(yOf(a.above));
-            out += `<line x1="${x}" y1="${ay}" x2="${x + w - 1}" y2="${ay}" stroke="${a.color}" stroke-width="2" stroke-dasharray="6 6"/>`;
-            break; // the first (highest-priority) alert only, as gauge_render.c does
-        }
+    // One polyline per run of the same colour, each starting where the last ended.
+    let runs = '';
+    for (let i = 0; i < pts.length;) {
+        const c = colorAt(pts[i][2]);
+        let k = i;
+        while (k + 1 < pts.length && colorAt(pts[k + 1][2]) === c) k++;
+        const seg = pts.slice(Math.max(0, i - 1), k + 1).map(([px, py]) => `${n(px)},${n(py)}`).join(' ');
+        runs += `<polyline points="${seg}" fill="none" stroke="${c}" stroke-width="${lw}" stroke-linejoin="round"/>`;
+        i = k + 1;
     }
     const [hx, hy] = pts[pts.length - 1];
-    out += `<polyline points="${line}" fill="none" stroke="${t.color}" stroke-width="${lw}" stroke-linejoin="round"/>` +
+    out += runs +
         `<circle cx="${n(hx)}" cy="${n(hy)}" r="${lw + 2}" fill="${m.readout ? m.readout.color : '#ffffff'}"/></g>`;
     return out;
 }
