@@ -11,6 +11,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -56,6 +57,27 @@ typedef void (*net_svc_config_changed_cb_t)(const char *id, bool deleted);
  */
 typedef void (*net_svc_telemetry_cb_t)(const char *channel, float value);
 
+/**
+ * @brief The OBD Display's beacon arrived (docs/networking.md, "The OBD Display link").
+ *
+ * Called from the telemetry task, about once a second while a display is on the network. Same
+ * threading rule as above.
+ *
+ * @param bright The display panel's brightness, 0-100, or -1 if the beacon carried none.
+ */
+typedef void (*net_svc_link_beacon_cb_t)(int bright);
+
+/**
+ * @brief Writes the owner's part of a link report: JSON members, each starting with a comma, e.g.
+ *        `,"face":"boost","want":"boost","unit":"psi","boost":63.20`.
+ *
+ * Called from the telemetry task, ten times a second while beacons arrive. Must not touch LVGL.
+ *
+ * @return Bytes written, not counting the terminator. @p len or more means it did not fit, and
+ *         nothing is added.
+ */
+typedef size_t (*net_svc_link_report_cb_t)(char *buf, size_t len);
+
 /** A screen image for `GET /api/screenshot`. */
 typedef struct {
     uint16_t       width, height;
@@ -83,6 +105,10 @@ typedef struct {
 typedef struct {
     net_svc_config_changed_cb_t on_config_changed;
     net_svc_telemetry_cb_t      on_telemetry;
+
+    /* The OBD Display link. Either may be NULL. */
+    net_svc_link_beacon_cb_t    on_link_beacon;
+    net_svc_link_report_cb_t    link_report;
 
     /*
      * Remote control (CONFIG_AI_GAUGE_REMOTE_CONTROL). Called on the HTTP task; the owner does the

@@ -32,6 +32,7 @@ static const char *KEY_SHOW_PEAK  = "showpeak";
 static const char *KEY_TREND      = "trend";
 static const char *KEY_SHIFT      = "shift";
 static const char *KEY_ENGINE_OFF = "engoff";
+static const char *KEY_FOLLOW     = "follow";
 
 static app_settings_t s_settings = {
     /* Modest: AMOLED wear rises steeply with brightness. */
@@ -45,6 +46,7 @@ static app_settings_t s_settings = {
     .trend_window      = APP_SETTINGS_TREND_60S,
     .pixel_shift       = APP_SETTINGS_SHIFT_3MIN,
     .engine_off_screen = true,
+    .follow_display    = true,
     .active_gauge      = "boost",
 };
 
@@ -103,6 +105,9 @@ esp_err_t app_settings_init(void)
     }
     if (nvs_get_u8(h, KEY_ENGINE_OFF, &u8) == ESP_OK) {
         s_settings.engine_off_screen = (u8 != 0);
+    }
+    if (nvs_get_u8(h, KEY_FOLLOW, &u8) == ESP_OK) {
+        s_settings.follow_display = (u8 != 0);
     }
 
     size_t len = sizeof(s_settings.active_gauge);
@@ -211,6 +216,14 @@ void app_settings_set_engine_off_screen(bool on)
     }
 }
 
+void app_settings_set_follow_display(bool on)
+{
+    if (on != s_settings.follow_display) {
+        s_settings.follow_display = on;
+        s_dirty                   = true;
+    }
+}
+
 uint32_t app_settings_trend_seconds(app_settings_trend_t w)
 {
     static const uint16_t k_seconds[APP_SETTINGS_TREND_COUNT] = {30, 60, 120};
@@ -277,6 +290,9 @@ esp_err_t app_settings_commit(void)
     }
     if (err == ESP_OK) {
         err = nvs_set_u8(h, KEY_ENGINE_OFF, s_settings.engine_off_screen ? 1 : 0);
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_u8(h, KEY_FOLLOW, s_settings.follow_display ? 1 : 0);
     }
     if (err == ESP_OK) {
         err = nvs_commit(h);

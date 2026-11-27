@@ -152,9 +152,79 @@ the renderer also treats a non-finite value as invalid, because NaN would otherw
 damping filter for good. UDP is deliberate: telemetry is a stream of perishable
 values, so dropping a datagram is strictly better than delaying the stream to retransmit one.
 
-**Not yet implemented:** the staleness rule. If a feed stops, the needle currently holds its
-last value rather than going invalid. That belongs with the channel snapshot in `sensor_hub`
-(M5), and until then the simulated source also keeps driving the needle alongside any feed.
+A telemetry value drives the needle for one second (`TELEMETRY_FRESH_US` in `app_main.c`). After
+that the face's channel falls back to the next source in `value_timer_cb()`: `sensor_hub` if the
+channel is one of its own, otherwise the simulated sweep on a build that has it and no board yet,
+otherwise invalid.
+
+## The OBD Display link
+
+Decided in [ADR 0015](adr/0015-obd-display-link.md). Code: `net_svc_telemetry.c` (the protocol),
+`app_main.c` (`on_link_beacon`, `link_report`, `link_timer_cb`), `app_ui.c` (brightness). The other
+end is obd-display's `Services/Gauges/GaugeLinkService.cs` (its docs/desktop-app-architecture.md,
+"The gauge link"). **This section is the normative description of the protocol: change both ends
+and this section together.**
+
+The OBD Display (the Pi in the dash) and every gauge on the same network share data both ways,
+with nothing configured on either side:
+
+- **The display's beacon**, once a second, broadcast to every IPv4 network the display is on and
+  sent to each gauge it already knows, to the gauge's telemetry port (UDP 5005):
+
+  ```json
+  {"t":"obd","ver":1,"seq":7,"bright":62}
+  ```
+
+  `bright` is the display's panel brightness, 0-100, and is left out when the display does not
+  know it. A brightness change is sent at once (at most five beacons a second).
+- **The gauge's report**, to the beacon's source address and port (the display's UDP 5006), every
+  100 ms while a beacon has arrived in the last 5 s:
+
+  ```json
+  {"t":"gauge","ver":1,"host":"ai-gauge-91e8","fw":"1.2.0","face":"boost","want":"boost",
+   "unit":"psi","boost":63.20,"map":164.53,"egt":452.10,"ignition":13.92,
+   "sensor_supply":5.01,"cold_junction":31.20}
+  ```
+
+  `face` is the stored face on screen ("" for the built-in one). `want` and `unit` are its
+  `<source>` channel and unit. The sensor channels are `sensor_hub`'s, in its native units (kPa,
+  kPa, C, V, V, C), each present only while it has a valid, fresh reading. A string value never
+  contains a `"` or `\`: they are dropped from it, as is any byte outside printable ASCII, so a
+  unit of `°C` is sent as `C`.
+- **The display's values**: when `want` is one of the display's catalog ids (for example
+  `engine.coolant_temp`, `engine.rpm`, `gauge.egt` from another gauge), the display sends it to
+  this gauge, 20 times a second, as the ordinary telemetry frame above, converted to `unit` where
+  it recognises both units (pressure, temperature, speed, voltage):
+
+  ```json
+  {"ch":"engine.coolant_temp","v":88.5}
+  ```
+
+  It stops when its own reading goes stale, and a second later the face falls back as for any
+  lapsed feed (above). A `want` that is one of the gauge's own channels (`boost`, `egt`) is not a catalog id and
+  gets nothing; the sensors drive that face as before. So a face shows a value from the vehicle by
+  naming a catalog id in `<source channel>`: the ids are in obd-display's `signals.xml`.
+- **Brightness**: while beacons arrive and *Dim with OBD Display* is on (Settings → Display,
+  default on), the panel runs at the gauge's own brightness × the display's / 100, never below
+  `APP_SETTINGS_BRIGHTNESS_MIN`. So the gauge's own setting is its level when the display is at
+  full brightness, and it dims with the display at night. Five seconds after the last beacon the
+  gauge's own setting returns. The engine-off screen's dimming still wins.
+
+The beacon is how the gauge finds the display: the report goes back to wherever it came from, so
+neither side needs an address, mDNS or a fixed IP. The display runs a hotspot for the gauges in
+its *USB upstream* Wi-Fi mode; provision every gauge onto it (`OBD-Display`), so they are on the
+display's network in the car whatever else is in range. An old gauge drops beacons as malformed
+telemetry, and a display without the link sends nothing a new gauge must answer, so either end
+can be updated first.
+
+The telemetry task's stack moved to PSRAM with this (4KB, was 3KB of internal RAM), like the
+update task's: it never writes flash, and formatting the report's floats needs the room.
+
+**Not yet run on a board** (2026-11-27). Checked: the firmware builds; the frame parsing, on the
+host against the display's exact frames; the display's end against a scripted gauge on Windows.
+Owed: a gauge on the display's hotspot answering, its readings logged, a face driven by a catalog
+id, brightness following, and the internal heap and largest DMA block in the boot log against
+the last figures in [performance.md](performance.md).
 
 ## OTA
 
@@ -242,10 +312,12 @@ is recorded in [performance.md](performance.md) and [display-pipeline.md](displa
 - Captive-portal DNS redirect for the setup network.
 - Settings-page controls to disable WiFi and to forget credentials (`net_svc_forget_credentials()`
   exists but is not wired to the UI).
-- Telemetry staleness.
 - Authentication, TLS and signed OTA images. Updates from GitHub are fetched over verified TLS,
   but the image itself is not signed: whoever can publish a release on the repository can update
   every gauge that installs it.
+- The OBD Display link is unauthenticated like everything else here: anything on the network can
+  send a beacon (and so set the gauge's brightness, within its own setting) or values for the
+  face's channel, and receive the gauge's readings.
 - Remote control lets anyone on the network see the screen and operate it, including settings
   and "Reset network". `POST /api/input` needs no preflight, so a web page can send gestures too,
   blind. Turn off `CONFIG_AI_GAUGE_REMOTE_CONTROL` for builds where that matters.

@@ -91,11 +91,11 @@ static void sweep_start(lv_anim_t *a)
     set_opa(s.spark, LV_OPA_COVER);
 }
 
-/* v is 0..1000 of the user's brightness; squared, so the dip looks even to the eye. */
+/* v is 0..1000 of the panel's brightness; squared, so the dip looks even to the eye. */
 static void brightness_exec(void *var, int32_t v)
 {
     (void)var;
-    bsp_display_brightness_set((int)(app_settings_get()->brightness * v * v / 1000000));
+    bsp_display_brightness_set((int)(app_ui_panel_brightness() * v * v / 1000000));
 }
 
 static void brightness_anim(int32_t from, int32_t to, uint32_t delay_ms, uint32_t ms, lv_anim_completed_cb_t done)

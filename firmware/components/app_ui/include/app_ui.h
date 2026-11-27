@@ -195,6 +195,18 @@ void app_ui_set_warning(const char *text);
  */
 void app_ui_set_engine_running(bool running);
 
+/**
+ * @brief The OBD Display's panel brightness, 0-100, or -1 when no display is beaconing.
+ *
+ * While it is known and Follow display is on, the panel runs at the user's brightness scaled by it
+ * (app_ui_panel_brightness()), so the gauge dims with the display at night and the user's setting
+ * stays the daytime level. Call from the LVGL task.
+ */
+void app_ui_set_link_brightness(int percent);
+
+/** @brief The brightness the panel should be at now, before the engine-off screen's own dimming. */
+uint8_t app_ui_panel_brightness(void);
+
 #ifdef __cplusplus
 }
 #endif

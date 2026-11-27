@@ -521,6 +521,17 @@ static void engine_off_changed_cb(lv_event_t *e)
     app_ui_priv_apply_engine_off();
 }
 
+static void follow_changed_cb(lv_event_t *e)
+{
+    uint32_t idx = lv_buttonmatrix_get_selected_button(lv_event_get_target(e));
+    if (idx > 1) {
+        return;
+    }
+    app_settings_set_follow_display(idx == 1);
+    app_settings_commit();
+    app_ui_priv_apply_brightness();
+}
+
 static void build_display(lv_obj_t *p)
 {
     const app_settings_t *set = app_settings_get();
@@ -533,6 +544,9 @@ static void build_display(lv_obj_t *p)
     segmented(p, k_shift_map, (uint32_t)set->pixel_shift, shift_changed_cb);
     caption(p, "Dark when engine off");
     segmented(p, k_onoff_map, set->engine_off_screen ? 1 : 0, engine_off_changed_cb);
+    /* Dims with the OBD Display at night (docs/networking.md, "The OBD Display link"). */
+    caption(p, "Dim with OBD Display");
+    segmented(p, k_onoff_map, set->follow_display ? 1 : 0, follow_changed_cb);
 }
 
 /* ---- Gauge ---- */
@@ -1116,9 +1130,13 @@ static void brightness_cb(lv_event_t *e)
         lv_arc_set_value(arc, v);
     }
 
-    /* Applied while dragging, so the change is visible; flash is written once, on release. */
-    bsp_display_brightness_set((int)v);
+    /*
+     * Applied while dragging, so the change is visible; flash is written once, on release. Through
+     * the shared path, because while following the OBD Display this is the daytime level and the
+     * panel runs at it scaled by the display's brightness.
+     */
     app_settings_set_brightness((uint8_t)v);
+    app_ui_priv_apply_brightness();
     lv_label_set_text_fmt(g.bright_label, "%" PRId32 "%%", v);
     if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
         app_settings_commit();

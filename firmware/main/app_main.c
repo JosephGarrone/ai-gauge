@@ -484,6 +484,104 @@ static void on_telemetry(const char *channel, float value)
     taskEXIT_CRITICAL(&s_telemetry.lock);
 }
 
+/* ------------------------------------------------------------ OBD Display link ------ */
+
+/*
+ * The OBD Display link (docs/networking.md, "The OBD Display link"; ADR 0015). The network task
+ * records each beacon's brightness, and builds the reports from a copy of what the face shows that
+ * the LVGL task refreshes, so neither side waits on the other.
+ */
+#define LINK_FRESH_US (5 * 1000 * 1000)
+#define LINK_TICK_MS  500
+
+static struct {
+    portMUX_TYPE lock;
+    int          bright;   /* the last beacon's, -1 for none */
+    int64_t      beacon_at;
+    char         face[GAUGE_CONFIG_MAX_ID_LEN];
+    char         want[GAUGE_CONFIG_MAX_ID_LEN];
+    char         unit[GAUGE_CONFIG_MAX_UNIT_LEN];
+} s_link = {.lock = portMUX_INITIALIZER_UNLOCKED, .bright = -1};
+
+/* Runs on the network task. */
+static void on_link_beacon(int bright)
+{
+    taskENTER_CRITICAL(&s_link.lock);
+    s_link.bright    = bright;
+    s_link.beacon_at = esp_timer_get_time();
+    taskEXIT_CRITICAL(&s_link.lock);
+}
+
+/* Copies a string for a JSON value, dropping anything that would need escaping. */
+static void json_safe(char *dst, size_t len, const char *src)
+{
+    size_t i = 0;
+    for (; *src != '\0' && i + 1 < len; src++) {
+        if (*src >= 0x20 && *src != '"' && *src != '\\') {
+            dst[i++] = *src;
+        }
+    }
+    dst[i] = '\0';
+}
+
+/* The gauge's own sensor channels, in their native units (sensor_hub.h), for the display to log. */
+static const char *const k_link_channels[] = {"boost", "map", "egt", "ignition", "sensor_supply",
+                                              "cold_junction"};
+
+/* Runs on the network task: what the face shows, then each sensor channel with a valid reading. */
+static size_t link_report(char *buf, size_t len)
+{
+    char face[GAUGE_CONFIG_MAX_ID_LEN], want[GAUGE_CONFIG_MAX_ID_LEN], unit[GAUGE_CONFIG_MAX_UNIT_LEN];
+    taskENTER_CRITICAL(&s_link.lock);
+    memcpy(face, s_link.face, sizeof(face));
+    memcpy(want, s_link.want, sizeof(want));
+    memcpy(unit, s_link.unit, sizeof(unit));
+    taskEXIT_CRITICAL(&s_link.lock);
+
+    int n = snprintf(buf, len, ",\"face\":\"%s\",\"want\":\"%s\",\"unit\":\"%s\"", face, want, unit);
+    if (n < 0 || (size_t)n >= len) {
+        return len;
+    }
+    size_t used = (size_t)n;
+
+    for (size_t i = 0; i < sizeof(k_link_channels) / sizeof(k_link_channels[0]); i++) {
+        float v;
+        bool  valid = false;
+        if (!sensor_hub_read(k_link_channels[i], "", &v, &valid) || !valid || !isfinite(v)) {
+            continue;
+        }
+        n = snprintf(buf + used, len - used, ",\"%s\":%.2f", k_link_channels[i], (double)v);
+        if (n < 0 || (size_t)n >= len - used) {
+            break; /* leave the report without the channels that did not fit */
+        }
+        used += (size_t)n;
+    }
+    return used;
+}
+
+/*
+ * On the LVGL task: hands the display's brightness to the UI while beacons arrive (and takes it
+ * away once they stop, so the user's own brightness comes back), and refreshes the face copy.
+ */
+static void link_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+    char face[GAUGE_CONFIG_MAX_ID_LEN], want[GAUGE_CONFIG_MAX_ID_LEN], unit[GAUGE_CONFIG_MAX_UNIT_LEN];
+    json_safe(face, sizeof(face), s_active_id);
+    json_safe(want, sizeof(want), s_active_cfg->source.channel);
+    json_safe(unit, sizeof(unit), s_active_cfg->source.unit);
+
+    taskENTER_CRITICAL(&s_link.lock);
+    memcpy(s_link.face, face, sizeof(face));
+    memcpy(s_link.want, want, sizeof(want));
+    memcpy(s_link.unit, unit, sizeof(unit));
+    bool fresh  = s_link.beacon_at != 0 && esp_timer_get_time() - s_link.beacon_at < LINK_FRESH_US;
+    int  bright = fresh ? s_link.bright : -1;
+    taskEXIT_CRITICAL(&s_link.lock);
+
+    app_ui_set_link_brightness(bright);
+}
+
 /*
  * Firmware updates from the settings page. The firmware line is the control: a tap checks, and
  * once a newer release is known, a tap arms the install and a second tap within a few seconds
@@ -927,6 +1025,7 @@ void app_main(void)
 
     lv_timer_create(value_timer_cb, VALUE_TICK_MS, NULL);
     lv_timer_create(engine_timer_cb, ENGINE_TICK_MS, NULL);
+    lv_timer_create(link_timer_cb, LINK_TICK_MS, NULL);
 #if CONFIG_AI_GAUGE_SIMULATED_SOURCE
     ESP_LOGW(TAG, "the needle sweeps SIMULATED values until a sensor board answers");
 #endif
@@ -983,6 +1082,8 @@ void app_main(void)
     const net_svc_callbacks_t net_cb = {
         .on_config_changed = on_config_changed,
         .on_telemetry      = on_telemetry,
+        .on_link_beacon    = on_link_beacon,
+        .link_report       = link_report,
 #if CONFIG_AI_GAUGE_REMOTE_CONTROL
         .screenshot         = on_screenshot,
         .screenshot_release = on_screenshot_release,

@@ -58,6 +58,11 @@ channel, if it arrived in the last second. Then `sensor_hub`, once a board has a
 simulated sweep, if built in, until a board has answered. Otherwise the channel is invalid.
 `sensor_hub` publishes in native units (kPa, °C, V); the face's `unit` converts them.
 
+The same UDP socket carries the OBD Display link ([networking.md](networking.md#the-obd-display-link)):
+the display's beacon brings its panel brightness (handed to `app_ui` by `link_timer_cb` every
+500 ms), and the gauge answers it with its face's channel and its sensor readings. A face whose
+channel is a display catalog id is fed by the display as ordinary telemetry.
+
 ### The snapshot rule
 
 **`sensor_hub` and `net_svc` never call LVGL.** They publish into a small per-channel

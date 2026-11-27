@@ -43,8 +43,9 @@ with `tools/remote/gauge_remote.py`, masked to the round panel.
 | ![sensors raw](images/settings/sensors-raw.png) **Sensors, raw**: ADC codes, pin volts, reads per second, bus scan ([sensor-frontend.md](sensor-frontend.md)) | ![calibrate](images/settings/calibrate.png) **Calibrate**: ‹ › picks the parameter, − and + either side of the value (hold to repeat, saved on release), and *Zero boost now*, which reads *Units: bar / psi / kPa* on the pressure range |
 | ![network](images/settings/network.png) **Network**: connection details on separate lines, and *Reset network*, which takes two taps within 4 s | ![system](images/settings/system.png) **System**: firmware card (tap to check for updates, twice to install), FPS counter, frame rate, memory |
 
-**Display** has rotation, the frame-rate limit, *Pixel shift, every* (Off / 1m / 3m / 10m) and *Dark
-when engine off*. The FPS counter moved to System, beside the numbers it explains.
+**Display** has rotation, the frame-rate limit, *Pixel shift, every* (Off / 1m / 3m / 10m), *Dark
+when engine off* and *Dim with OBD Display* (on by default: the brightness arc is then the level
+at the display's full brightness; [networking.md](networking.md#the-obd-display-link)). The FPS counter moved to System, beside the numbers it explains.
 
 The Faces and Display screenshots predate the settings added on 2026-11-27, and both pages now
 scroll; retake them on hardware.

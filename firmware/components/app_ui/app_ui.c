@@ -78,6 +78,10 @@ static struct {
     lv_timer_t *shift_timer;   /**< Pixel shift; NULL when off. */
     uint8_t     shift_step;
 
+    /* The OBD Display's brightness (app_ui_set_link_brightness); link_bright_known false means none. */
+    bool        link_bright_known;
+    uint8_t     link_bright;
+
     /* Engine-off screen, on lv_layer_top(). Exists only while shown. */
     bool        engine_running;
     lv_obj_t   *off_screen;
@@ -305,7 +309,7 @@ static void off_screen_hide(void)
         s.off_screen = NULL;
         s.off_notice = NULL;
         lv_obj_remove_flag(s.tileview, LV_OBJ_FLAG_HIDDEN);
-        bsp_display_brightness_set(app_settings_get()->brightness);
+        bsp_display_brightness_set(app_ui_panel_brightness());
     }
 }
 
@@ -410,6 +414,37 @@ void app_ui_set_engine_running(bool running)
 void app_ui_priv_apply_engine_off(void)
 {
     app_ui_set_engine_running(s.engine_running);
+}
+
+uint8_t app_ui_panel_brightness(void)
+{
+    const app_settings_t *set  = app_settings_get();
+    int                   user = set->brightness;
+    if (!s.link_bright_known || !set->follow_display) {
+        return (uint8_t)user;
+    }
+    /* The user's setting is the level at the display's full brightness; it scales down from there. */
+    int v = user * s.link_bright / 100;
+    return (uint8_t)(v < APP_SETTINGS_BRIGHTNESS_MIN ? APP_SETTINGS_BRIGHTNESS_MIN : v);
+}
+
+void app_ui_priv_apply_brightness(void)
+{
+    if (s.off_screen == NULL) {
+        bsp_display_brightness_set(app_ui_panel_brightness());
+    }
+}
+
+void app_ui_set_link_brightness(int percent)
+{
+    bool    known = percent >= 0;
+    uint8_t value = known ? (uint8_t)(percent > 100 ? 100 : percent) : 0;
+    if (known == s.link_bright_known && value == s.link_bright) {
+        return;
+    }
+    s.link_bright_known = known;
+    s.link_bright       = value;
+    app_ui_priv_apply_brightness();
 }
 
 /* ------------------------------------------------------------------ dial ------------ */

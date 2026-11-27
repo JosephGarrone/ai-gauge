@@ -90,6 +90,7 @@ typedef struct {
     app_settings_trend_t     trend_window;       /**< Sparkline history. */
     app_settings_shift_t     pixel_shift;        /**< Burn-in protection. */
     bool                     engine_off_screen;  /**< Go dark with a drifting notice when the engine stops. */
+    bool                     follow_display;     /**< Scale brightness by the OBD Display's (docs/networking.md). */
     char    active_gauge[APP_SETTINGS_MAX_GAUGE_ID];
 } app_settings_t;
 
@@ -139,6 +140,9 @@ void app_settings_set_pixel_shift(app_settings_shift_t s);
 
 /** @brief Update whether the engine-off screen is used, in memory. */
 void app_settings_set_engine_off_screen(bool on);
+
+/** @brief Update whether brightness follows the OBD Display's, in memory. */
+void app_settings_set_follow_display(bool on);
 
 /** @brief Update the active gauge id in memory. */
 void app_settings_set_active_gauge(const char *id);

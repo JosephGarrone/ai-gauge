@@ -28,6 +28,9 @@ void app_ui_priv_apply_pixel_shift(void);
 /** The engine-off screen setting changed: leave the screen if it was just turned off. */
 void app_ui_priv_apply_engine_off(void);
 
+/** Set the panel to app_ui_panel_brightness(), unless the engine-off screen holds it dark. */
+void app_ui_priv_apply_brightness(void);
+
 /* ---- provided by app_ui_settings.c ---- */
 
 void settings_build(lv_obj_t *tile, const board_profile_t *board, const gauge_config_t *cfg);
