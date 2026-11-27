@@ -212,7 +212,7 @@ For driving and inspecting the UI without touching the gauge, by a person or an 
 Built in with `CONFIG_AI_GAUGE_REMOTE_CONTROL` (default on). Client:
 `tools/remote/gauge_remote.py HOST shot out.png | tap X Y | long X Y | swipe up | swipe X1 Y1 X2 Y2`.
 
-- **`GET /api/screenshot`**: `lv_snapshot_take()` of the active screen, rendered on the LVGL task
+- **`GET /api/screenshot`**: `lv_snapshot_take()` of the active screen (or of `lv_layer_top()` while the splash or engine-off screen covers it), rendered on the LVGL task
   (`app_ui_remote.c`) while the HTTP task waits. The result is sent as a top-down RGB565
   `BI_BITFIELDS` BMP, 434,378 bytes, in ~1 s. It costs one full-screen render, so don't poll it
   while measuring performance. It shows **what LVGL drew, not what reached the panel**: a

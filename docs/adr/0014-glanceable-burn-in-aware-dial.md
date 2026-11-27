@@ -1,7 +1,7 @@
 # ADR 0014: A glanceable, burn-in-aware dial
 
 **Status:** accepted, 2026-11-27. Flashed and measured on the bench board: 66.4–66.9 fps
-([performance.md](../performance.md)). The engine-off screen has not been seen with a real ignition feed.
+([performance.md](../performance.md)). The engine-off screen was checked on the bench, where the unpowered ignition input reads 0V: 20 repaints a second of the box only, 5.4 ms each. Not yet seen with a real ignition feed.
 
 ## Context
 
@@ -37,8 +37,11 @@ The owner also asked for a running chart of the last 30/60/120 s.
 6. **Burn-in:** the shipped faces' static artwork is drawn at 75% (`#b0b4b6`, redline `#cc2626`);
    **pixel shift** moves the whole dial tile around a 3 px orbit every 1/3/10 minutes (setting,
    default 3) with LVGL's translate style; and when the ignition feed stays below 12.9 V for 15 s,
-   an opaque **engine-off screen** on `lv_layer_top()` covers the dial at 3% brightness with an
-   "ENGINE OFF" notice that moves every 20 s. A tap shows the dial for a minute. No reading (no
+   an opaque **engine-off screen** on `lv_layer_top()` hides the dial and leaves the panel black
+   apart from a small bordered box, "DISPLAY OFF / saving the screen / tap to wake" in 20 px, that
+   drifts at 30 px/s and bounces off the round edge like an old DVD logo, changing border colour at
+   each bounce. It runs at the user's brightness capped at 40%, so it stays readable. A tap shows the
+   dial for a minute. No reading (no
    board, a fault) counts as running.
 
 ## Alternatives rejected
@@ -58,7 +61,9 @@ The owner also asked for a running chart of the last 30/60/120 s.
   Translating the tile keeps LVGL's coordinates honest; the renderer re-derives the needle and peak
   marker's cached screen positions (`gauge_render_parent_moved`).
 - **Turning the panel fully off with the engine off.** The owner wanted to see that the gauge is
-  alive; a 3% notice that keeps moving costs next to nothing in wear.
+  alive and why it is dark; a small box that never stops moving costs next to nothing in wear.
+- **A notice that jumps every 20 s, at 3% brightness** (the first version). Unreadable, and the
+  owner asked for the DVD-logo bounce instead.
 - **Dimming from the obd-display.** Wanted, but it depends on an in-vehicle network that is not
   designed yet.
 

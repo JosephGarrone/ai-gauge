@@ -172,8 +172,19 @@ typedef struct {
 static void snapshot_async_cb(void *arg)
 {
     snapshot_job_t *job = arg;
-    /* RGB565 is the display's own format, so this is the cheapest render and a direct BMP. */
-    job->buf = lv_snapshot_take(lv_screen_active(), LV_COLOR_FORMAT_RGB565);
+    /*
+     * RGB565 is the display's own format, so this is the cheapest render and a direct BMP.
+     * What sits on lv_layer_top() (the boot splash, the engine-off screen) covers the whole panel,
+     * so while it has anything showing, that is the picture.
+     */
+    lv_obj_t *top   = lv_layer_top();
+    bool      cover = false;
+    for (uint32_t i = 0; i < lv_obj_get_child_count(top); i++) {
+        if (!lv_obj_has_flag(lv_obj_get_child(top, (int32_t)i), LV_OBJ_FLAG_HIDDEN)) {
+            cover = true;
+        }
+    }
+    job->buf = lv_snapshot_take(cover ? top : lv_screen_active(), LV_COLOR_FORMAT_RGB565);
     xSemaphoreGive(job->done);
 }
 
