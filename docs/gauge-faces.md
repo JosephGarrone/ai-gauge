@@ -29,8 +29,8 @@ What was carried over, measured on the photo as fractions of the ring's outer ra
 
 | Feature | Tacho | Here |
 |---|---|---|
-| Scale ring | Thick off-white ring near the rim, broken at each half-major | 7 bands, 12 px (5.5% R), 1.4° gaps |
-| Redline | Ring turns red; pointers in it are red | Ring splits to `#ff3030` at the redline; `band-color` pointers |
+| Scale ring | Thick off-white ring near the rim, broken at each half-major | 7 bands, 12 px (5.5% R), 1.4° gaps, in `#b0b4b6` (dimmed, see below) |
+| Redline | Ring turns red; pointers in it are red | Ring splits to `#cc2626` at the redline; `band-color` pointers |
 | Major marks | Small inward triangle hanging off the ring, no line ticks | Custom major-tick shape: 13 px wide, 16 px deep |
 | Minor marks | Short bars off the ring between numerals | 2.5 × 6 px bars, every 1 psi / 50 °C; red in the redline |
 | Numerals | White, every major, ~0.8 R, single digits | `montserrat_32` at 172 px (boost); EGT's three-digit numbers use `montserrat_26` at 166 px to keep the same clearance |
@@ -40,10 +40,21 @@ What was carried over, measured on the photo as fractions of the ring's outer ra
 
 ### Deliberate departures
 
-- **The caption sits under the readout**, in `montserrat_16` and a muted `#8f9aa0`, not ~0.5 R
+- **The caption sits under the readout**, in `montserrat_22` and a muted `#8f9aa0`, not ~0.5 R
   above centre. Boost and EGT spend most of their time in the upper-left of the sweep, so a
   caption there was crossed by the needle constantly; below the hub it labels the number instead.
-  The lower half reads top-down as value, unit, peak.
+  The lower half reads top-down as value, unit, (peak, when turned on), sparkline.
+- **Sized for the A-pillar** (2026-11-27). The gauge is read at a glance from the driver's seat, so
+  the readout is an 80 px whole number (`montserrat_digits_80`, top at y 262), the caption 22 px
+  (centre 338), and the peak figure, when the user turns it on, 20 px at y 352. Nothing on the dial
+  is smaller than the numerals except that optional peak figure.
+- **A sparkline** (`<trend>`, 200 × 50 px at y 378) fills the gap under the dial: the reading over
+  the last 30/60/120 s across the face's range, with the redline dashed.
+- **Dimmed static artwork, against AMOLED burn-in** (2026-11-27). The ring, pointers and numerals
+  are `#b0b4b6`, 75% of the cluster's `#ebf0f2`, and the redline ring `#cc2626`, 80% of `#ff3030`.
+  Those pixels never move, so they wear while the black around them does not; the needle and
+  readout, which do move, stay at full brightness and lead the eye. Pixel shift does the rest
+  ([ADR 0014](adr/0014-glanceable-burn-in-aware-dial.md)).
 
 - **The needle stops at 180 px** rather than reaching the ring as on the tacho. That is the built-in
   needle's footprint, the size the 60fps budget was measured at, and the editor warns beyond it.
@@ -64,7 +75,8 @@ flash red at 2 Hz.
 
 ![boost](images/faces/boost.png) ![egt](images/faces/egt.png)
 
-Screenshots taken with `tools/remote/gauge_remote.py` while values were pushed over UDP telemetry;
+These screenshots predate the 2026-11-27 layout (bigger readout, sparkline, dimmed ring); retake
+them on hardware. Screenshots taken with `tools/remote/gauge_remote.py` while values were pushed over UDP telemetry;
 the green fps counter is the display overlay, stalled by the screenshot itself.
 
 ## Measured

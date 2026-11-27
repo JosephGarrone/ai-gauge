@@ -485,6 +485,14 @@ void gauge_config_set_defaults(gauge_config_t *cfg)
     snprintf(cfg->peak.font, sizeof(cfg->peak.font), "montserrat_16");
     snprintf(cfg->peak.format, sizeof(cfg->peak.format), "%%.1f");
     snprintf(cfg->peak.prefix, sizeof(cfg->peak.prefix), "PEAK ");
+
+    cfg->trend.x             = INT16_MIN; /* centre horizontally */
+    cfg->trend.y             = INT16_MIN; /* in the gap under the dial */
+    cfg->trend.width_px      = 200;
+    cfg->trend.height_px     = 50;
+    cfg->trend.line_width_px = 3;
+    cfg->trend.color         = (gauge_color_t){0x17, 0xca, 0xff};
+    cfg->trend.alert_marks   = true;
 }
 
 /* --------------------------------------------------------------- element parsers ---- */
@@ -912,6 +920,42 @@ static void parse_peak(const xml_tag_t *tag, gauge_config_t *cfg)
     attr_str(tag, "prefix", cfg->peak.prefix, sizeof(cfg->peak.prefix));
 }
 
+static void parse_trend(const xml_tag_t *tag, gauge_config_t *cfg)
+{
+    cfg->trend.present = true;
+
+    attr_coord(tag, "x", &cfg->trend.x, &cfg->warning_count);
+    attr_coord(tag, "y", &cfg->trend.y, &cfg->warning_count);
+    attr_px(tag, "width", &cfg->trend.width_px, &cfg->warning_count);
+    attr_px(tag, "height", &cfg->trend.height_px, &cfg->warning_count);
+    attr_px(tag, "line-width", &cfg->trend.line_width_px, &cfg->warning_count);
+    attr_color(tag, "color", &cfg->trend.color, &cfg->warning_count);
+    attr_bool(tag, "alert-marks", &cfg->trend.alert_marks);
+
+    const char *val;
+    size_t      len;
+    if (attr_find(tag, "fill", &val, &len)) {
+        if (parse_color(val, len, &cfg->trend.fill)) {
+            cfg->trend.has_fill = true;
+        } else {
+            cfg->warning_count++;
+        }
+    }
+
+    /* The renderer keeps one column per pixel, in a buffer sized for the panel. */
+    if (cfg->trend.width_px < GAUGE_CONFIG_TREND_MIN_PX) {
+        cfg->trend.width_px = GAUGE_CONFIG_TREND_MIN_PX;
+        cfg->warning_count++;
+    } else if (cfg->trend.width_px > GAUGE_CONFIG_TREND_MAX_W_PX) {
+        cfg->trend.width_px = GAUGE_CONFIG_TREND_MAX_W_PX;
+        cfg->warning_count++;
+    }
+    if (cfg->trend.height_px < GAUGE_CONFIG_TREND_MIN_PX) {
+        cfg->trend.height_px = GAUGE_CONFIG_TREND_MIN_PX;
+        cfg->warning_count++;
+    }
+}
+
 static void parse_alert(const xml_tag_t *tag, gauge_config_t *cfg)
 {
     if (cfg->alert_count >= GAUGE_CONFIG_MAX_ALERTS) {
@@ -1060,6 +1104,8 @@ gauge_config_err_t gauge_config_parse(const char *xml, size_t len, gauge_config_
             parse_readout(&tag, cfg);
         } else if (tag_is(&tag, "peak")) {
             parse_peak(&tag, cfg);
+        } else if (tag_is(&tag, "trend")) {
+            parse_trend(&tag, cfg);
         } else if (tag_is(&tag, "alert")) {
             parse_alert(&tag, cfg);
         }

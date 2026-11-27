@@ -169,6 +169,14 @@ The live numeric value. A separate LVGL label, not part of the background — se
 | `prefix`, `suffix` | string | `""` | Text either side of the number |
 | `color` | colour | `#ffffff` | |
 
+The user's readout settings override `format` on the gauge, for the readout, peak figure and
+min/max recall: pressure faces (unit `psi`, `kPa`, `bar`) show the chosen decimals (by default none
+for psi and kPa, one for bar), and temperature faces (unit `C`) show whole degrees, optionally
+rounded to 10. Faces in any other unit keep their own formats.
+
+`montserrat_digits_80` is a large readout font with only `0-9 . - +` and space: anything else in a
+prefix or suffix draws blank. Put the unit in a `<title>`.
+
 ### `<peak>` (0..1)
 
 A telltale marker that stays at the highest value reached, with an optional peak readout.
@@ -191,6 +199,33 @@ if the damped needle never quite reaches it.
 | `prefix` | string | `PEAK ` | Text before the peak value |
 
 Omit the element to disable peak-hold.
+
+Whether the peak **figure** shows is also a user setting on the gauge (off by default); the marker
+on the scale is unaffected by it.
+
+### `<trend>` (0..1)
+
+A sparkline of recent readings across the face's own `min`..`max`, newest on the right, with a dot
+on the newest reading. How much history it holds (30, 60 or 120 s) is a user setting on the gauge,
+not part of the face. One column per pixel: each holds the mean of the raw (undamped, clamped)
+readings in its slice of the window, and a column with no valid reading is a gap.
+
+It is drawn over the face and under the peak marker and needle, and repainted only when a column
+completes: under 7 times a second at 30 s with the default width, and under 2 at 120 s
+([display-pipeline.md](display-pipeline.md)).
+
+| Attribute | Type | Default | Meaning |
+|---|---|---|---|
+| `x` | int | centred | **Left edge** of the strip |
+| `y` | int | in the gap under the dial | **Top edge** of the strip. The default is `cy + 0.6 × cy` |
+| `width` | int | `200` | Clamped to 8..466 |
+| `height` | int | `50` | At least 8 |
+| `line-width` | int | `3` | The trace |
+| `color` | colour | `#17caff` | The trace. The baseline is this at 30% |
+| `fill` | colour | trace colour at 30% | Under the trace |
+| `alert-marks` | bool | `true` | A dashed line, in the alert's colour, at each `above` alert inside the range |
+
+Omit the element for no strip. Keep it within about 200 × 50 px: that is the size it was budgeted at.
 
 ### `<alert>` (0..4)
 

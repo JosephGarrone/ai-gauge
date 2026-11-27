@@ -114,7 +114,36 @@ struct gauge_render_t {
     lv_timer_t *recall_timer;
     gauge_render_alert_cb_t alert_cb;
     void                   *alert_cb_user;
+
+    /* The user's number preferences (gauge_render_set_number_format). */
+    char  num_format[GAUGE_CONFIG_MAX_FORMAT_LEN]; /**< "" = the face's own formats. */
+    float round_step;                              /**< 0 = no rounding. */
+    bool  peak_value_hidden;
+
+    /*
+     * Sparkline strip: one column per pixel of history, re-rasterised into two A8 masks whenever a
+     * column completes, and repainted only then. See docs/display-pipeline.md.
+     */
+    lv_obj_t      *trend;
+    lv_area_t      trend_area;      /**< The strip itself, parent-relative. */
+    int32_t        trend_w, trend_h;
+    float         *trend_cols;      /**< PSRAM ring of column means; NAN = no valid reading. */
+    uint16_t       trend_next;      /**< Ring slot the next column goes in. */
+    uint16_t       trend_count;
+    float          trend_sum;
+    uint32_t       trend_n;
+    uint32_t       trend_col_ms;
+    uint32_t       trend_col_start;
+    uint8_t       *trend_fill_cov;  /**< PSRAM, trend_w x trend_h. */
+    uint8_t       *trend_line_cov;  /**< PSRAM, trend_w x trend_h. */
+    lv_image_dsc_t trend_fill_img;
+    lv_image_dsc_t trend_line_img;
+    lv_color_t     trend_fill_color;
+    bool           trend_head_valid;
+    lv_point_t     trend_head;      /**< Newest point, strip-relative, for the dot. */
 };
+
+LV_FONT_DECLARE(lv_font_montserrat_digits_80)
 
 /* ------------------------------------------------------------------- helpers -------- */
 
@@ -160,6 +189,8 @@ static const lv_font_t *font_by_name(const char *name)
 #if LV_FONT_MONTSERRAT_48
         {"montserrat_48", &lv_font_montserrat_48},
 #endif
+        /* Digits, '.', '-', '+' and space only: tools/fonts/make_digits_font.py. */
+        {"montserrat_digits_80", &lv_font_montserrat_digits_80},
     };
 
     if (name != NULL && name[0] != '\0') {
@@ -862,6 +893,26 @@ static void update_needle(gauge_render_t *g)
     g->prev_valid = true;
 }
 
+/* ------------------------------------------------------------------ numbers -------- */
+
+/*
+ * Format a displayed number: in the user's format if one is set, otherwise the element's own, and
+ * rounded to the user's step first (EGT to the nearest 10 degrees).
+ */
+static void format_number(const gauge_render_t *g, const char *face_fmt, float v, char *out,
+                          size_t len)
+{
+    if (g->round_step > 0.0f) {
+        v = roundf(v / g->round_step) * g->round_step;
+    }
+    const char *fmt = (g->num_format[0] != '\0') ? g->num_format : face_fmt;
+    snprintf(out, len, fmt, (double)v);
+    /* "-0" reads as a fault at a glance; a value that rounds to zero is zero. */
+    if (strcmp(out, "-0") == 0 || strcmp(out, "-0.0") == 0 || strcmp(out, "-0.00") == 0) {
+        memmove(out, out + 1, strlen(out));
+    }
+}
+
 /* --------------------------------------------------------------------- peak --------- */
 
 static void peak_draw_cb(lv_event_t *e)
@@ -893,7 +944,7 @@ static void set_peak_label(gauge_render_t *g)
 
     char num[32];
     if (g->peak_valid) {
-        snprintf(num, sizeof(num), g->cfg.peak.format, (double)g->peak_value);
+        format_number(g, g->cfg.peak.format, g->peak_value, num, sizeof(num));
     } else {
         snprintf(num, sizeof(num), "--");
     }
@@ -909,6 +960,8 @@ static void set_peak_label(gauge_render_t *g)
  * Track the highest raw value and move the marker when it rises. The marker only repaints when
  * it lands on different pixels, so a value sitting below its peak costs nothing.
  */
+static void place_peak_marker(gauge_render_t *g);
+
 static void update_peak(gauge_render_t *g, float value, bool valid)
 {
     if (g->peak_marker == NULL || !valid) {
@@ -921,6 +974,13 @@ static void update_peak(gauge_render_t *g, float value, bool valid)
     g->peak_value = value;
     g->peak_valid = true;
     set_peak_label(g);
+    place_peak_marker(g);
+}
+
+/* Move the marker to peak_value, repainting only if it lands on different pixels. */
+static void place_peak_marker(gauge_render_t *g)
+{
+    float value = g->peak_value;
 
     lv_area_t pa;
     lv_obj_get_coords(g->parent, &pa);
@@ -982,7 +1042,7 @@ static void format_extreme(const gauge_render_t *g, char *out, size_t len, const
     char                  num[32];
 
     if (g->minmax_valid) {
-        snprintf(num, sizeof(num), c->readout.format, (double)value);
+        format_number(g, c->readout.format, value, num, sizeof(num));
     } else {
         snprintf(num, sizeof(num), "---");
     }
@@ -1035,7 +1095,7 @@ static void set_readouts_hidden(gauge_render_t *g, bool hidden)
         if (objs[i] == NULL) {
             continue;
         }
-        if (hidden) {
+        if (hidden || (objs[i] == g->peak_label && g->peak_value_hidden)) {
             lv_obj_add_flag(objs[i], LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_remove_flag(objs[i], LV_OBJ_FLAG_HIDDEN);
@@ -1097,6 +1157,271 @@ void gauge_render_reset_minmax(gauge_render_t *g)
     set_recall_label(g);
 }
 
+/* -------------------------------------------------------------------- trend -------- */
+
+static lv_color_t mix_black(gauge_color_t c, uint8_t pct)
+{
+    return lv_color_make((uint8_t)(c.r * pct / 100), (uint8_t)(c.g * pct / 100),
+                         (uint8_t)(c.b * pct / 100));
+}
+
+/* The strip's y for a value, as a float so the trace keeps sub-pixel position. */
+static float trend_y(const gauge_render_t *g, float v)
+{
+    float lw  = (float)g->cfg.trend.line_width_px;
+    float top = lw * 0.5f;
+    float bot = (float)g->trend_h - 1.0f - lw * 0.5f;
+    float t   = (v - g->cfg.source.min) / (g->cfg.source.max - g->cfg.source.min);
+    if (t < 0.0f) {
+        t = 0.0f;
+    } else if (t > 1.0f) {
+        t = 1.0f;
+    }
+    return bot - t * (bot - top);
+}
+
+/* Cover rows [y0, y1) of column x, with fractional coverage at both ends. */
+static void cov_span(uint8_t *cov, int32_t w, int32_t h, int32_t x, float y0, float y1)
+{
+    if (y0 < 0.0f) {
+        y0 = 0.0f;
+    }
+    if (y1 > (float)h) {
+        y1 = (float)h;
+    }
+    for (int32_t y = (int32_t)floorf(y0); y < h && (float)y < y1; y++) {
+        float a = fmaxf(y0, (float)y);
+        float b = fminf(y1, (float)(y + 1));
+        if (b <= a) {
+            continue;
+        }
+        uint32_t v = cov[y * w + x] + (uint32_t)lroundf((b - a) * 255.0f);
+        cov[y * w + x] = (uint8_t)(v > 255 ? 255 : v);
+    }
+}
+
+/*
+ * Rebuild both masks from the ring. Newest column at the right edge. ~10 KB of writes per mask,
+ * at most a few times a second: far cheaper than drawing 200 primitives per repaint.
+ */
+static void trend_rasterise(gauge_render_t *g)
+{
+    int32_t w  = g->trend_w;
+    int32_t h  = g->trend_h;
+    float   hw = (float)g->cfg.trend.line_width_px * 0.5f;
+
+    memset(g->trend_fill_cov, 0, (size_t)w * h);
+    memset(g->trend_line_cov, 0, (size_t)w * h);
+    g->trend_head_valid = false;
+
+    bool  have_prev = false;
+    float prev_y    = 0.0f;
+    for (uint16_t i = 0; i < g->trend_count; i++) {
+        uint16_t slot = (uint16_t)((g->trend_next + w - g->trend_count + i) % w);
+        int32_t  x    = w - g->trend_count + i;
+        float    v    = g->trend_cols[slot];
+        if (isnan(v)) {
+            have_prev = false;
+            continue;
+        }
+        float y = trend_y(g, v);
+        cov_span(g->trend_fill_cov, w, h, x, y, (float)h);
+        float lo = have_prev ? fminf(prev_y, y) : y;
+        float hi = have_prev ? fmaxf(prev_y, y) : y;
+        cov_span(g->trend_line_cov, w, h, x, lo - hw, hi + hw);
+        prev_y    = y;
+        have_prev = true;
+
+        g->trend_head       = (lv_point_t){.x = x, .y = (int32_t)lroundf(y)};
+        g->trend_head_valid = true;
+    }
+    if (!have_prev) {
+        g->trend_head_valid = false; /* the newest column is a gap: no dot */
+    }
+}
+
+static void trend_draw_cb(lv_event_t *e)
+{
+    gauge_render_t *g     = lv_event_get_user_data(e);
+    lv_layer_t     *layer = lv_event_get_layer(e);
+    const gauge_config_t *c = &g->cfg;
+    if (layer == NULL) {
+        return;
+    }
+
+    lv_area_t pa;
+    lv_obj_get_coords(g->parent, &pa);
+    lv_area_t a = g->trend_area;
+    lv_area_move(&a, pa.x1, pa.y1);
+
+    /* Baseline, so an empty strip still reads as a chart. */
+    lv_draw_line_dsc_t ln;
+    lv_draw_line_dsc_init(&ln);
+    ln.color = mix_black(c->trend.color, 30);
+    ln.width = 2;
+    ln.p1    = (lv_point_precise_t){.x = a.x1, .y = a.y2};
+    ln.p2    = (lv_point_precise_t){.x = a.x2, .y = a.y2};
+    lv_draw_line(layer, &ln);
+
+    lv_draw_image_dsc_t img;
+    lv_draw_image_dsc_init(&img);
+    img.src         = &g->trend_fill_img;
+    img.recolor     = g->trend_fill_color;
+    img.recolor_opa = LV_OPA_COVER;
+    lv_draw_image(layer, &img, &a);
+
+    /* The alert thresholds, dashed, over the fill and under the trace. */
+    if (c->trend.alert_marks) {
+        for (uint8_t i = 0; i < c->alert_count; i++) {
+            const gauge_alert_t *al = &c->alerts[i];
+            if (!al->has_above || al->above <= c->source.min || al->above >= c->source.max) {
+                continue;
+            }
+            int32_t y = a.y1 + (int32_t)lroundf(trend_y(g, al->above));
+            lv_draw_line_dsc_init(&ln);
+            ln.color      = to_lv(al->color);
+            ln.width      = 2;
+            ln.dash_width = 6;
+            ln.dash_gap   = 6;
+            ln.p1         = (lv_point_precise_t){.x = a.x1, .y = y};
+            ln.p2         = (lv_point_precise_t){.x = a.x2, .y = y};
+            lv_draw_line(layer, &ln);
+        }
+    }
+
+    img.src     = &g->trend_line_img;
+    img.recolor = to_lv(c->trend.color);
+    lv_draw_image(layer, &img, &a);
+
+    /* The newest reading, as a dot the eye can find at a glance. */
+    if (g->trend_head_valid) {
+        int32_t r = c->trend.line_width_px + 2;
+        lv_area_t d = {
+            .x1 = a.x1 + g->trend_head.x - r, .y1 = a.y1 + g->trend_head.y - r,
+            .x2 = a.x1 + g->trend_head.x + r, .y2 = a.y1 + g->trend_head.y + r,
+        };
+        lv_draw_rect_dsc_t rd;
+        lv_draw_rect_dsc_init(&rd);
+        rd.bg_color = c->readout.present ? to_lv(c->readout.color) : lv_color_white();
+        rd.bg_opa   = LV_OPA_COVER;
+        rd.radius   = LV_RADIUS_CIRCLE;
+        lv_draw_rect(layer, &rd, &d);
+    }
+}
+
+static void trend_reset(gauge_render_t *g)
+{
+    g->trend_count     = 0;
+    g->trend_next      = 0;
+    g->trend_sum       = 0.0f;
+    g->trend_n         = 0;
+    g->trend_col_start = lv_tick_get();
+    trend_rasterise(g);
+    lv_obj_invalidate(g->trend);
+}
+
+/* Add a sample to the current column; close the column, and repaint, once its time is up. */
+static void trend_sample(gauge_render_t *g, float value, bool valid)
+{
+    if (g->trend == NULL) {
+        return;
+    }
+    if (valid) {
+        g->trend_sum += value;
+        g->trend_n++;
+    }
+
+    uint32_t elapsed = lv_tick_elaps(g->trend_col_start);
+    if (elapsed < g->trend_col_ms) {
+        return;
+    }
+    /* Keep to the column grid, but don't try to catch up after a long stall. */
+    g->trend_col_start = (elapsed < 2 * g->trend_col_ms) ? g->trend_col_start + g->trend_col_ms
+                                                         : lv_tick_get();
+
+    g->trend_cols[g->trend_next] = (g->trend_n > 0) ? g->trend_sum / (float)g->trend_n : NAN;
+    g->trend_next = (uint16_t)((g->trend_next + 1) % g->trend_w);
+    if (g->trend_count < g->trend_w) {
+        g->trend_count++;
+    }
+    g->trend_sum = 0.0f;
+    g->trend_n   = 0;
+
+    trend_rasterise(g);
+    lv_obj_invalidate(g->trend);
+}
+
+static void trend_init_img(lv_image_dsc_t *img, uint8_t *cov, int32_t w, int32_t h)
+{
+    memset(img, 0, sizeof(*img));
+    img->header.magic  = LV_IMAGE_HEADER_MAGIC;
+    img->header.cf     = LV_COLOR_FORMAT_A8;
+    img->header.w      = (uint32_t)w;
+    img->header.h      = (uint32_t)h;
+    img->header.stride = (uint32_t)w;
+    img->data_size     = (uint32_t)(w * h);
+    img->data          = cov;
+}
+
+/* Builds the strip. A PSRAM shortfall leaves the gauge without it rather than failing the gauge. */
+static void trend_create(gauge_render_t *g, lv_obj_t *parent)
+{
+    const gauge_config_t *c = &g->cfg;
+    int32_t w = c->trend.width_px;
+    int32_t h = c->trend.height_px;
+    if (w > g->board->width_px) {
+        w = g->board->width_px;
+    }
+
+    g->trend_cols     = heap_caps_malloc(sizeof(float) * (size_t)w, MALLOC_CAP_SPIRAM);
+    g->trend_fill_cov = heap_caps_malloc((size_t)w * h, MALLOC_CAP_SPIRAM);
+    g->trend_line_cov = heap_caps_malloc((size_t)w * h, MALLOC_CAP_SPIRAM);
+    if (g->trend_cols == NULL || g->trend_fill_cov == NULL || g->trend_line_cov == NULL) {
+        ESP_LOGW(TAG, "no PSRAM for the trend strip; leaving it out");
+        return;
+    }
+
+    g->trend_w = w;
+    g->trend_h = h;
+    int32_t x  = (c->trend.x == INT16_MIN) ? g->cx - w / 2 : c->trend.x;
+    /* Auto: in the gap under a 270-degree dial, 0.6 of the way from centre to the panel edge. */
+    int32_t y  = (c->trend.y == INT16_MIN) ? g->cy + (int32_t)lroundf(0.6f * (float)g->cy)
+                                           : c->trend.y;
+    g->trend_area = (lv_area_t){.x1 = x, .y1 = y, .x2 = x + w - 1, .y2 = y + h - 1};
+
+    g->trend_fill_color = c->trend.has_fill ? to_lv(c->trend.fill) : mix_black(c->trend.color, 30);
+    trend_init_img(&g->trend_fill_img, g->trend_fill_cov, w, h);
+    trend_init_img(&g->trend_line_img, g->trend_line_cov, w, h);
+
+    g->trend = lv_obj_create(parent);
+    if (g->trend == NULL) {
+        return;
+    }
+    lv_obj_remove_style_all(g->trend);
+    lv_obj_remove_flag(g->trend, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(g->trend, LV_OBJ_FLAG_CLICKABLE);
+    /* Room for the dot, which may sit on the strip's edge. */
+    int32_t slack = c->trend.line_width_px + 4;
+    lv_obj_set_size(g->trend, w + 2 * slack, h + 2 * slack);
+    lv_obj_set_pos(g->trend, x - slack, y - slack);
+    lv_obj_add_event_cb(g->trend, trend_draw_cb, LV_EVENT_DRAW_MAIN, g);
+
+    gauge_render_set_trend_window(g, 60);
+}
+
+void gauge_render_set_trend_window(gauge_render_t *g, uint32_t seconds)
+{
+    if (g == NULL || g->trend == NULL || seconds == 0) {
+        return;
+    }
+    uint32_t ms = seconds * 1000u / (uint32_t)g->trend_w;
+    if (ms == g->trend_col_ms && g->trend_count > 0) {
+        return;
+    }
+    g->trend_col_ms = ms > 0 ? ms : 1;
+    trend_reset(g);
+}
+
 /* ------------------------------------------------------------------ readout --------- */
 
 static void update_readout(gauge_render_t *g)
@@ -1114,7 +1439,7 @@ static void update_readout(gauge_render_t *g)
     }
 
     char num[32];
-    snprintf(num, sizeof(num), c->readout.format, (double)g->displayed);
+    format_number(g, c->readout.format, g->displayed, num, sizeof(num));
 
     char text[96];
     snprintf(text, sizeof(text), "%s%s%s", c->readout.prefix, num, c->readout.suffix);
@@ -1256,6 +1581,11 @@ esp_err_t gauge_render_create(lv_obj_t *parent, const gauge_config_t *cfg,
     lv_obj_set_pos(g->face, 0, 0);
 
     render_face(g);
+
+    /* --- sparkline strip: over the face, under the needle --- */
+    if (cfg->trend.present) {
+        trend_create(g, parent);
+    }
 
     /* --- peak marker: under the needle, over the face --- */
     if (cfg->peak.present) {
@@ -1427,6 +1757,9 @@ void gauge_render_destroy(gauge_render_t *g)
     if (g->peak_marker != NULL) {
         lv_obj_delete(g->peak_marker);
     }
+    if (g->trend != NULL) {
+        lv_obj_delete(g->trend);
+    }
     if (g->hub != NULL) {
         lv_obj_delete(g->hub);
     }
@@ -1440,6 +1773,9 @@ void gauge_render_destroy(gauge_render_t *g)
     free_sprites(g->needle_parts);
     free_sprites(g->hub_parts);
     free(g->raster_acc);
+    free(g->trend_cols);
+    free(g->trend_fill_cov);
+    free(g->trend_line_cov);
     free(g->face_buf);
     free(g);
 }
@@ -1483,6 +1819,7 @@ void gauge_render_set_value(gauge_render_t *g, float value, bool valid)
 
     update_minmax(g, value, valid);
     update_peak(g, target, valid);
+    trend_sample(g, target, valid);
     update_needle(g);
     update_readout(g);
     evaluate_alerts(g);
@@ -1500,4 +1837,52 @@ void gauge_render_set_alert_cb(gauge_render_t *g, gauge_render_alert_cb_t cb, vo
     }
     g->alert_cb      = cb;
     g->alert_cb_user = user_data;
+}
+
+void gauge_render_set_number_format(gauge_render_t *g, int decimals, float round_step)
+{
+    if (g == NULL) {
+        return;
+    }
+    if (decimals >= 0 && decimals <= 3) {
+        snprintf(g->num_format, sizeof(g->num_format), "%%.%df", decimals);
+    } else {
+        g->num_format[0] = '\0';
+    }
+    g->round_step = (round_step > 0.0f) ? round_step : 0.0f;
+
+    update_readout(g);
+    set_peak_label(g);
+    set_recall_label(g);
+}
+
+void gauge_render_show_peak_value(gauge_render_t *g, bool show)
+{
+    if (g == NULL) {
+        return;
+    }
+    g->peak_value_hidden = !show;
+    if (g->peak_label == NULL) {
+        return;
+    }
+    if (show && !gauge_render_minmax_recalled(g)) {
+        lv_obj_remove_flag(g->peak_label, LV_OBJ_FLAG_HIDDEN);
+    } else if (!show) {
+        lv_obj_add_flag(g->peak_label, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+void gauge_render_parent_moved(gauge_render_t *g)
+{
+    if (g == NULL) {
+        return;
+    }
+    /* The needle and peak marker cache screen coordinates; recompute them where they now are. */
+    g->prev_valid  = false;
+    g->shape_valid = false;
+    update_needle(g);
+    if (g->peak_marker != NULL && g->peak_valid) {
+        g->peak_bbox_valid = false;
+        place_peak_marker(g);
+    }
 }

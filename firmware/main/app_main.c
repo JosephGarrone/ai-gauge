@@ -167,6 +167,42 @@ static void value_timer_cb(lv_timer_t *t)
 #endif
 }
 
+/*
+ * Engine running or not, from the ignition feed (AIN2). A charging alternator holds the feed above
+ * ~13.5V; a stopped engine leaves the battery at 12.4-12.8V. Off needs ENGINE_OFF_HOLD_MS below the
+ * low threshold, so cranking and a dip at idle do not blank the dial; running is immediate.
+ *
+ * No reading at all (no board, a fault, a gauge on telemetry only) counts as running: the dial
+ * must never go dark because a sensor is missing.
+ */
+#define ENGINE_ON_V        13.2f
+#define ENGINE_OFF_V       12.9f
+#define ENGINE_OFF_HOLD_MS 15000
+#define ENGINE_TICK_MS     1000
+
+static void engine_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+    static uint32_t low_ms;
+    static bool     running = true;
+
+    float v;
+    bool  valid = false;
+    if (!sensor_hub_read("ignition", "V", &v, &valid) || !valid) {
+        low_ms  = 0;
+        running = true;
+    } else if (v >= ENGINE_ON_V) {
+        low_ms  = 0;
+        running = true;
+    } else if (v < ENGINE_OFF_V) {
+        low_ms = (low_ms < ENGINE_OFF_HOLD_MS) ? low_ms + ENGINE_TICK_MS : low_ms;
+        if (low_ms >= ENGINE_OFF_HOLD_MS) {
+            running = false;
+        }
+    }
+    app_ui_set_engine_running(running);
+}
+
 #if CONFIG_AI_GAUGE_BENCH_TRANSITION
 
 /*
@@ -890,6 +926,7 @@ void app_main(void)
     }
 
     lv_timer_create(value_timer_cb, VALUE_TICK_MS, NULL);
+    lv_timer_create(engine_timer_cb, ENGINE_TICK_MS, NULL);
 #if CONFIG_AI_GAUGE_SIMULATED_SOURCE
     ESP_LOGW(TAG, "the needle sweeps SIMULATED values until a sensor board answers");
 #endif

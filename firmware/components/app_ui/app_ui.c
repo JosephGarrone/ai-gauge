@@ -12,6 +12,8 @@
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
+#include <strings.h>
 
 #include "esp_check.h"
 #include "esp_log.h"
@@ -71,12 +73,23 @@ static struct {
 
     gauge_render_t *gauge;
     lv_obj_t       *fps_badge; /**< On the dial tile, optional. */
+
+    lv_timer_t *shift_timer;   /**< Pixel shift; NULL when off. */
+    uint8_t     shift_step;
+
+    /* Engine-off screen, on lv_layer_top(). Exists only while shown. */
+    bool        engine_running;
+    lv_obj_t   *off_screen;
+    lv_obj_t   *off_notice;
+    lv_timer_t *off_timer;      /**< Moves the notice. */
+    lv_timer_t *peek_timer;     /**< A tap shows the dial for a while; this brings the screen back. */
     lv_point_t      press_at;  /**< Where the current touch on the dial began. */
 
     gauge_render_alert_cb_t alert_cb;
     void                   *alert_cb_user;
 
     const board_profile_t *board;
+    char unit[GAUGE_CONFIG_MAX_UNIT_LEN]; /**< The unit of the face on screen. */
 } s;
 
 /* ------------------------------------------------------------ shared with settings -- */
@@ -120,6 +133,197 @@ void app_ui_priv_show_fps_badge(bool show)
     } else {
         lv_obj_add_flag(s.fps_badge, LV_OBJ_FLAG_HIDDEN);
     }
+}
+
+/* ------------------------------------------------------------ gauge preferences --- */
+
+static bool unit_is(const char *unit, const char *want)
+{
+    return unit != NULL && strcasecmp(unit, want) == 0;
+}
+
+/*
+ * The readout's number format from the user's settings and the face's unit. Pressure: "Auto" is
+ * none for psi and kPa, one for bar. Temperature: whole degrees, optionally to the nearest 10.
+ * Any other unit keeps the face's own formats.
+ */
+void app_ui_priv_apply_gauge_prefs(void)
+{
+    if (s.gauge == NULL) {
+        return;
+    }
+    const app_settings_t *set  = app_settings_get();
+    const char           *unit = s.unit;
+
+    int   decimals = -1;
+    float step     = 0.0f;
+    if (unit_is(unit, "psi") || unit_is(unit, "kpa") || unit_is(unit, "bar")) {
+        if (set->pressure_decimals == APP_SETTINGS_DECIMALS_AUTO) {
+            decimals = unit_is(unit, "bar") ? 1 : 0;
+        } else {
+            decimals = (int)set->pressure_decimals - (int)APP_SETTINGS_DECIMALS_0;
+        }
+    } else if (unit_is(unit, "c") || strcmp(unit, "\xc2\xb0" "C") == 0) {
+        decimals = 0;
+        step     = (set->temp_step == APP_SETTINGS_TEMP_STEP_10) ? 10.0f : 0.0f;
+    }
+    gauge_render_set_number_format(s.gauge, decimals, step);
+    gauge_render_show_peak_value(s.gauge, set->show_peak);
+    gauge_render_set_trend_window(s.gauge, app_settings_trend_seconds(set->trend_window));
+}
+
+/* ------------------------------------------------------------------ pixel shift ----- */
+
+/*
+ * A slow orbit, 3 px from centre, so no edge of the static artwork sits on the same pixels for
+ * long. Each step redraws the whole dial once: one dropped frame every few minutes.
+ */
+static const int8_t k_shift_orbit[][2] = {
+    {0, 0}, {3, 0}, {2, 2}, {0, 3}, {-2, 2}, {-3, 0}, {-2, -2}, {0, -3}, {2, -2},
+};
+#define SHIFT_STEPS (sizeof(k_shift_orbit) / sizeof(k_shift_orbit[0]))
+
+static void shift_to(uint8_t step)
+{
+    s.shift_step = step % SHIFT_STEPS;
+    lv_obj_set_style_translate_x(s.tile_gauge, k_shift_orbit[s.shift_step][0], LV_PART_MAIN);
+    lv_obj_set_style_translate_y(s.tile_gauge, k_shift_orbit[s.shift_step][1], LV_PART_MAIN);
+    lv_obj_update_layout(s.tile_gauge);
+    gauge_render_parent_moved(s.gauge);
+    lv_obj_invalidate(s.tile_gauge);
+}
+
+static void shift_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+    /* Not while the settings tile is up: moving the tile under a finger would be odd. */
+    if (app_ui_get_tile() == APP_UI_TILE_GAUGE) {
+        shift_to((uint8_t)(s.shift_step + 1));
+    }
+}
+
+void app_ui_priv_apply_pixel_shift(void)
+{
+    uint32_t period = app_settings_shift_period_ms(app_settings_get()->pixel_shift);
+    if (s.shift_timer != NULL) {
+        lv_timer_delete(s.shift_timer);
+        s.shift_timer = NULL;
+    }
+    if (period == 0) {
+        shift_to(0);
+        return;
+    }
+    s.shift_timer = lv_timer_create(shift_timer_cb, period, NULL);
+}
+
+/* ------------------------------------------------------------------ engine off ------ */
+
+#define OFF_BRIGHTNESS   3      /* percent: enough to read the notice in a dark garage */
+#define OFF_MOVE_MS      20000  /* the notice moves this often */
+#define OFF_PEEK_MS      60000  /* a tap shows the dial for this long */
+#define OFF_NOTICE_COLOR 0x50575c
+
+static void off_move_notice(void)
+{
+    if (s.off_notice == NULL || s.board == NULL) {
+        return;
+    }
+    /* Anywhere inside the middle 60% of the panel, so it stays on the round glass. */
+    int32_t span_x = s.board->width_px * 3 / 10;
+    int32_t span_y = s.board->height_px * 3 / 10;
+    int32_t dx     = (int32_t)(lv_rand(0, (uint32_t)(2 * span_x))) - span_x;
+    int32_t dy     = (int32_t)(lv_rand(0, (uint32_t)(2 * span_y))) - span_y;
+    lv_obj_align(s.off_notice, LV_ALIGN_CENTER, dx, dy);
+}
+
+static void off_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+    off_move_notice();
+}
+
+static void off_screen_hide(void)
+{
+    if (s.off_timer != NULL) {
+        lv_timer_delete(s.off_timer);
+        s.off_timer = NULL;
+    }
+    if (s.off_screen != NULL) {
+        lv_obj_delete(s.off_screen);
+        s.off_screen = NULL;
+        s.off_notice = NULL;
+        bsp_display_brightness_set(app_settings_get()->brightness);
+    }
+}
+
+static void peek_timer_cb(lv_timer_t *t);
+
+static void off_screen_tapped_cb(lv_event_t *e)
+{
+    (void)e;
+    off_screen_hide();
+    if (s.peek_timer == NULL) {
+        s.peek_timer = lv_timer_create(peek_timer_cb, OFF_PEEK_MS, NULL);
+        if (s.peek_timer != NULL) {
+            lv_timer_set_repeat_count(s.peek_timer, 1);
+        }
+    }
+}
+
+static void off_screen_show(void)
+{
+    if (s.off_screen != NULL || s.peek_timer != NULL) {
+        return;
+    }
+    /* An opaque cover: LVGL then repaints only it where the needle moves underneath. */
+    s.off_screen = lv_obj_create(lv_layer_top());
+    if (s.off_screen == NULL) {
+        return;
+    }
+    lv_obj_remove_style_all(s.off_screen);
+    lv_obj_set_size(s.off_screen, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(s.off_screen, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s.off_screen, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_add_flag(s.off_screen, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s.off_screen, off_screen_tapped_cb, LV_EVENT_CLICKED, NULL);
+
+    s.off_notice = lv_label_create(s.off_screen);
+    if (s.off_notice != NULL) {
+        lv_label_set_text(s.off_notice, "ENGINE OFF");
+        lv_obj_set_style_text_font(s.off_notice, &lv_font_montserrat_22, LV_PART_MAIN);
+        lv_obj_set_style_text_color(s.off_notice, lv_color_hex(OFF_NOTICE_COLOR), LV_PART_MAIN);
+        off_move_notice();
+    }
+    s.off_timer = lv_timer_create(off_timer_cb, OFF_MOVE_MS, NULL);
+    bsp_display_brightness_set(OFF_BRIGHTNESS);
+}
+
+static void peek_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+    s.peek_timer = NULL; /* one-shot: LVGL deletes it after this callback */
+    if (!s.engine_running && app_settings_get()->engine_off_screen) {
+        off_screen_show();
+    }
+}
+
+void app_ui_set_engine_running(bool running)
+{
+    s.engine_running = running;
+    if (running || !app_settings_get()->engine_off_screen) {
+        if (s.peek_timer != NULL) {
+            lv_timer_delete(s.peek_timer);
+            s.peek_timer = NULL;
+        }
+        off_screen_hide();
+    } else {
+        off_screen_show();
+    }
+}
+
+void app_ui_priv_apply_engine_off(void)
+{
+    app_ui_set_engine_running(s.engine_running);
 }
 
 /* ------------------------------------------------------------------ dial ------------ */
@@ -193,7 +397,9 @@ esp_err_t app_ui_create(const gauge_config_t *cfg, const board_profile_t *board)
 {
     ESP_RETURN_ON_FALSE(cfg && board, ESP_ERR_INVALID_ARG, TAG, "bad args");
 
-    s.board = board;
+    s.board          = board;
+    s.engine_running = true;
+    strlcpy(s.unit, cfg->source.unit, sizeof(s.unit));
 
     app_ui_priv_apply_rotation(app_settings_get()->rotation);
     app_ui_priv_apply_fps_cap(app_settings_get()->fps_cap);
@@ -260,6 +466,9 @@ esp_err_t app_ui_create(const gauge_config_t *cfg, const board_profile_t *board)
     lv_obj_align(s.fps_badge, LV_ALIGN_CENTER, 0, 60);
     app_ui_priv_show_fps_badge(app_settings_get()->show_fps);
 
+    app_ui_priv_apply_gauge_prefs();
+    app_ui_priv_apply_pixel_shift();
+
     settings_build(s.tile_settings, board, cfg);
 
     /* 500ms is frequent enough to feel live without dirtying the dial needlessly. */
@@ -293,7 +502,10 @@ esp_err_t app_ui_set_config(const gauge_config_t *cfg)
     ESP_RETURN_ON_ERROR(err, TAG, "could not build the replacement gauge");
 
     s.gauge = replacement;
+    strlcpy(s.unit, cfg->source.unit, sizeof(s.unit));
     gauge_render_set_alert_cb(s.gauge, s.alert_cb, s.alert_cb_user);
+    app_ui_priv_apply_gauge_prefs();
+    gauge_render_parent_moved(s.gauge); /* built where the tile is now, but say so anyway */
 
     if (old_gauge != NULL) {
         gauge_render_destroy(old_gauge);

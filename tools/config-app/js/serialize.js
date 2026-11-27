@@ -182,6 +182,20 @@ export function serializeGauge(m) {
         ])}/>`);
     }
 
+    if (m.trend) {
+        const t = m.trend;
+        w.line(1, `<trend${attrs([
+            ['x', t.x],
+            ['y', t.y],
+            ['width', t.width],
+            ['height', t.height],
+            ['line-width', t.lineWidth],
+            ['color', t.color],
+            ['fill', t.fill],
+            ['alert-marks', 'false', !t.alertMarks],
+        ])}/>`);
+    }
+
     for (const a of m.alerts) {
         w.line(1, `<alert${attrs([
             ['above', a.above],

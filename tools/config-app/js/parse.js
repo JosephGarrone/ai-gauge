@@ -15,7 +15,7 @@
 
 import {
     ERRORS, LIMITS, SCHEMA_VERSION, defaultAlert, defaultBand, defaultLabels, defaultModel,
-    defaultPeak, defaultReadout, defaultTicks, defaultTitle,
+    defaultPeak, defaultReadout, defaultTicks, defaultTitle, defaultTrend,
 } from './schema.js';
 import { checkFormat } from './printf.js';
 
@@ -595,6 +595,31 @@ function parsePeak(r, tag, m) {
     m.peak = k;
 }
 
+function parseTrend(r, tag, m) {
+    const t = m.trend ?? defaultTrend();
+    t.x = r.coord(tag, 'x', t.x, 'trend');
+    t.y = r.coord(tag, 'y', t.y, 'trend');
+    t.width = r.px(tag, 'width', t.width, 'trend');
+    t.height = r.px(tag, 'height', t.height, 'trend');
+    t.lineWidth = r.px(tag, 'line-width', t.lineWidth, 'trend');
+    t.color = r.color(tag, 'color', t.color, 'trend color');
+    t.alertMarks = r.bool(tag, 'alert-marks') ?? t.alertMarks;
+    t.fill = r.color(tag, 'fill', t.fill, 'trend fill');
+    // One column per pixel, in a buffer sized for the panel.
+    if (t.width < LIMITS.trendMinPx) {
+        r.warn(`trend width ${t.width} is below ${LIMITS.trendMinPx}; clamped`);
+        t.width = LIMITS.trendMinPx;
+    } else if (t.width > LIMITS.trendMaxWidth) {
+        r.warn(`trend width ${t.width} is above ${LIMITS.trendMaxWidth}; clamped`);
+        t.width = LIMITS.trendMaxWidth;
+    }
+    if (t.height < LIMITS.trendMinPx) {
+        r.warn(`trend height ${t.height} is below ${LIMITS.trendMinPx}; clamped`);
+        t.height = LIMITS.trendMinPx;
+    }
+    m.trend = t;
+}
+
 function parseAlert(r, tag, m) {
     const n = m.alerts.length + 1;
     if (m.alerts.length >= LIMITS.alerts) {
@@ -712,6 +737,8 @@ export function parseGauge(xml) {
             parseReadout(r, tag, m);
         } else if (name === 'peak') {
             parsePeak(r, tag, m);
+        } else if (name === 'trend') {
+            parseTrend(r, tag, m);
         } else if (name === 'alert') {
             parseAlert(r, tag, m);
         }

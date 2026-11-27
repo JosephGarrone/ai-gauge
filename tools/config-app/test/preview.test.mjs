@@ -117,7 +117,7 @@ test('the PX boost face: segmented ring, red redline pointers, 1 psi graduations
     assert.equal(count(svg, /<path /g), 8, 'seven ring segments, one split at the redline');
     assert.equal(count(svg, /<use href="#px-major-tick"/g), 6, '0 to 25 in the ring colour');
     assert.equal(count(svg, /<use href="#px-major-tick-1"/g), 1, '30, past the redline at 26, in red');
-    assert.equal(tickColor(m, 30), '#ff3030');
+    assert.equal(tickColor(m, 30), '#cc2626', 'the redline ring, dimmed against burn-in');
     assert.equal(count(svg, /<use href="#px-minor-tick"/g), 26, '0 to 25, under the pointers as on the device');
     assert.equal(count(svg, /<use href="#px-minor-tick-1"/g), 5, '26 to 30, in the redline');
 });

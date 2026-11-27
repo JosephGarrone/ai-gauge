@@ -18,7 +18,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 # ---------------------------------------------------------------- palette (obd-display ipc-*)
-OFF_WHITE = "#ebf0f2"  # IpcWhite: ring, pointers, numerals, readout
+OFF_WHITE = "#ebf0f2"  # IpcWhite: the readout, the one thing that changes
+# The static artwork (ring, pointers, numerals) at 75% of IpcWhite, and the redline ring at 80% of
+# IpcRedBright. These pixels never move, so on an AMOLED they wear while the black around them does
+# not; dimming them cuts that wear by about a quarter, and the moving needle and readout stay at full
+# brightness so they still lead the eye. Glare at night drops too.
+ART = "#b0b4b6"
+RED_ART = "#cc2626"
 MUTED = "#8f9aa0"      # caption: secondary text, a cool grey beside the off-white
 RED = "#ff3030"        # IpcRedBright: redline ring and pointers, alert
 AMBER = "#ffb000"      # IpcAmber: peak marker
@@ -33,9 +39,14 @@ BAND_W = 12                         # ring thickness, ~5.5% of radius
 GAP_DEG = 1.4                       # break in the ring at each half-major
 # The caption labels the readout from under it, not ~0.5 R above centre as on the tacho: the needle
 # spends most of its time sweeping the upper face, and a caption there is crossed constantly.
-READOUT_Y = 300                     # top edge of the 48 px number
-CAPTION_Y = 362                     # centre of the caption, just under the number
-PEAK_Y = 382                        # top edge of the peak value, under the caption
+# Sized for a glance from the driver's seat on the A-pillar: an 80 px whole-number readout and a 22 px
+# caption, with the sparkline in the gap under the dial.
+READOUT_FONT = "montserrat_digits_80"  # digits only: tools/fonts/make_digits_font.py
+READOUT_Y = 262                     # top edge of the number (58 px tall)
+CAPTION_Y = 338                     # centre of the caption, just under the number
+PEAK_Y = 352                        # top edge of the peak value, when the user turns it on
+TREND_Y = 378                       # top edge of the sparkline strip
+TREND_W, TREND_H = 200, 50
 TICK_GAP = 6                        # renderer: tick circle = band inner edge - 6 px
 
 # Pointer: an inward triangle hanging off the ring's inner edge (y = -TICK_GAP in the tick frame).
@@ -88,9 +99,9 @@ def bands(vmin, vmax, major, red_from):
         lo = a if a == vmin else a + gap
         hi = b if b == vmax else b - gap
         if lo < red_from < hi:
-            out += [(lo, red_from, OFF_WHITE), (red_from, hi, RED)]
+            out += [(lo, red_from, ART), (red_from, hi, RED_ART)]
         else:
-            out.append((lo, hi, RED if lo >= red_from else OFF_WHITE))
+            out.append((lo, hi, RED_ART if lo >= red_from else ART))
     assert len(out) <= 8, "the schema allows 8 bands"
     return out
 
@@ -116,7 +127,7 @@ def face(gid, comment, channel, unit, vmax, major, minor, red_from, caption, dam
 
   <face start-angle="225" sweep="270" background="#000000" radius="{RADIUS}">
 {band_xml}
-    <ticks major-every="{major}" minor-every="{num(minor)}" color="{OFF_WHITE}" band-color="true">
+    <ticks major-every="{major}" minor-every="{num(minor)}" color="{ART}" band-color="true">
       <major-shape>
         <polygon points="{POINTER}"/>
       </major-shape>
@@ -124,15 +135,16 @@ def face(gid, comment, channel, unit, vmax, major, minor, red_from, caption, dam
         <polygon points="{MINOR}"/>
       </minor-shape>
     </ticks>
-    <labels every="{major}" font="{label_font}" color="{OFF_WHITE}" radius="{label_r}"/>
+    <labels every="{major}" font="{label_font}" color="{ART}" radius="{label_r}"/>
   </face>
 
 {needle_xml(builtin_needle)}
 
-  <readout y="{READOUT_Y}" font="montserrat_48" format="{fmt}" color="{OFF_WHITE}"/>
-  <title text="{caption}" y="{CAPTION_Y}" font="montserrat_16" color="{MUTED}"/>
+  <readout y="{READOUT_Y}" font="{READOUT_FONT}" format="{fmt}" color="{OFF_WHITE}"/>
+  <title text="{caption}" y="{CAPTION_Y}" font="montserrat_22" color="{MUTED}"/>
 
-  <peak color="{AMBER}" length="{BAND_W + 4}" width="5" value-y="{PEAK_Y}" font="montserrat_16" format="{fmt}"/>
+  <peak color="{AMBER}" length="{BAND_W + 4}" width="5" value-y="{PEAK_Y}" font="montserrat_20" format="{fmt}"/>
+  <trend y="{TREND_Y}" width="{TREND_W}" height="{TREND_H}" line-width="3" color="{NEEDLE}"/>
   <alert above="{num(red_from)}" flash-hz="2" color="{RED}"/>
 </gauge>
 """
@@ -140,7 +152,7 @@ def face(gid, comment, channel, unit, vmax, major, minor, red_from, caption, dam
 
 BOOST = dict(gid="boost", comment="Boost gauge, 0-30 PSI, redline from 26 as on the obd-display boost dial.",
              channel="boost", unit="psi", vmax=30, major=5, minor=1, red_from=26, caption="BOOST  PSI",
-             damping="0.15", fmt="%.1f",
+             damping="0.15", fmt="%.0f",
              # Numerals at ~0.8 R, as on the tacho, pulled in far enough to clear the pointers at 3
              # and 9 o'clock, where a number is set sideways to the radius.
              label_font="montserrat_32", label_r=172)

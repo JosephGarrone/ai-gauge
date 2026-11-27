@@ -19,6 +19,15 @@ void app_ui_priv_apply_rotation(app_settings_rotation_t rotation);
 void app_ui_priv_apply_fps_cap(app_settings_fps_cap_t cap);
 void app_ui_priv_show_fps_badge(bool show);
 
+/** Re-apply the number format, peak figure and trend window settings to the gauge on screen. */
+void app_ui_priv_apply_gauge_prefs(void);
+
+/** Restart the pixel-shift timer at the current setting (off returns the dial to centre). */
+void app_ui_priv_apply_pixel_shift(void);
+
+/** The engine-off screen setting changed: leave the screen if it was just turned off. */
+void app_ui_priv_apply_engine_off(void);
+
 /* ---- provided by app_ui_settings.c ---- */
 
 void settings_build(lv_obj_t *tile, const board_profile_t *board, const gauge_config_t *cfg);

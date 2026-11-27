@@ -99,7 +99,7 @@ prefix + number + suffix is cut at 95.
 | colour | `#rrggbb` or `#rgb`. Emit `#rrggbb` |
 | bool | `true` / `false` (the parser also accepts `1` / `0`) |
 | int, float | Decimal. Out-of-range values clamp; see [§6](#6-validation) |
-| font | One of `montserrat_12`, `montserrat_16`, `montserrat_18`, `montserrat_20`, `montserrat_22`, `montserrat_24`, `montserrat_26`, `montserrat_32`, `montserrat_48` |
+| font | One of `montserrat_12`, `montserrat_16`, `montserrat_18`, `montserrat_20`, `montserrat_22`, `montserrat_24`, `montserrat_26`, `montserrat_32`, `montserrat_48`, or `montserrat_digits_80` (line height 58, baseline 1; only `0-9 . - +` and space, for readouts) |
 | point list | SVG `points` syntax: numbers separated by spaces and/or commas, in x,y pairs. Emit `x,y x,y …` |
 
 ---
@@ -255,6 +255,23 @@ Omit it and peak-hold is off.
 | `font` | font | `montserrat_16` | |
 | `format` | printf | `%.1f` | |
 | `prefix` | string | `PEAK ` | Note the trailing space |
+
+The gauge hides the peak figure unless the user turns it on in its settings.
+
+### `<trend>` — at most one
+
+A sparkline of recent readings. Omit it and there is none. The history length is a gauge setting.
+
+| Attribute | Type | Default | Notes |
+|---|---|---|---|
+| `x` | int | centred | **Left edge** |
+| `y` | int | `cy + round(0.6 × cy)` (373) | **Top edge** |
+| `width` | int | `200` | Clamped to 8..466, with a warning |
+| `height` | int | `50` | Clamped to at least 8, with a warning |
+| `line-width` | int | `3` | |
+| `color` | colour | `#17caff` | Trace; the baseline is this at 30% |
+| `fill` | colour | trace at 30% | Omit to derive it |
+| `alert-marks` | bool | `true` | Dashed line at each `above` alert strictly inside the range |
 
 ### `<alert>` — 0–4
 
@@ -479,6 +496,13 @@ inwards to `R − length`.
   to its colour, toggling every `500 / flash-hz` ms; with `flash-hz="0"` the colour stays
   steady. The chime sounds once on entry.
 - **Peak** tracks the *raw* (undamped) value. Tapping the dial clears it.
+- **Number formats** follow the user's settings on pressure and temperature faces (see
+  [gauge-config-schema.md](gauge-config-schema.md#readout-01)); the file's `format` is what the
+  editor previews and what any other unit shows.
+- **Trend**: each column is the mean of the raw readings, clamped to `[min, max]`, in its slice of
+  the window; `y = top + (bottom − top) × (1 − (v − min) / (max − min))` with `top = line-width/2`
+  and `bottom = height − 1 − line-width/2`. The newest column is at the right edge; the dot on it
+  has radius `line-width + 2`, in the readout's colour.
 - **Min/max recall** is not configured by the file. Long-pressing the dial shows `MAX` and `MIN`
   for 3s in place of the readout and peak value, in `montserrat_26` and the readout's colour,
   `format` and `suffix`, at the readout's position. The values are the raw input, before damping

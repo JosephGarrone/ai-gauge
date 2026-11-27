@@ -15,7 +15,7 @@
  */
 
 import {
-    FONTS, ID_PATTERN, LIMITS, NEEDLE_SHAPE_GUIDE, PANEL, utf8Length,
+    DIGITS_FONT_CHARS, FONTS, ID_PATTERN, LIMITS, NEEDLE_SHAPE_GUIDE, PANEL, utf8Length,
 } from './schema.js';
 import {
     labelRadius, labelStep, needleLength, polygonArea, polygonSelfIntersects, quantize, scaleRadius,
@@ -331,6 +331,27 @@ function checkReadout(is, m) {
     if (o.x !== null) checkRange(is, 'readout', 'Readout x', o.x, -LIMITS.coord, LIMITS.coord);
     checkRange(is, 'readout', 'Readout y', o.y, -LIMITS.coord, LIMITS.coord);
     checkFormatField(is, 'readout', 'Readout format', o.format, 31, [m.source.min, m.source.max]);
+    if (o.font.includes('digits')) {
+        const stray = [...new Set([...(o.prefix + o.suffix)].filter((c) => !DIGITS_FONT_CHARS.includes(c)))];
+        if (stray.length > 0) {
+            is.warning('readout', `${o.font} only has digits, '.', '-', '+' and space, so ${stray.map((c) => `'${c}'`).join(', ')} in the prefix or suffix will not show. Put the unit in a title instead.`);
+        }
+    }
+}
+
+function checkTrend(is, m) {
+    const t = m.trend;
+    if (!t) return;
+    checkColor(is, 'trend', 'Trace colour', t.color);
+    checkColor(is, 'trend', 'Fill colour', t.fill);
+    if (t.x !== null) checkRange(is, 'trend', 'Trend x', t.x, -LIMITS.coord, LIMITS.coord);
+    if (t.y !== null) checkRange(is, 'trend', 'Trend y', t.y, -LIMITS.coord, LIMITS.coord);
+    checkRange(is, 'trend', 'Width', t.width, LIMITS.trendMinPx, LIMITS.trendMaxWidth);
+    checkRange(is, 'trend', 'Height', t.height, LIMITS.trendMinPx, LIMITS.px);
+    checkRange(is, 'trend', 'Line width', t.lineWidth, 0, LIMITS.px);
+    if (t.width * t.height > 240 * 60) {
+        is.warning('trend', 'A strip bigger than about 240 x 60 px costs more of each frame it repaints in; the budget was measured at 200 x 50.');
+    }
 }
 
 function checkPeak(is, m) {
@@ -393,6 +414,7 @@ export function validateModel(m) {
     checkTitles(is, m);
     checkReadout(is, m);
     checkPeak(is, m);
+    checkTrend(is, m);
     checkAlerts(is, m);
 
     const xml = serializeGauge(m);

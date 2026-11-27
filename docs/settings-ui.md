@@ -32,19 +32,22 @@ with `tools/remote/gauge_remote.py`, masked to the round panel.
   is still wide. Every page is built when it opens and deleted when it closes.
 - **Auto-return:** after 30 s with no touch on the settings tile, the gauge goes back to the dial
   (`SETTINGS_IDLE_MS`).
-- Pages are sized to fit above the Back pill without scrolling, except Sensors in its raw view and
-  System, which scroll.
+- Pages are sized to fit above the Back pill without scrolling, except Sensors in its raw view,
+  Faces, Display and System, which scroll.
 
 ## Pages
 
 | | |
 |---|---|
-| ![faces](images/settings/faces.png) **Faces**: one full-width button per stored face (a single buttonmatrix), the one on screen highlighted | ![sensors](images/settings/sensors.png) **Sensors**: live readings in native units. Tap the readout for the raw view |
+| ![faces](images/settings/faces.png) **Faces**: one full-width button per stored face (a single buttonmatrix), the one on screen highlighted; below it *Boost decimals*, *EGT rounded to*, *Peak figure* and *Trend history*, which apply to every face ([ADR 0014](adr/0014-glanceable-burn-in-aware-dial.md)) | ![sensors](images/settings/sensors.png) **Sensors**: live readings in native units. Tap the readout for the raw view |
 | ![sensors raw](images/settings/sensors-raw.png) **Sensors, raw**: ADC codes, pin volts, reads per second, bus scan ([sensor-frontend.md](sensor-frontend.md)) | ![calibrate](images/settings/calibrate.png) **Calibrate**: ‹ › picks the parameter, − and + either side of the value (hold to repeat, saved on release), and *Zero boost now*, which reads *Units: bar / psi / kPa* on the pressure range |
 | ![network](images/settings/network.png) **Network**: connection details on separate lines, and *Reset network*, which takes two taps within 4 s | ![system](images/settings/system.png) **System**: firmware card (tap to check for updates, twice to install), FPS counter, frame rate, memory |
 
-**Display** has rotation and the frame-rate limit. The FPS counter moved to System, beside the
-numbers it explains.
+**Display** has rotation, the frame-rate limit, *Pixel shift, every* (Off / 1m / 3m / 10m) and *Dark
+when engine off*. The FPS counter moved to System, beside the numbers it explains.
+
+The Faces and Display screenshots predate the settings added on 2026-11-27, and both pages now
+scroll; retake them on hardware.
 
 ## Rules for changing it
 

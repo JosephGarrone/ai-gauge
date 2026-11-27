@@ -29,7 +29,15 @@ export const FONTS = Object.freeze({
     montserrat_26: 29,
     montserrat_32: 35,
     montserrat_48: 52,
+    // Digits, '.', '-', '+' and space only (tools/fonts/make_digits_font.py); for readouts.
+    montserrat_digits_80: 58,
 });
+
+/** Characters the digits-only fonts have. Anything else draws blank on the device. */
+export const DIGITS_FONT_CHARS = ' +-.0123456789';
+
+/** Pixels from the bottom of a font's line box to its baseline, where it is not the usual ~19%. */
+export const FONT_BASELINE = Object.freeze({ montserrat_digits_80: 1 });
 
 export const FONT_NAMES = Object.freeze(Object.keys(FONTS));
 
@@ -57,6 +65,8 @@ export const LIMITS = Object.freeze({
     bands: 8,
     titles: 4,
     alerts: 4,
+    trendMinPx: 8,    // GAUGE_CONFIG_TREND_MIN_PX
+    trendMaxWidth: 466, // GAUGE_CONFIG_TREND_MAX_W_PX
     deviceFaces: 12,
     shapeParts: 6,
     shapePoints: 64,
@@ -93,7 +103,7 @@ export function lineHeight(font) {
 
 /** Nominal pixel size of a font, e.g. 24 for montserrat_24. */
 export function fontSize(font) {
-    return FONTS[font] ? Number(font.slice('montserrat_'.length)) : FALLBACK_FONT.size;
+    return FONTS[font] ? Number(font.match(/(\d+)$/)[1]) : FALLBACK_FONT.size;
 }
 
 /**
@@ -141,6 +151,11 @@ export function defaultPeak() {
     };
 }
 
+/** <trend>: the sparkline strip. x and y null mean centred, and in the gap under the dial. */
+export function defaultTrend() {
+    return { x: null, y: null, width: 200, height: 50, lineWidth: 3, color: '#17caff', fill: null, alertMarks: true };
+}
+
 export function defaultAlert() {
     return { above: null, below: null, color: '#d50000', flashHz: 2, chime: false };
 }
@@ -160,6 +175,7 @@ export function defaultModel() {
         titles: [],
         readout: null,
         peak: null,
+        trend: null,
         alerts: [],
     };
 }

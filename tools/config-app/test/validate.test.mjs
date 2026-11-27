@@ -34,6 +34,7 @@ test('ids, ranges and required strings', () => {
 
 test('formats, fonts and characters', () => {
     const m = boost();
+    m.readout.font = 'montserrat_48'; // the shipped digits-only font has its own check, below
     m.readout.format = '%d';
     m.labels.font = 'montserrat_14';
     m.readout.suffix = ' µs';
@@ -44,6 +45,14 @@ test('formats, fonts and characters', () => {
     assert.equal(having(m, 'warning', /'µ'/).length, 1, 'not in the device fonts');
     assert.equal(having(m, 'warning', /'°'/).length, 0, 'the device fonts carry the degree sign');
     assert.equal(having(m, 'error', /& </).length, 1);
+});
+
+test('the digits-only readout font', () => {
+    const m = boost();
+    assert.equal(m.readout.font, 'montserrat_digits_80');
+    assert.equal(having(m, 'warning', /only has digits/).length, 0, 'the shipped face is clean');
+    m.readout.suffix = ' psi';
+    assert.equal(having(m, 'warning', /only has digits.*'p', 's', 'i'/).length, 1);
 });
 
 test('label text longer than the device buffer', () => {

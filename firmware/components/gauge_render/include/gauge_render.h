@@ -70,6 +70,32 @@ float gauge_render_get_displayed(const gauge_render_t *g);
  */
 typedef void (*gauge_render_alert_cb_t)(const gauge_alert_t *alert, bool active, void *user_data);
 
+/**
+ * @brief Override the face's number formats with the user's preference.
+ *
+ * Applies to the readout, the peak figure and the min/max recall.
+ *
+ * @param decimals   Decimal places, 0-3, or -1 to keep each element's own format.
+ * @param round_step Round to a multiple of this before formatting (10 for EGT to the nearest 10
+ *                   degrees), or 0 not to.
+ */
+void gauge_render_set_number_format(gauge_render_t *g, int decimals, float round_step);
+
+/** @brief Show or hide the peak figure. The peak marker on the scale is unaffected. */
+void gauge_render_show_peak_value(gauge_render_t *g, bool show);
+
+/**
+ * @brief Set how many seconds of history the face's `<trend>` strip shows. Clears the strip.
+ * No effect if the face has none.
+ */
+void gauge_render_set_trend_window(gauge_render_t *g, uint32_t seconds);
+
+/**
+ * @brief Tell the gauge its parent has moved on screen (pixel shift), so cached screen
+ * coordinates are recomputed. The caller invalidates the moved area.
+ */
+void gauge_render_parent_moved(gauge_render_t *g);
+
 /** @brief Clear the peak marker and peak readout. No effect if the face has no `<peak>`. */
 void gauge_render_reset_peak(gauge_render_t *g);
 

@@ -186,6 +186,15 @@ void app_ui_screenshot_free(app_ui_image_t *img);
  */
 void app_ui_set_warning(const char *text);
 
+/**
+ * @brief Tell the UI whether the engine is running, from the ignition feed's voltage.
+ *
+ * While it is not, and the setting allows, the dial is replaced by a near-black screen with a
+ * small notice that drifts about, so nothing static burns into the AMOLED while the car sits
+ * with the gauge powered. A tap shows the dial for a minute. Call from the LVGL task.
+ */
+void app_ui_set_engine_running(bool running);
+
 #ifdef __cplusplus
 }
 #endif

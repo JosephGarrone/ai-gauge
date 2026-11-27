@@ -30,6 +30,8 @@ extern "C" {
 #define GAUGE_CONFIG_MAX_BANDS        8
 #define GAUGE_CONFIG_MAX_TITLES       4
 #define GAUGE_CONFIG_MAX_ALERTS       4
+#define GAUGE_CONFIG_TREND_MIN_PX     8    /**< <trend> width and height, at least. */
+#define GAUGE_CONFIG_TREND_MAX_W_PX   466  /**< <trend> width, at most: one column per pixel. */
 
 /** Result of a parse. Warnings still yield a usable config; errors do not. */
 typedef enum {
@@ -225,6 +227,20 @@ typedef struct {
         char          format[GAUGE_CONFIG_MAX_FORMAT_LEN];
         char          prefix[GAUGE_CONFIG_MAX_TEXT_LEN];
     } peak;
+
+    /* --- <trend> --- */
+    struct {
+        bool          present;
+        int16_t       x;             /**< Left edge. INT16_MIN means "centre horizontally". */
+        int16_t       y;             /**< Top edge. INT16_MIN means "in the gap under the dial". */
+        uint16_t      width_px;
+        uint16_t      height_px;
+        uint16_t      line_width_px;
+        gauge_color_t color;         /**< The trace. */
+        bool          has_fill;      /**< False: the fill is the trace colour at 30%. */
+        gauge_color_t fill;          /**< Under the trace. */
+        bool          alert_marks;   /**< A dashed line at each `above` alert, in its colour. */
+    } trend;
 
     /* --- <alert> --- */
     gauge_alert_t alerts[GAUGE_CONFIG_MAX_ALERTS];

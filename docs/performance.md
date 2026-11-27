@@ -514,6 +514,9 @@ day, rear board attached, three boots, all identical within a few ms:
 | Internal free once the splash has gone (`/api/status`, 15 s uptime) | 26,743 B; lowest since boot 19,227 B |
 
 ### Not yet measured
+- The 2026-11-27 dial changes ([ADR 0014](adr/0014-glanceable-burn-in-aware-dial.md)): the
+  80 px readout, the trend strip repainting at 30 s, and a pixel-shift step. The gauge was in the car
+  when they were built.
 - Scenarios 1, 3 and 6.
 - Scenario 2 with a custom needle shape (above).
 

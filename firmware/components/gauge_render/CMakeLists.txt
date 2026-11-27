@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "gauge_render.c"
+        "fonts/montserrat_digits_80.c"
     INCLUDE_DIRS
         "include"
     REQUIRES

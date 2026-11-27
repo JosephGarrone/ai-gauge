@@ -215,6 +215,11 @@ static void cal_refresh(void);
 static const char *const k_rotation_map[] ={"0" DEG, "90" DEG, "180" DEG, "270" DEG, ""};
 static const char *const k_fps_map[]      = {"30", "45", "60", "Off", ""};
 static const char *const k_badge_map[]    = {"Hidden", "Shown", ""};
+static const char *const k_onoff_map[]    = {"Off", "On", ""};
+static const char *const k_decimals_map[] = {"Auto", "0", "0.0", "0.00", ""};
+static const char *const k_temp_map[]     = {"1" DEG, "10" DEG, ""};
+static const char *const k_trend_map[]    = {"30 s", "60 s", "120 s", ""};
+static const char *const k_shift_map[]    = {"Off", "1m", "3m", "10m", ""};
 
 /* ------------------------------------------------------------------ helpers -------- */
 
@@ -494,6 +499,28 @@ static void badge_changed_cb(lv_event_t *e)
     app_ui_priv_show_fps_badge(idx == 1);
 }
 
+static void shift_changed_cb(lv_event_t *e)
+{
+    uint32_t idx = lv_buttonmatrix_get_selected_button(lv_event_get_target(e));
+    if (idx >= APP_SETTINGS_SHIFT_COUNT) {
+        return;
+    }
+    app_settings_set_pixel_shift((app_settings_shift_t)idx);
+    app_settings_commit();
+    app_ui_priv_apply_pixel_shift();
+}
+
+static void engine_off_changed_cb(lv_event_t *e)
+{
+    uint32_t idx = lv_buttonmatrix_get_selected_button(lv_event_get_target(e));
+    if (idx > 1) {
+        return;
+    }
+    app_settings_set_engine_off_screen(idx == 1);
+    app_settings_commit();
+    app_ui_priv_apply_engine_off();
+}
+
 static void build_display(lv_obj_t *p)
 {
     const app_settings_t *set = app_settings_get();
@@ -501,9 +528,72 @@ static void build_display(lv_obj_t *p)
     segmented(p, k_rotation_map, (uint32_t)set->rotation, rotation_changed_cb);
     caption(p, "Frame rate limit");
     segmented(p, k_fps_map, (uint32_t)set->fps_cap, fps_cap_changed_cb);
+    /* Burn-in protection: the AMOLED wears where the artwork never moves. */
+    caption(p, "Pixel shift, every");
+    segmented(p, k_shift_map, (uint32_t)set->pixel_shift, shift_changed_cb);
+    caption(p, "Dark when engine off");
+    segmented(p, k_onoff_map, set->engine_off_screen ? 1 : 0, engine_off_changed_cb);
 }
 
 /* ---- Gauge ---- */
+
+static void decimals_changed_cb(lv_event_t *e)
+{
+    uint32_t idx = lv_buttonmatrix_get_selected_button(lv_event_get_target(e));
+    if (idx >= APP_SETTINGS_DECIMALS_COUNT) {
+        return;
+    }
+    app_settings_set_pressure_decimals((app_settings_decimals_t)idx);
+    app_settings_commit();
+    app_ui_priv_apply_gauge_prefs();
+}
+
+static void temp_step_changed_cb(lv_event_t *e)
+{
+    uint32_t idx = lv_buttonmatrix_get_selected_button(lv_event_get_target(e));
+    if (idx >= APP_SETTINGS_TEMP_STEP_COUNT) {
+        return;
+    }
+    app_settings_set_temp_step((app_settings_temp_step_t)idx);
+    app_settings_commit();
+    app_ui_priv_apply_gauge_prefs();
+}
+
+static void peak_changed_cb(lv_event_t *e)
+{
+    uint32_t idx = lv_buttonmatrix_get_selected_button(lv_event_get_target(e));
+    if (idx > 1) {
+        return;
+    }
+    app_settings_set_show_peak(idx == 1);
+    app_settings_commit();
+    app_ui_priv_apply_gauge_prefs();
+}
+
+static void trend_changed_cb(lv_event_t *e)
+{
+    uint32_t idx = lv_buttonmatrix_get_selected_button(lv_event_get_target(e));
+    if (idx >= APP_SETTINGS_TREND_COUNT) {
+        return;
+    }
+    app_settings_set_trend_window((app_settings_trend_t)idx);
+    app_settings_commit();
+    app_ui_priv_apply_gauge_prefs();
+}
+
+/* How every face shows its number, under the list of faces. A segmented control is one widget. */
+static void build_readout_prefs(lv_obj_t *p)
+{
+    const app_settings_t *set = app_settings_get();
+    caption(p, "Boost decimals");
+    segmented(p, k_decimals_map, (uint32_t)set->pressure_decimals, decimals_changed_cb);
+    caption(p, "EGT rounded to");
+    segmented(p, k_temp_map, (uint32_t)set->temp_step, temp_step_changed_cb);
+    caption(p, "Peak figure");
+    segmented(p, k_badge_map, set->show_peak ? 1 : 0, peak_changed_cb);
+    caption(p, "Trend history");
+    segmented(p, k_trend_map, (uint32_t)set->trend_window, trend_changed_cb);
+}
 
 static void gauge_list_cb(lv_event_t *e)
 {
@@ -524,12 +614,13 @@ static void build_gauge(lv_obj_t *p)
     if (g.gauge_count == 0) {
         wrap_label(p, &st.body, "Only the built-in face is available. Add faces with the editor at "
                                 "http://<gauge>/editor/");
-        return;
+    } else {
+        /* One buttonmatrix, a face per row: twelve faces cost one widget, not twenty-four. */
+        lv_obj_t *bm = segmented(p, g.gauge_map, (uint32_t)g.gauge_active, gauge_list_cb);
+        lv_obj_set_height(bm, g.gauge_count * CONTROL_H + (g.gauge_count - 1) * 8);
     }
 
-    /* One buttonmatrix, a face per row: twelve faces cost one widget, not twenty-four. */
-    lv_obj_t *bm = segmented(p, g.gauge_map, (uint32_t)g.gauge_active, gauge_list_cb);
-    lv_obj_set_height(bm, g.gauge_count * CONTROL_H + (g.gauge_count - 1) * 8);
+    build_readout_prefs(p);
 }
 
 /* ---- Sensors ---- */

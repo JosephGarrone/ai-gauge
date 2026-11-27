@@ -9,15 +9,15 @@
   <source channel="egt" unit="C" min="0" max="900" damping="0.25"/>
 
   <face start-angle="225" sweep="270" background="#000000" radius="220">
-    <band from="0" to="72.67" color="#ebf0f2" width="12"/>
-    <band from="77.33" to="222.67" color="#ebf0f2" width="12"/>
-    <band from="227.33" to="372.67" color="#ebf0f2" width="12"/>
-    <band from="377.33" to="522.67" color="#ebf0f2" width="12"/>
-    <band from="527.33" to="672.67" color="#ebf0f2" width="12"/>
-    <band from="677.33" to="750" color="#ebf0f2" width="12"/>
-    <band from="750" to="822.67" color="#ff3030" width="12"/>
-    <band from="827.33" to="900" color="#ff3030" width="12"/>
-    <ticks major-every="150" minor-every="50" color="#ebf0f2" band-color="true">
+    <band from="0" to="72.67" color="#b0b4b6" width="12"/>
+    <band from="77.33" to="222.67" color="#b0b4b6" width="12"/>
+    <band from="227.33" to="372.67" color="#b0b4b6" width="12"/>
+    <band from="377.33" to="522.67" color="#b0b4b6" width="12"/>
+    <band from="527.33" to="672.67" color="#b0b4b6" width="12"/>
+    <band from="677.33" to="750" color="#b0b4b6" width="12"/>
+    <band from="750" to="822.67" color="#cc2626" width="12"/>
+    <band from="827.33" to="900" color="#cc2626" width="12"/>
+    <ticks major-every="150" minor-every="50" color="#b0b4b6" band-color="true">
       <major-shape>
         <polygon points="-6.5,-7 6.5,-7 0,9"/>
       </major-shape>
@@ -25,7 +25,7 @@
         <polygon points="-1.25,-7 1.25,-7 1.25,-1 -1.25,-1"/>
       </minor-shape>
     </ticks>
-    <labels every="150" font="montserrat_26" color="#ebf0f2" radius="166"/>
+    <labels every="150" font="montserrat_26" color="#b0b4b6" radius="166"/>
   </face>
 
   <needle color="#17caff">
@@ -38,9 +38,10 @@
     </hub>
   </needle>
 
-  <readout y="300" font="montserrat_48" format="%.0f" color="#ebf0f2"/>
-  <title text="EGT  °C" y="362" font="montserrat_16" color="#8f9aa0"/>
+  <readout y="262" font="montserrat_digits_80" format="%.0f" color="#ebf0f2"/>
+  <title text="EGT  °C" y="338" font="montserrat_22" color="#8f9aa0"/>
 
-  <peak color="#ffb000" length="16" width="5" value-y="382" font="montserrat_16" format="%.0f"/>
+  <peak color="#ffb000" length="16" width="5" value-y="352" font="montserrat_20" format="%.0f"/>
+  <trend y="378" width="200" height="50" line-width="3" color="#17caff"/>
   <alert above="750" flash-hz="2" color="#ff3030"/>
 </gauge>

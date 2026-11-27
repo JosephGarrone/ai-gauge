@@ -102,6 +102,9 @@ export const CASES = {
 `,
     peak: doc('<peak color="#00ff00" length="30" width="6" show-value="false" value-y="380" format="%.0f" prefix="MAX "/>'),
     barePeak: doc('<peak/>'),
+    trend: doc('<trend x="120" y="380" width="220" height="40" line-width="2" color="#00ff00" fill="#003300" alert-marks="false"/>'),
+    bareTrend: doc('<trend/>'),
+    trendClamps: doc('<trend width="2" height="-5" fill="nope"/><trend width="9999"/>'),
     boolVariants: doc('<peak show-value="0"/><alert above="1" chime="1"/><alert below="1" chime="yes"/><alert above="2" chime="true "/>'),
 
     shapes: doc(`<face><ticks major-every="5" minor-every="1" color="#ffffff">
@@ -240,6 +243,7 @@ export function randomDocuments(count, seed = 1) {
         () => `<title ${attrs([['text', text], ['x', num], ['y', num], ['font', font], ['color', colour]])}/>`,
         () => `<readout ${attrs([['x', num], ['y', num], ['font', font], ['format', fmt], ['prefix', text], ['suffix', text], ['color', colour]])}/>`,
         () => `<peak ${attrs([['color', colour], ['length', num], ['width', num], ['show-value', bool], ['value-y', num], ['font', font], ['format', fmt], ['prefix', text]])}/>`,
+        () => `<trend ${attrs([['x', num], ['y', num], ['width', num], ['height', num], ['line-width', num], ['color', colour], ['fill', colour], ['alert-marks', bool]])}/>`,
         () => `<alert ${attrs([['above', num], ['below', num], ['color', colour], ['flash-hz', num], ['chime', bool]])}/>`,
         () => pick(['<!-- note -->', '<unknown a="1"/>', slot('hub'), part(), '</needle>', '</ticks>']),
     ];

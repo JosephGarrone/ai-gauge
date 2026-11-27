@@ -242,6 +242,26 @@ static void dump(const gauge_config_t *c)
         printf("null");
     }
 
+    printf(",\"trend\":");
+    if (c->trend.present) {
+        printf("{\"x\":");
+        put_coord(c->trend.x);
+        printf(",\"y\":");
+        put_coord(c->trend.y);
+        printf(",\"width\":%u,\"height\":%u,\"lineWidth\":%u,\"color\":", c->trend.width_px,
+               c->trend.height_px, c->trend.line_width_px);
+        put_color(c->trend.color);
+        printf(",\"fill\":");
+        if (c->trend.has_fill) {
+            put_color(c->trend.fill);
+        } else {
+            printf("null");
+        }
+        printf(",\"alertMarks\":%s}", c->trend.alert_marks ? "true" : "false");
+    } else {
+        printf("null");
+    }
+
     printf(",\"alerts\":[");
     for (uint8_t i = 0; i < c->alert_count; i++) {
         const gauge_alert_t *a = &c->alerts[i];

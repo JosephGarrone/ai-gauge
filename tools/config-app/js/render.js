@@ -11,7 +11,7 @@
  * the same family the device's fonts are cut from; its metrics will not match LVGL to the pixel.
  */
 
-import { LIMITS, PANEL, fontSize, lineHeight } from './schema.js';
+import { FONT_BASELINE, LIMITS, PANEL, fontSize, lineHeight } from './schema.js';
 import {
     labelRadius, labelStep, lround, needleLength, polar, scaleRadius, shapeExtent, stepValues,
     tickRadius, valueToDeg,
@@ -29,7 +29,7 @@ export function escapeXml(s) {
 
 /** Pixels from the bottom of an LVGL line box up to the baseline, approximated for Montserrat. */
 function baseLine(font) {
-    return Math.round(fontSize(font) * 0.19);
+    return FONT_BASELINE[font] ?? Math.round(fontSize(font) * 0.19);
 }
 
 /**
@@ -170,7 +170,65 @@ export function renderFace(m, prefix = 'face') {
 
     return `<defs>${ticks.defs}</defs>` +
         `<rect width="${PANEL.width}" height="${PANEL.height}" fill="${m.face.background}" data-section="dial"/>` +
-        bands + ticks.body + labelsLayer(m) + titles;
+        bands + ticks.body + labelsLayer(m) + titles + renderTrend(m);
+}
+
+/** Where the trend strip sits: explicit, or centred in the gap under the dial (gauge_render.c). */
+export function trendBox(m) {
+    const t = m.trend;
+    const w = Math.min(t.width, PANEL.width);
+    return {
+        x: t.x ?? CX - Math.trunc(w / 2),
+        y: t.y ?? CY + Math.round(0.6 * CY),
+        w,
+        h: t.height,
+    };
+}
+
+function mixBlack(hex, pct) {
+    const v = parseInt(hex.slice(1), 16);
+    const c = (s) => Math.trunc((((v >> s) & 0xff) * pct) / 100).toString(16).padStart(2, '0');
+    return `#${c(16)}${c(8)}${c(0)}`;
+}
+
+/*
+ * The sparkline strip, with a made-up history: the device fills it from live readings, so the
+ * preview shows the shape it will take, across the face's own range, with the alert marks.
+ */
+export function renderTrend(m) {
+    if (!m.trend) return '';
+    const t = m.trend;
+    const { x, y, w, h } = trendBox(m);
+    const lw = t.lineWidth;
+    const top = lw / 2, bot = h - 1 - lw / 2;
+    const span = m.source.max - m.source.min;
+    const yOf = (v) => {
+        const f = span > 0 ? Math.min(1, Math.max(0, (v - m.source.min) / span)) : 0;
+        return y + bot - f * (bot - top);
+    };
+    const pts = [];
+    for (let i = 0; i < w; i++) {
+        const u = i / Math.max(1, w - 1);
+        const f = 0.1 + 0.45 * Math.exp(-(((u - 0.35) / 0.08) ** 2)) + 0.65 * Math.exp(-(((u - 0.78) / 0.07) ** 2)) +
+            0.35 * Math.exp(-(((u - 1) / 0.05) ** 2));
+        pts.push([x + i, yOf(m.source.min + Math.min(1, f) * span)]);
+    }
+    const line = pts.map(([px, py]) => `${n(px)},${n(py)}`).join(' ');
+    const fill = t.fill ?? mixBlack(t.color, 30);
+    let out = `<g data-section="trend">` +
+        `<line x1="${x}" y1="${y + h - 1}" x2="${x + w - 1}" y2="${y + h - 1}" stroke="${mixBlack(t.color, 30)}" stroke-width="2"/>` +
+        `<polygon points="${x},${y + h} ${line} ${x + w - 1},${y + h}" fill="${fill}"/>`;
+    if (t.alertMarks) {
+        for (const a of m.alerts) {
+            if (a.above === null || a.above <= m.source.min || a.above >= m.source.max) continue;
+            const ay = Math.round(yOf(a.above));
+            out += `<line x1="${x}" y1="${ay}" x2="${x + w - 1}" y2="${ay}" stroke="${a.color}" stroke-width="2" stroke-dasharray="6 6"/>`;
+        }
+    }
+    const [hx, hy] = pts[pts.length - 1];
+    out += `<polyline points="${line}" fill="none" stroke="${t.color}" stroke-width="${lw}" stroke-linejoin="round"/>` +
+        `<circle cx="${n(hx)}" cy="${n(hy)}" r="${lw + 2}" fill="${m.readout ? m.readout.color : '#ffffff'}"/></g>`;
+    return out;
 }
 
 /* --------------------------------------------------------------------- moving ------- */

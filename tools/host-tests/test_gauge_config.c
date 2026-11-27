@@ -508,6 +508,45 @@ static void test_shape_validation(void)
 
 /* ------------------------------------------------------------------------------------ */
 
+static void test_trend(void)
+{
+    gauge_config_t cfg;
+
+    CHECK(gauge_config_parse(MINIMAL, 0, &cfg) == GAUGE_CONFIG_OK, "minimal should parse");
+    CHECK(!cfg.trend.present, "trend should be off unless the element is present");
+
+    CHECK(gauge_config_parse("<gauge version=\"1\" id=\"t\"><source channel=\"c\" min=\"0\" "
+                             "max=\"10\"/><trend/></gauge>", 0, &cfg) == GAUGE_CONFIG_OK,
+          "bare trend should parse");
+    CHECK(cfg.trend.present && cfg.trend.x == INT16_MIN && cfg.trend.y == INT16_MIN, "auto position");
+    CHECK(cfg.trend.width_px == 200 && cfg.trend.height_px == 50 && cfg.trend.line_width_px == 3,
+          "default size");
+    CHECK(!cfg.trend.has_fill && cfg.trend.alert_marks, "derived fill, marks on");
+    CHECK(cfg.warning_count == 0, "unexpected warnings: %u", cfg.warning_count);
+
+    CHECK(gauge_config_parse("<gauge version=\"1\" id=\"t\"><source channel=\"c\" min=\"0\" "
+                             "max=\"10\"/><trend x=\"120\" y=\"380\" width=\"220\" height=\"40\" "
+                             "line-width=\"2\" color=\"#00ff00\" fill=\"#003300\" "
+                             "alert-marks=\"false\"/></gauge>", 0, &cfg) == GAUGE_CONFIG_OK,
+          "trend should parse");
+    CHECK(cfg.trend.x == 120 && cfg.trend.y == 380 && cfg.trend.width_px == 220 &&
+              cfg.trend.height_px == 40 && cfg.trend.line_width_px == 2, "geometry");
+    CHECK(cfg.trend.has_fill && cfg.trend.fill.g == 0x33, "fill");
+    CHECK(!cfg.trend.alert_marks, "alert-marks=false");
+
+    /* Too small or too wide is clamped, and counted. */
+    CHECK(gauge_config_parse("<gauge version=\"1\" id=\"t\"><source channel=\"c\" min=\"0\" "
+                             "max=\"10\"/><trend width=\"2\" height=\"1\"/></gauge>", 0, &cfg) ==
+              GAUGE_CONFIG_OK, "small trend should parse");
+    CHECK(cfg.trend.width_px == GAUGE_CONFIG_TREND_MIN_PX &&
+              cfg.trend.height_px == GAUGE_CONFIG_TREND_MIN_PX && cfg.warning_count == 2,
+          "clamped up, 2 warnings (got %u)", cfg.warning_count);
+    CHECK(gauge_config_parse("<gauge version=\"1\" id=\"t\"><source channel=\"c\" min=\"0\" "
+                             "max=\"10\"/><trend width=\"900\"/></gauge>", 0, &cfg) ==
+              GAUGE_CONFIG_OK, "wide trend should parse");
+    CHECK(cfg.trend.width_px == GAUGE_CONFIG_TREND_MAX_W_PX && cfg.warning_count == 1, "clamped down");
+}
+
 static void test_peak(void)
 {
     gauge_config_t cfg;
@@ -590,6 +629,7 @@ int main(void)
         {"unsafe_formats_rejected",  test_unsafe_formats_rejected},
         {"builtin_default_is_valid", test_builtin_default_is_valid},
         {"peak",                     test_peak},
+        {"trend",                    test_trend},
         {"tick_band_color",          test_tick_band_color},
         {"shapes_absent_by_default", test_shapes_absent_by_default},
         {"shapes_parse",             test_shapes_parse},

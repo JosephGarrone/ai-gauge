@@ -11,7 +11,7 @@ import {
     renderStaticSvg,
 } from './render.js';
 import {
-    LIMITS, PANEL, defaultAlert, defaultBand, defaultLabels, defaultPeak, defaultReadout, defaultTicks,
+    LIMITS, PANEL, defaultAlert, defaultBand, defaultLabels, defaultPeak, defaultReadout, defaultTicks, defaultTrend,
     defaultTitle, lineHeight,
 } from './schema.js';
 import { labelRadius, needleLength, scaleRadius, valueToDeg } from './geometry.js';
@@ -35,6 +35,7 @@ const SECTIONS = [
     ['titles', 'Titles', 'face'],
     ['readout', 'Readout', 'face'],
     ['peak', 'Peak hold', 'face'],
+    ['trend', 'Trend', 'face'],
     ['alerts', 'Alerts', 'face'],
     ['library', 'My faces', 'manage'],
     ['device', 'Device', 'manage'],
@@ -620,6 +621,28 @@ const INSPECTORS = {
                     form.format('Format', () => k().format, (v) => { k().format = v; }),
                     form.text('Prefix', () => k().prefix, (v) => { k().prefix = v; }, { maxBytes: LIMITS.text })),
             ] : null,
+        ];
+    },
+
+    trend(form, m) {
+        const on = !!m.trend;
+        const head = sectionHead('Trend', 'A sparkline of recent readings across the face\'s range, newest on the right. How much history it holds (30, 60 or 120 s) is a setting on the gauge.',
+            presenceToggle('Trend on', on, (v) => app.commit((mm) => { mm.trend = v ? defaultTrend() : null; }, { rebuild: true })));
+        if (!on) return [head];
+        const t = () => m.trend;
+        return [
+            head,
+            row(
+                form.number('Left x', () => t().x, (v) => { t().x = v; }, { integer: true, unit: 'px', empty: null, placeholder: 'centred' }),
+                form.number('Top y', () => t().y, (v) => { t().y = v; }, { integer: true, unit: 'px', empty: null, placeholder: `under the dial (${PANEL.cy + Math.round(0.6 * PANEL.cy)})` })),
+            row(
+                form.number('Width', () => t().width, (v) => { t().width = v; }, { integer: true, min: LIMITS.trendMinPx, unit: 'px', help: 'One pixel per column of history.' }),
+                form.number('Height', () => t().height, (v) => { t().height = v; }, { integer: true, min: LIMITS.trendMinPx, unit: 'px' }),
+                form.number('Line width', () => t().lineWidth, (v) => { t().lineWidth = v; }, { integer: true, min: 0, unit: 'px' })),
+            row(
+                form.color('Trace', () => t().color, (v) => { t().color = v; }),
+                form.color('Fill', () => t().fill, (v) => { t().fill = v; }, { optional: true, inherited: () => t().color, help: 'Unticked: the trace colour at 30%.' })),
+            form.checkbox('Mark the alert thresholds', () => t().alertMarks, (v) => { t().alertMarks = v; }),
         ];
     },
 

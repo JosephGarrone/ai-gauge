@@ -9,15 +9,15 @@
   <source channel="boost" unit="psi" min="0" max="30" damping="0.15"/>
 
   <face start-angle="225" sweep="270" background="#000000" radius="220">
-    <band from="0" to="2.42" color="#ebf0f2" width="12"/>
-    <band from="2.58" to="7.42" color="#ebf0f2" width="12"/>
-    <band from="7.58" to="12.42" color="#ebf0f2" width="12"/>
-    <band from="12.58" to="17.42" color="#ebf0f2" width="12"/>
-    <band from="17.58" to="22.42" color="#ebf0f2" width="12"/>
-    <band from="22.58" to="26" color="#ebf0f2" width="12"/>
-    <band from="26" to="27.42" color="#ff3030" width="12"/>
-    <band from="27.58" to="30" color="#ff3030" width="12"/>
-    <ticks major-every="5" minor-every="1" color="#ebf0f2" band-color="true">
+    <band from="0" to="2.42" color="#b0b4b6" width="12"/>
+    <band from="2.58" to="7.42" color="#b0b4b6" width="12"/>
+    <band from="7.58" to="12.42" color="#b0b4b6" width="12"/>
+    <band from="12.58" to="17.42" color="#b0b4b6" width="12"/>
+    <band from="17.58" to="22.42" color="#b0b4b6" width="12"/>
+    <band from="22.58" to="26" color="#b0b4b6" width="12"/>
+    <band from="26" to="27.42" color="#cc2626" width="12"/>
+    <band from="27.58" to="30" color="#cc2626" width="12"/>
+    <ticks major-every="5" minor-every="1" color="#b0b4b6" band-color="true">
       <major-shape>
         <polygon points="-6.5,-7 6.5,-7 0,9"/>
       </major-shape>
@@ -25,7 +25,7 @@
         <polygon points="-1.25,-7 1.25,-7 1.25,-1 -1.25,-1"/>
       </minor-shape>
     </ticks>
-    <labels every="5" font="montserrat_32" color="#ebf0f2" radius="172"/>
+    <labels every="5" font="montserrat_32" color="#b0b4b6" radius="172"/>
   </face>
 
   <needle color="#17caff">
@@ -38,9 +38,10 @@
     </hub>
   </needle>
 
-  <readout y="300" font="montserrat_48" format="%.1f" color="#ebf0f2"/>
-  <title text="BOOST  PSI" y="362" font="montserrat_16" color="#8f9aa0"/>
+  <readout y="262" font="montserrat_digits_80" format="%.0f" color="#ebf0f2"/>
+  <title text="BOOST  PSI" y="338" font="montserrat_22" color="#8f9aa0"/>
 
-  <peak color="#ffb000" length="16" width="5" value-y="382" font="montserrat_16" format="%.1f"/>
+  <peak color="#ffb000" length="16" width="5" value-y="352" font="montserrat_20" format="%.0f"/>
+  <trend y="378" width="200" height="50" line-width="3" color="#17caff"/>
   <alert above="26" flash-hz="2" color="#ff3030"/>
 </gauge>

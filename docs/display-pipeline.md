@@ -52,6 +52,21 @@ the rasterisation itself, which is not yet measured.
 Digital readouts are their own small labels with their own background, so a changing number
 dirties only its own box rather than the dial behind it.
 
+### 3a. The trend strip repaints only when a column completes
+
+A face's `<trend>` sparkline keeps one column per pixel of history. Samples accumulate into the
+current column; when its slice of the window (window / width: 150 ms at 30 s and 200 px) is up, the
+column closes, two A8 masks (fill and trace) are rebuilt from the ring on the CPU, and only the
+strip's own object is invalidated. Between columns it costs nothing. It sits in the gap under the
+dial, which the needle's box does not reach. See
+[ADR 0014](adr/0014-glanceable-burn-in-aware-dial.md).
+
+### 3b. Pixel shift redraws the dial once per step
+
+Burn-in protection translates the whole dial tile by up to 3 px, every few minutes. Each step is a
+full-screen repaint (one dropped frame); the renderer then recomputes the needle and peak marker's
+cached screen coordinates (`gauge_render_parent_moved`), so their tight dirty boxes stay correct.
+
 ### Frame-rate cap
 
 The display redraws on LVGL's refresh timer. Its period is the user's *Frame rate limit* setting

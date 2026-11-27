@@ -43,13 +43,61 @@ typedef enum {
     APP_SETTINGS_FPS_CAP_COUNT,
 } app_settings_fps_cap_t;
 
+/**
+ * Decimal places on a pressure readout. "Auto" follows the face's unit: none for psi and kPa, one
+ * for bar. A face in any other unit keeps its own format.
+ */
+typedef enum {
+    APP_SETTINGS_DECIMALS_AUTO = 0,
+    APP_SETTINGS_DECIMALS_0,
+    APP_SETTINGS_DECIMALS_1,
+    APP_SETTINGS_DECIMALS_2,
+    APP_SETTINGS_DECIMALS_COUNT,
+} app_settings_decimals_t;
+
+/** How a temperature readout is rounded: to the degree, or to the nearest 10 degrees. */
+typedef enum {
+    APP_SETTINGS_TEMP_STEP_1 = 0,
+    APP_SETTINGS_TEMP_STEP_10,
+    APP_SETTINGS_TEMP_STEP_COUNT,
+} app_settings_temp_step_t;
+
+/** How much history the sparkline strip shows. */
+typedef enum {
+    APP_SETTINGS_TREND_30S = 0,
+    APP_SETTINGS_TREND_60S,
+    APP_SETTINGS_TREND_120S,
+    APP_SETTINGS_TREND_COUNT,
+} app_settings_trend_t;
+
+/** How often the dial moves a few pixels, so its static artwork does not burn into the AMOLED. */
+typedef enum {
+    APP_SETTINGS_SHIFT_OFF = 0,
+    APP_SETTINGS_SHIFT_1MIN,
+    APP_SETTINGS_SHIFT_3MIN,
+    APP_SETTINGS_SHIFT_10MIN,
+    APP_SETTINGS_SHIFT_COUNT,
+} app_settings_shift_t;
+
 typedef struct {
     uint8_t brightness;                          /**< Percent, clamped to the range above. */
     bool    show_fps;                            /**< FPS badge on the gauge screen. */
     app_settings_rotation_t rotation;            /**< Screen rotation. */
     app_settings_fps_cap_t  fps_cap;             /**< Frame-rate cap. */
+    app_settings_decimals_t  pressure_decimals;  /**< Boost and other pressure readouts. */
+    app_settings_temp_step_t temp_step;          /**< EGT and other temperature readouts. */
+    bool                     show_peak;          /**< The peak figure under the readout. */
+    app_settings_trend_t     trend_window;       /**< Sparkline history. */
+    app_settings_shift_t     pixel_shift;        /**< Burn-in protection. */
+    bool                     engine_off_screen;  /**< Go dark with a drifting notice when the engine stops. */
     char    active_gauge[APP_SETTINGS_MAX_GAUGE_ID];
 } app_settings_t;
+
+/** @brief Seconds of history for a trend window setting. */
+uint32_t app_settings_trend_seconds(app_settings_trend_t w);
+
+/** @brief Milliseconds between pixel-shift steps, or 0 for off. */
+uint32_t app_settings_shift_period_ms(app_settings_shift_t s);
 
 /**
  * @brief Load settings from NVS, filling in defaults for anything missing.
@@ -73,6 +121,24 @@ void app_settings_set_rotation(app_settings_rotation_t rotation);
 
 /** @brief Update the frame-rate cap in memory. Out-of-range values are ignored. */
 void app_settings_set_fps_cap(app_settings_fps_cap_t cap);
+
+/** @brief Update the pressure readout's decimal places in memory. Out-of-range values are ignored. */
+void app_settings_set_pressure_decimals(app_settings_decimals_t d);
+
+/** @brief Update the temperature readout's rounding in memory. Out-of-range values are ignored. */
+void app_settings_set_temp_step(app_settings_temp_step_t step);
+
+/** @brief Update whether the peak figure is shown, in memory. */
+void app_settings_set_show_peak(bool show);
+
+/** @brief Update the sparkline window in memory. Out-of-range values are ignored. */
+void app_settings_set_trend_window(app_settings_trend_t w);
+
+/** @brief Update the pixel-shift interval in memory. Out-of-range values are ignored. */
+void app_settings_set_pixel_shift(app_settings_shift_t s);
+
+/** @brief Update whether the engine-off screen is used, in memory. */
+void app_settings_set_engine_off_screen(bool on);
 
 /** @brief Update the active gauge id in memory. */
 void app_settings_set_active_gauge(const char *id);
