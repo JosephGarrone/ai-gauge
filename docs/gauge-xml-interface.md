@@ -258,6 +258,17 @@ Omit it and peak-hold is off.
 
 The gauge hides the peak figure unless the user turns it on in its settings.
 
+### `<icon>` — at most one
+
+A static symbol baked into the face: `<polygon>` / `<circle>` children exactly as in a shape slot
+(§4), drawn unrotated and centred on (`x`, `y`). Omit it, or give it no parts, for none.
+
+| Attribute | Type | Default | Notes |
+|---|---|---|---|
+| `x` | int | 233 (centre) | Centre |
+| `y` | int | `0` | Centre |
+| `color` | colour | `#ffffff` | Inherited by parts without their own |
+
 ### `<trend>` — at most one
 
 A sparkline of recent readings. Omit it and there is none. The history length is a gauge setting.

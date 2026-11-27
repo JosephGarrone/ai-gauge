@@ -35,6 +35,7 @@ const SECTIONS = [
     ['titles', 'Titles', 'face'],
     ['readout', 'Readout', 'face'],
     ['peak', 'Peak hold', 'face'],
+    ['icon', 'Icon', 'face'],
     ['trend', 'Trend', 'face'],
     ['alerts', 'Alerts', 'face'],
     ['library', 'My faces', 'manage'],
@@ -621,6 +622,23 @@ const INSPECTORS = {
                     form.format('Format', () => k().format, (v) => { k().format = v; }),
                     form.text('Prefix', () => k().prefix, (v) => { k().prefix = v; }, { maxBytes: LIMITS.text })),
             ] : null,
+        ];
+    },
+
+    icon(form, m) {
+        const on = !!m.icon;
+        const head = sectionHead('Icon', 'A symbol baked into the face, such as a turbo or an exhaust thermometer: polygons and circles in the XML, drawn as authored and centred on x, y. Edit its parts in the XML tab.',
+            presenceToggle('Icon on', on, (v) => app.commit((mm) => {
+                mm.icon = v ? { x: null, y: PANEL.cy - 60, shape: { color: '#8f9aa0', parts: [{ kind: 'circle', cx: 0, cy: 0, r: 12, color: null }] } } : null;
+            }, { rebuild: true })));
+        if (!on) return [head];
+        const k = () => m.icon;
+        return [
+            head,
+            row(
+                form.number('Centre x', () => k().x, (v) => { k().x = v; }, { integer: true, unit: 'px', empty: null, placeholder: 'centred' }),
+                form.number('Centre y', () => k().y, (v) => { k().y = v; }, { integer: true, unit: 'px' })),
+            form.color('Colour', () => k().shape.color, (v) => { k().shape.color = v; }, { optional: true, inherited: () => '#ffffff', help: 'Parts without their own colour take this.' }),
         ];
     },
 

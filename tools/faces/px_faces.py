@@ -12,6 +12,7 @@ with the needle outline and palette from the obd-display dashboard (NeedleGaugeV
 Styles/Colors.axaml). The design notes are in docs/gauge-faces.md.
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -43,7 +44,10 @@ GAP_DEG = 1.4                       # break in the ring at each half-major
 # caption, with the sparkline in the gap under the dial.
 READOUT_FONT = "montserrat_digits_80"  # digits only: tools/fonts/make_digits_font.py
 READOUT_Y = 258                     # top edge of the number (58 px tall)
-CAPTION_Y = 342                     # centre of the caption, 14 px clear of the number
+CAPTION_Y = 342                     # centre of the unit, 14 px clear of the number
+# What the gauge measures is an icon above the hub rather than a word, as on the cluster's own
+# telltales; the readout keeps only its unit, under the number.
+ICON_Y = 162                        # centre of the icon, ~70 px above the hub
 PEAK_Y = 356                        # top edge of the peak value, when the user turns it on
 TREND_Y = 378                       # top edge of the sparkline strip
 TREND_W, TREND_H = 200, 50
@@ -71,6 +75,47 @@ def needle_outline():
     pts = right + [(-x, y) for x, y in reversed(right)]
     # Needle-local +y is the tip; the schema's needle points up (-y).
     return " ".join(f"{x * k:.2f},{-y * k:.2f}".replace(".00", "") for x, y in pts)
+
+
+# Icons, about 40 px across, centred on (0, 0), x right and y down. Polygons and circles only: the
+# schema's <icon> takes the same parts as a custom needle (docs/gauge-config-schema.md, Shapes).
+#
+# Boost: a turbocharger's compressor housing seen end-on, the symbol aftermarket boost gauges and
+# Ford's own turbo warnings use. The volute's outlet leaves tangentially at the top right; two vanes
+# on the wheel suggest it turning.
+TURBO_ICON = """    <polygon points="2,-17 25,-17 25,-8.5 2,-8.5"/>
+    <circle r="17"/>
+    <circle r="12.5" color="#000000"/>
+    <circle r="4.5"/>
+    <polygon points="-1.6,-3.6 1.6,-3.6 6,-11 2.6,-12"/>
+    <polygon points="1.6,3.6 -1.6,3.6 -6,11 -2.6,12"/>"""
+
+# EGT: a thermometer beside an exhaust tailpipe with heat rising off it, the usual pyrometer symbol.
+def _wave(x):
+    """A 2.6 px zigzag rising from y 0 to y -18, as a closed polygon."""
+    c = [(x, 0), (x + 3.2, -4.5), (x, -9), (x + 3.2, -13.5), (x, -18)]
+    left = [(px - 1.6, py) for px, py in c]
+    right = [(px + 1.6, py) for px, py in reversed(c)]
+    return " ".join(f"{px:g},{py:g}" for px, py in left + right)
+
+
+EGT_ICON = f"""    <polygon points="-19,-17 -12,-17 -12,6 -19,6"/>
+    <circle cx="-15.5" cy="9" r="7"/>
+    <polygon points="-4,8 19,8 23,15 -4,15"/>
+    <polygon points="{_wave(-1)}"/>
+    <polygon points="{_wave(7)}"/>
+    <polygon points="{_wave(15)}"/>"""
+
+
+# Drawn at ~40 px, then scaled up so they read at a glance from the driver's seat.
+ICON_SCALE = 1.45
+
+
+def scaled(icon):
+    """The geometry attributes (points, cx, cy, r) times ICON_SCALE; colours untouched."""
+    num = re.compile(r"-?\d+(?:\.\d+)?")
+    fmt = lambda m: f"{float(m.group()) * ICON_SCALE:.2f}".rstrip("0").rstrip(".")
+    return re.sub(r'\b(points|cx|cy|r)="([^"]*)"', lambda a: f'{a.group(1)}="{num.sub(fmt, a.group(2))}"', icon)
 
 
 def needle_xml(builtin):
@@ -110,8 +155,8 @@ def num(v):
     return f"{v:.2f}".rstrip("0").rstrip(".")
 
 
-def face(gid, comment, channel, unit, vmax, major, minor, red_from, caption, damping, fmt, label_font, label_r,
-         builtin_needle=False):
+def face(gid, comment, channel, unit, vmax, major, minor, red_from, caption, icon, damping, fmt, label_font,
+         label_r, builtin_needle=False):
     band_xml = "\n".join(
         f'    <band from="{num(a)}" to="{num(b)}" color="{c}" width="{BAND_W}"/>'
         for a, b, c in bands(0, vmax, major, red_from))
@@ -138,6 +183,10 @@ def face(gid, comment, channel, unit, vmax, major, minor, red_from, caption, dam
     <labels every="{major}" font="{label_font}" color="{ART}" radius="{label_r}"/>
   </face>
 
+  <icon y="{ICON_Y}" color="{MUTED}">
+{scaled(icon)}
+  </icon>
+
 {needle_xml(builtin_needle)}
 
   <readout y="{READOUT_Y}" font="{READOUT_FONT}" format="{fmt}" color="{OFF_WHITE}"/>
@@ -151,13 +200,13 @@ def face(gid, comment, channel, unit, vmax, major, minor, red_from, caption, dam
 
 
 BOOST = dict(gid="boost", comment="Boost gauge, 0-30 PSI, redline from 26 as on the obd-display boost dial.",
-             channel="boost", unit="psi", vmax=30, major=5, minor=1, red_from=26, caption="BOOST  PSI",
+             channel="boost", unit="psi", vmax=30, major=5, minor=1, red_from=26, caption="PSI", icon=TURBO_ICON,
              damping="0.15", fmt="%.0f",
              # Numerals at ~0.8 R, as on the tacho, pulled in far enough to clear the pointers at 3
              # and 9 o'clock, where a number is set sideways to the radius.
              label_font="montserrat_32", label_r=172)
 EGT = dict(gid="egt", comment="Exhaust gas temperature gauge, 0-900 C, redline from 750.",
-           channel="egt", unit="C", vmax=900, major=150, minor=50, red_from=750, caption="EGT  °C",
+           channel="egt", unit="C", vmax=900, major=150, minor=50, red_from=750, caption="°C", icon=EGT_ICON,
            damping="0.25", fmt="%.0f",
            # Three-digit numbers: the tacho only ever has one, so a size down to keep the same clearance.
            label_font="montserrat_26", label_r=166)

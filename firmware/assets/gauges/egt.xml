@@ -28,6 +28,15 @@
     <labels every="150" font="montserrat_26" color="#b0b4b6" radius="166"/>
   </face>
 
+  <icon y="162" color="#8f9aa0">
+    <polygon points="-27.55,-24.65 -17.4,-24.65 -17.4,8.7 -27.55,8.7"/>
+    <circle cx="-22.47" cy="13.05" r="10.15"/>
+    <polygon points="-5.8,11.6 27.55,11.6 33.35,21.75 -5.8,21.75"/>
+    <polygon points="-3.77,0 0.87,-6.52 -3.77,-13.05 0.87,-19.57 -3.77,-26.1 0.87,-26.1 5.51,-19.57 0.87,-13.05 5.51,-6.52 0.87,0"/>
+    <polygon points="7.83,0 12.47,-6.52 7.83,-13.05 12.47,-19.57 7.83,-26.1 12.47,-26.1 17.11,-19.57 12.47,-13.05 17.11,-6.52 12.47,0"/>
+    <polygon points="19.43,0 24.07,-6.52 19.43,-13.05 24.07,-19.57 19.43,-26.1 24.07,-26.1 28.71,-19.57 24.07,-13.05 28.71,-6.52 24.07,0"/>
+  </icon>
+
   <needle color="#17caff">
     <shape>
       <polygon points="4.90,7.26 5.44,-35.56 8.35,-44.64 6.90,-71.85 7.66,-71.85 2.18,-179.27 1.45,-180 -1.45,-180 -2.18,-179.27 -7.66,-71.85 -6.90,-71.85 -8.35,-44.64 -5.44,-35.56 -4.90,7.26"/>
@@ -39,7 +48,7 @@
   </needle>
 
   <readout y="258" font="montserrat_digits_80" format="%.0f" color="#ebf0f2"/>
-  <title text="EGT  °C" y="342" font="montserrat_22" color="#8f9aa0"/>
+  <title text="°C" y="342" font="montserrat_22" color="#8f9aa0"/>
 
   <peak color="#ffb000" length="16" width="5" value-y="356" font="montserrat_20" format="%.0f"/>
   <trend y="378" width="200" height="50" line-width="3" color="#17caff"/>

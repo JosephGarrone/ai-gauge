@@ -486,6 +486,9 @@ void gauge_config_set_defaults(gauge_config_t *cfg)
     snprintf(cfg->peak.format, sizeof(cfg->peak.format), "%%.1f");
     snprintf(cfg->peak.prefix, sizeof(cfg->peak.prefix), "PEAK ");
 
+    cfg->icon.x = INT16_MIN; /* centre horizontally */
+    cfg->icon.y = 0;
+
     cfg->trend.x             = INT16_MIN; /* centre horizontally */
     cfg->trend.y             = INT16_MIN; /* in the gap under the dial */
     cfg->trend.width_px      = 200;
@@ -1058,7 +1061,7 @@ gauge_config_err_t gauge_config_parse(const char *xml, size_t len, gauge_config_
                 ctx   = CTX_NONE;
                 shape = NULL;
             } else if (tag_is(&tag, "major-shape") || tag_is(&tag, "minor-shape") ||
-                       tag_is(&tag, "shape") || tag_is(&tag, "hub")) {
+                       tag_is(&tag, "shape") || tag_is(&tag, "hub") || tag_is(&tag, "icon")) {
                 shape = NULL;
             }
             continue;
@@ -1104,6 +1107,13 @@ gauge_config_err_t gauge_config_parse(const char *xml, size_t len, gauge_config_
             parse_readout(&tag, cfg);
         } else if (tag_is(&tag, "peak")) {
             parse_peak(&tag, cfg);
+        } else if (tag_is(&tag, "icon")) {
+            /* A shape container at the top level. A repeated <icon> replaces the earlier one. */
+            cfg->icon.x = INT16_MIN;
+            cfg->icon.y = 0;
+            attr_coord(&tag, "x", &cfg->icon.x, &cfg->warning_count);
+            attr_coord(&tag, "y", &cfg->icon.y, &cfg->warning_count);
+            shape = open_shape(&tag, &cfg->icon.shape, &cfg->warning_count);
         } else if (tag_is(&tag, "trend")) {
             parse_trend(&tag, cfg);
         } else if (tag_is(&tag, "alert")) {

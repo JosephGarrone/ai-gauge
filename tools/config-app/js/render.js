@@ -170,7 +170,14 @@ export function renderFace(m, prefix = 'face') {
 
     return `<defs>${ticks.defs}</defs>` +
         `<rect width="${PANEL.width}" height="${PANEL.height}" fill="${m.face.background}" data-section="dial"/>` +
-        bands + ticks.body + labelsLayer(m) + titles + renderTrend(m);
+        bands + ticks.body + labelsLayer(m) + titles + renderIcon(m) + renderTrend(m);
+}
+
+/** The face's icon, drawn as authored and centred on (x, y): baked into the background. */
+export function renderIcon(m) {
+    if (!m.icon) return '';
+    const x = m.icon.x ?? CX;
+    return `<g transform="translate(${x} ${m.icon.y})" data-section="icon">${shapeParts(m.icon.shape, '#ffffff')}</g>`;
 }
 
 /** Where the trend strip sits: explicit, or centred in the gap under the dial (gauge_render.c). */

@@ -28,6 +28,15 @@
     <labels every="5" font="montserrat_32" color="#b0b4b6" radius="172"/>
   </face>
 
+  <icon y="162" color="#8f9aa0">
+    <polygon points="2.9,-24.65 36.25,-24.65 36.25,-12.32 2.9,-12.32"/>
+    <circle r="24.65"/>
+    <circle r="18.12" color="#000000"/>
+    <circle r="6.52"/>
+    <polygon points="-2.32,-5.22 2.32,-5.22 8.7,-15.95 3.77,-17.4"/>
+    <polygon points="2.32,5.22 -2.32,5.22 -8.7,15.95 -3.77,17.4"/>
+  </icon>
+
   <needle color="#17caff">
     <shape>
       <polygon points="4.90,7.26 5.44,-35.56 8.35,-44.64 6.90,-71.85 7.66,-71.85 2.18,-179.27 1.45,-180 -1.45,-180 -2.18,-179.27 -7.66,-71.85 -6.90,-71.85 -8.35,-44.64 -5.44,-35.56 -4.90,7.26"/>
@@ -39,7 +48,7 @@
   </needle>
 
   <readout y="258" font="montserrat_digits_80" format="%.0f" color="#ebf0f2"/>
-  <title text="BOOST  PSI" y="342" font="montserrat_22" color="#8f9aa0"/>
+  <title text="PSI" y="342" font="montserrat_22" color="#8f9aa0"/>
 
   <peak color="#ffb000" length="16" width="5" value-y="356" font="montserrat_20" format="%.0f"/>
   <trend y="378" width="200" height="50" line-width="3" color="#17caff"/>

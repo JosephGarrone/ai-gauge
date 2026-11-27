@@ -242,6 +242,17 @@ static void dump(const gauge_config_t *c)
         printf("null");
     }
 
+    printf(",\"icon\":");
+    if (c->icon.shape.part_count > 0) {
+        printf("{\"x\":");
+        put_coord(c->icon.x);
+        printf(",\"y\":%d,\"shape\":", c->icon.y);
+        put_shape(&c->icon.shape);
+        putchar('}');
+    } else {
+        printf("null");
+    }
+
     printf(",\"trend\":");
     if (c->trend.present) {
         printf("{\"x\":");

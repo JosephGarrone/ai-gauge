@@ -415,6 +415,11 @@ export function validateModel(m) {
     checkReadout(is, m);
     checkPeak(is, m);
     checkTrend(is, m);
+    if (m.icon) {
+        if (m.icon.x !== null) checkRange(is, 'icon', 'Icon x', m.icon.x, -LIMITS.coord, LIMITS.coord);
+        checkRange(is, 'icon', 'Icon y', m.icon.y, -LIMITS.coord, LIMITS.coord);
+        checkShape(is, 'icon', 'Icon', m.icon.shape);
+    }
     checkAlerts(is, m);
 
     const xml = serializeGauge(m);

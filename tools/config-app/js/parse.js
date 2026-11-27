@@ -693,7 +693,7 @@ export function parseGauge(xml) {
             if (name === 'ticks' || name === 'needle') {
                 ctx = null;
                 slot = null;
-            } else if (name === 'major-shape' || name === 'minor-shape' || name === 'shape' || name === 'hub') {
+            } else if (name === 'major-shape' || name === 'minor-shape' || name === 'shape' || name === 'hub' || name === 'icon') {
                 slot = null;
             }
             continue;
@@ -737,6 +737,13 @@ export function parseGauge(xml) {
             parseReadout(r, tag, m);
         } else if (name === 'peak') {
             parsePeak(r, tag, m);
+        } else if (name === 'icon') {
+            // A shape container at the top level; a repeated <icon> replaces the earlier one.
+            const x = r.coord(tag, 'x', null, 'icon');
+            const y = r.coord(tag, 'y', 0, 'icon');
+            const s = openShape(r, tag, 'icon');
+            m.icon = { x, y, shape: s.shape };
+            slot = tag.selfClosing ? null : s;
         } else if (name === 'trend') {
             parseTrend(r, tag, m);
         } else if (name === 'alert') {
@@ -754,6 +761,7 @@ export function parseGauge(xml) {
     }
     if (m.needle.shape?.parts.length === 0) m.needle.shape = null;
     if (m.needle.hub?.parts.length === 0) m.needle.hub = null;
+    if (m.icon?.shape.parts.length === 0) m.icon = null;
 
     return { ok: true, model: m, warnings: r.warnings };
 }
@@ -762,5 +770,6 @@ function slotName(m, slot) {
     if (m.ticks?.majorShape === slot.shape) return 'major tick shape';
     if (m.ticks?.minorShape === slot.shape) return 'minor tick shape';
     if (m.needle.shape === slot.shape) return 'needle shape';
+    if (m.icon?.shape === slot.shape) return 'icon';
     return 'hub shape';
 }

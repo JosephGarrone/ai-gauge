@@ -203,6 +203,22 @@ Omit the element to disable peak-hold.
 Whether the peak **figure** shows is also a user setting on the gauge (off by default); the marker
 on the scale is unaffected by it.
 
+### `<icon>` (0..1)
+
+A symbol baked into the pre-rendered face, such as a turbo or an exhaust thermometer: the same
+`<polygon>` and `<circle>` parts as a custom shape ([Shapes](#shapes)), drawn as authored (not
+rotated) and centred on `x`, `y`. It costs nothing per frame. The shipped faces put one above the
+hub in place of a word like "BOOST", the way the cluster's own telltales do.
+
+| Attribute | Type | Default | Meaning |
+|---|---|---|---|
+| `x` | int | panel centre | Centre |
+| `y` | int | `0` | Centre |
+| `color` | colour | `#ffffff` | For parts that do not set their own |
+
+An icon with no parts is no icon. A repeated `<icon>` replaces the earlier one. Parts count
+against the usual shape limits (6 parts, 64 points).
+
 ### `<trend>` (0..1)
 
 A sparkline of recent readings across the face's own `min`..`max`, newest on the right, with a dot
@@ -277,6 +293,7 @@ downwards**: the SVG convention. The firmware rotates it clockwise by the releva
   dial centre. The built-in major tick is equivalent to the rectangle
   `-2,0 2,0 2,20 -2,20`.
 - **Hub:** drawn as authored, centred on the pivot.
+- **Icon:** drawn as authored, centred on the icon's `x`, `y`.
 
 Coordinates may be fractional. They are stored to 1/16 px and edges are anti-aliased.
 

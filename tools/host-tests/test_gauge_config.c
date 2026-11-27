@@ -508,6 +508,29 @@ static void test_shape_validation(void)
 
 /* ------------------------------------------------------------------------------------ */
 
+static void test_icon(void)
+{
+    gauge_config_t cfg;
+
+    CHECK(gauge_config_parse(MINIMAL, 0, &cfg) == GAUGE_CONFIG_OK, "minimal should parse");
+    CHECK(cfg.icon.shape.part_count == 0, "no icon unless the element is present");
+
+    CHECK(gauge_config_parse("<gauge version=\"1\" id=\"i\"><source channel=\"c\" min=\"0\" "
+                             "max=\"10\"/><icon y=\"160\" color=\"#8f9aa0\"><circle r=\"17\"/>"
+                             "<circle r=\"12\" color=\"#000000\"/><polygon points=\"0,0 10,0 10,5\"/>"
+                             "</icon><circle r=\"3\"/></gauge>", 0, &cfg) == GAUGE_CONFIG_OK,
+          "icon should parse");
+    CHECK(cfg.icon.x == INT16_MIN && cfg.icon.y == 160, "centred, y 160");
+    CHECK(cfg.icon.shape.part_count == 3, "three parts; the circle after </icon> is ignored (got %u)",
+          cfg.icon.shape.part_count);
+    CHECK(cfg.icon.shape.has_color && cfg.icon.shape.color.r == 0x8f, "icon colour");
+    CHECK(cfg.warning_count == 0, "unexpected warnings: %u", cfg.warning_count);
+
+    /* The shipped fallback face carries one. */
+    gauge_config_builtin_default(&cfg);
+    CHECK(cfg.icon.shape.part_count > 0, "built-in face has an icon");
+}
+
 static void test_trend(void)
 {
     gauge_config_t cfg;
@@ -630,6 +653,7 @@ int main(void)
         {"builtin_default_is_valid", test_builtin_default_is_valid},
         {"peak",                     test_peak},
         {"trend",                    test_trend},
+        {"icon",                     test_icon},
         {"tick_band_color",          test_tick_band_color},
         {"shapes_absent_by_default", test_shapes_absent_by_default},
         {"shapes_parse",             test_shapes_parse},

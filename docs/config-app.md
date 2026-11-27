@@ -12,7 +12,7 @@ shape are in [ADR 0007](adr/0007-face-editor-static-app-with-parser-port.md).
 
 | Feature | Notes |
 |---|---|
-| Edit every schema element | Gauge and source, dial, bands, ticks, labels, needle, titles, readout, peak hold, trend (sparkline), alerts |
+| Edit every schema element | Gauge and source, dial, bands, ticks, labels, needle, titles, readout, peak hold, icon, trend (sparkline), alerts |
 | Custom shapes | All four slots (major/minor tick, needle, hub): drag vertices, double-click an edge to add one, circles, presets, per-part colours, and **SVG path import** with curve flattening to 0.1 px and simplification to the 64-vertex budget. The canvas shows neighbouring ticks and the tested needle footprint |
 | Live preview | SVG rendering of the rendering model in §5, with the firmware's damping, alert flashing (including a quirk, below), and peak hold. The trend strip shows a made-up history, since the device fills it from live readings. Sweep, set a value, reset the peak. Drag titles, the readout and the peak value to place them; click any part of the face to edit it. Optional construction guides |
 | Validation | Every forgiven condition in §6 is reported as an error before export, plus warnings for things that parse but are probably wrong (ticks running into each other, alerts that can never fire, over-long label text, non-ASCII glyphs) and the needle performance guidance in §4.6 |

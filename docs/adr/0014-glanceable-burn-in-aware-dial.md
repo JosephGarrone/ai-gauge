@@ -44,6 +44,10 @@ The owner also asked for a running chart of the last 30/60/120 s.
    dial for a minute. No reading (no
    board, a fault) counts as running.
 
+7. **What a gauge measures is an icon, not a word** (`<icon>`, a static shape baked into the face):
+   a turbo for boost, a thermometer over a tailpipe for EGT, above the hub. The unit stays as text
+   under the readout, since the digits-only font cannot carry it.
+
 ## Alternatives rejected
 
 - **Decimals in the face XML only.** The owner wants a per-unit default and one switch for every
@@ -64,6 +68,9 @@ The owner also asked for a running chart of the last 30/60/120 s.
   alive and why it is dark; a small box that never stops moving costs next to nothing in wear.
 - **A notice that jumps every 20 s, at 3% brightness** (the first version). Unreadable, and the
   owner asked for the DVD-logo bounce instead.
+- **Icons as embedded images.** An image element would need a converter and costs flash and
+  PSRAM per icon; polygons reuse the anti-aliased shape rasteriser, scale cleanly, and the editor
+  already previews them.
 - **Dimming from the obd-display.** Wanted, but it depends on an in-vehicle network that is not
   designed yet.
 

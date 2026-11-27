@@ -472,6 +472,36 @@ static void draw_shaped_ticks(gauge_render_t *g, const gauge_shape_t *shape, flo
     free(cov);
 }
 
+/* An icon from its shape, unrotated, centred on (ox, oy), blended into the face canvas. */
+static void draw_icon(gauge_render_t *g, const gauge_shape_t *shape, float ox, float oy)
+{
+    size_t need = 0;
+    for (uint8_t i = 0; i < shape->part_count; i++) {
+        int32_t w, h;
+        gauge_shape_max_size(shape, i, &w, &h);
+        if ((size_t)w * (size_t)h > need) {
+            need = (size_t)w * (size_t)h;
+        }
+    }
+    float   *acc = heap_caps_malloc(need * sizeof(float), MALLOC_CAP_SPIRAM);
+    uint8_t *cov = heap_caps_malloc(need, MALLOC_CAP_SPIRAM);
+    if (acc != NULL && cov != NULL) {
+        lv_draw_buf_t *dst = lv_canvas_get_draw_buf(g->face);
+        for (uint8_t i = 0; i < shape->part_count; i++) {
+            gauge_shape_rect_t r;
+            size_t             n = gauge_shape_outline(shape, i, 0.0f, ox, oy, g->outline);
+            gauge_shape_bounds(g->outline, n, &r);
+            gauge_shape_rasterize(g->outline, n, &r, acc, cov);
+            gauge_color_t white = {0xff, 0xff, 0xff};
+            blend_mask(dst, &r, cov, to_lv(gauge_shape_part_color(shape, i, white, NULL)));
+        }
+    } else {
+        ESP_LOGW(TAG, "no PSRAM to draw the icon; skipping it");
+    }
+    free(acc);
+    free(cov);
+}
+
 /* ------------------------------------------------------------- face pre-render ------ */
 
 static void render_face(gauge_render_t *g)
@@ -620,6 +650,12 @@ static void render_face(gauge_render_t *g)
     }
 
     lv_canvas_finish_layer(cv, &layer);
+
+    /* --- icon: blended straight into the canvas, after LVGL's own drawing has landed --- */
+    if (c->icon.shape.part_count > 0) {
+        float ix = (c->icon.x == INT16_MIN) ? (float)g->cx : (float)c->icon.x;
+        draw_icon(g, &c->icon.shape, ix, (float)c->icon.y);
+    }
 }
 
 /* ------------------------------------------------------------------- needle --------- */

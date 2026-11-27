@@ -228,6 +228,13 @@ typedef struct {
         char          prefix[GAUGE_CONFIG_MAX_TEXT_LEN];
     } peak;
 
+    /* --- <icon> --- */
+    struct {
+        int16_t       x;             /**< Centre. INT16_MIN means "centre horizontally". */
+        int16_t       y;             /**< Centre. */
+        gauge_shape_t shape;         /**< part_count 0 = no icon. Baked into the face. */
+    } icon;
+
     /* --- <trend> --- */
     struct {
         bool          present;

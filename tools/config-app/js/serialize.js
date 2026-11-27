@@ -47,9 +47,9 @@ function attrs(list) {
         .join('');
 }
 
-function writeShape(w, depth, tag, shape) {
+function writeShape(w, depth, tag, shape, extra = []) {
     if (!shape || shape.parts.length === 0) return;
-    w.line(depth, `<${tag}${attrs([['color', shape.color]])}>`);
+    w.line(depth, `<${tag}${attrs([...extra, ['color', shape.color]])}>`);
     for (const p of shape.parts) {
         if (p.kind === 'circle') {
             w.line(depth + 1, `<circle${attrs([
@@ -180,6 +180,10 @@ export function serializeGauge(m) {
             ['format', k.format, k.format !== '%.1f'],
             ['prefix', k.prefix, k.prefix !== 'PEAK '],
         ])}/>`);
+    }
+
+    if (m.icon) {
+        writeShape(w, 1, 'icon', m.icon.shape, [['x', m.icon.x], ['y', m.icon.y]]);
     }
 
     if (m.trend) {

@@ -175,6 +175,7 @@ export function defaultModel() {
         titles: [],
         readout: null,
         peak: null,
+        icon: null,
         trend: null,
         alerts: [],
     };
