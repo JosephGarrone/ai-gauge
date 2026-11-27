@@ -641,7 +641,7 @@ const INSPECTORS = {
                 form.number('Line width', () => t().lineWidth, (v) => { t().lineWidth = v; }, { integer: true, min: 0, unit: 'px' })),
             row(
                 form.color('Trace', () => t().color, (v) => { t().color = v; }),
-                form.color('Fill', () => t().fill, (v) => { t().fill = v; }, { optional: true, inherited: () => t().color, help: 'Unticked: the trace colour at 30%.' })),
+                form.color('Fill', () => t().fill, (v) => { t().fill = v; }, { optional: true, inherited: () => '#000000', help: 'Unticked: a line only, which reads best at a glance.' })),
             form.checkbox('Mark the alert thresholds', () => t().alertMarks, (v) => { t().alertMarks = v; }),
         ];
     },

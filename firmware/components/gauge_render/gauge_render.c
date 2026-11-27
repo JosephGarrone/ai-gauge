@@ -134,7 +134,7 @@ struct gauge_render_t {
     uint32_t       trend_n;
     uint32_t       trend_col_ms;
     uint32_t       trend_col_start;
-    uint8_t       *trend_fill_cov;  /**< PSRAM, trend_w x trend_h. */
+    uint8_t       *trend_fill_cov;  /**< PSRAM, trend_w x trend_h. NULL: no fill (the default). */
     uint8_t       *trend_line_cov;  /**< PSRAM, trend_w x trend_h. */
     lv_image_dsc_t trend_fill_img;
     lv_image_dsc_t trend_line_img;
@@ -1210,7 +1210,9 @@ static void trend_rasterise(gauge_render_t *g)
     int32_t h  = g->trend_h;
     float   hw = (float)g->cfg.trend.line_width_px * 0.5f;
 
-    memset(g->trend_fill_cov, 0, (size_t)w * h);
+    if (g->trend_fill_cov != NULL) {
+        memset(g->trend_fill_cov, 0, (size_t)w * h);
+    }
     memset(g->trend_line_cov, 0, (size_t)w * h);
     g->trend_head_valid = false;
 
@@ -1225,7 +1227,9 @@ static void trend_rasterise(gauge_render_t *g)
             continue;
         }
         float y = trend_y(g, v);
-        cov_span(g->trend_fill_cov, w, h, x, y, (float)h);
+        if (g->trend_fill_cov != NULL) {
+            cov_span(g->trend_fill_cov, w, h, x, y, (float)h);
+        }
         float lo = have_prev ? fminf(prev_y, y) : y;
         float hi = have_prev ? fmaxf(prev_y, y) : y;
         cov_span(g->trend_line_cov, w, h, x, lo - hw, hi + hw);
@@ -1265,10 +1269,12 @@ static void trend_draw_cb(lv_event_t *e)
 
     lv_draw_image_dsc_t img;
     lv_draw_image_dsc_init(&img);
-    img.src         = &g->trend_fill_img;
-    img.recolor     = g->trend_fill_color;
     img.recolor_opa = LV_OPA_COVER;
-    lv_draw_image(layer, &img, &a);
+    if (g->trend_fill_cov != NULL) {
+        img.src     = &g->trend_fill_img;
+        img.recolor = g->trend_fill_color;
+        lv_draw_image(layer, &img, &a);
+    }
 
     /* The alert thresholds, dashed, over the fill and under the trace. */
     if (c->trend.alert_marks) {
@@ -1374,9 +1380,12 @@ static void trend_create(gauge_render_t *g, lv_obj_t *parent)
     }
 
     g->trend_cols     = heap_caps_malloc(sizeof(float) * (size_t)w, MALLOC_CAP_SPIRAM);
-    g->trend_fill_cov = heap_caps_malloc((size_t)w * h, MALLOC_CAP_SPIRAM);
     g->trend_line_cov = heap_caps_malloc((size_t)w * h, MALLOC_CAP_SPIRAM);
-    if (g->trend_cols == NULL || g->trend_fill_cov == NULL || g->trend_line_cov == NULL) {
+    if (c->trend.has_fill) {
+        g->trend_fill_cov = heap_caps_malloc((size_t)w * h, MALLOC_CAP_SPIRAM);
+    }
+    if (g->trend_cols == NULL || g->trend_line_cov == NULL ||
+        (c->trend.has_fill && g->trend_fill_cov == NULL)) {
         ESP_LOGW(TAG, "no PSRAM for the trend strip; leaving it out");
         return;
     }
@@ -1389,8 +1398,10 @@ static void trend_create(gauge_render_t *g, lv_obj_t *parent)
                                            : c->trend.y;
     g->trend_area = (lv_area_t){.x1 = x, .y1 = y, .x2 = x + w - 1, .y2 = y + h - 1};
 
-    g->trend_fill_color = c->trend.has_fill ? to_lv(c->trend.fill) : mix_black(c->trend.color, 30);
-    trend_init_img(&g->trend_fill_img, g->trend_fill_cov, w, h);
+    if (g->trend_fill_cov != NULL) {
+        g->trend_fill_color = to_lv(c->trend.fill);
+        trend_init_img(&g->trend_fill_img, g->trend_fill_cov, w, h);
+    }
     trend_init_img(&g->trend_line_img, g->trend_line_cov, w, h);
 
     g->trend = lv_obj_create(parent);

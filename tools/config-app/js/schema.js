@@ -151,7 +151,7 @@ export function defaultPeak() {
     };
 }
 
-/** <trend>: the sparkline strip. x and y null mean centred, and in the gap under the dial. */
+/** <trend>: the sparkline strip. x and y null mean centred, and in the gap under the dial; fill null, none. */
 export function defaultTrend() {
     return { x: null, y: null, width: 200, height: 50, lineWidth: 3, color: '#17caff', fill: null, alertMarks: true };
 }

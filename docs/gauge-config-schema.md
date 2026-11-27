@@ -222,7 +222,7 @@ completes: under 7 times a second at 30 s with the default width, and under 2 at
 | `height` | int | `50` | At least 8 |
 | `line-width` | int | `3` | The trace |
 | `color` | colour | `#17caff` | The trace. The baseline is this at 30% |
-| `fill` | colour | trace colour at 30% | Under the trace |
+| `fill` | colour | none | Fills under the trace. Omit it for a line only, which reads best at a glance |
 | `alert-marks` | bool | `true` | A dashed line, in the alert's colour, at each `above` alert inside the range |
 
 Omit the element for no strip. Keep it within about 200 × 50 px: that is the size it was budgeted at.

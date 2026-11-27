@@ -30,7 +30,8 @@ The owner also asked for a running chart of the last 30/60/120 s.
 4. **The sparkline is a face element, `<trend>`,** with its window as a user setting. Placement and
    colour belong to the face (the editor previews it); history length is a driving preference, so
    it applies to every face.
-5. **The trend is rasterised into two A8 masks on the CPU** (fill and trace), rebuilt from a
+5. **The trend is a line, with no fill by default** (a filled area read as a solid block at a
+   glance; `fill` opts in). It is rasterised into A8 masks on the CPU (trace, and fill if any), rebuilt from a
    one-column-per-pixel ring of means only when a column completes, and drawn as two recoloured
    images plus a few lines. The strip is its own object, repainted only then.
 6. **Burn-in:** the shipped faces' static artwork is drawn at 75% (`#b0b4b6`, redline `#cc2626`);
@@ -49,7 +50,7 @@ The owner also asked for a running chart of the last 30/60/120 s.
 - **`lv_font_conv`.** Needs a Node package download at generation time; the glyph set is tiny and
   Pillow is already a tool dependency.
 - **Drawing the trend as 200 lines or rects per repaint.** Each is an LVGL draw task; rebuilding two
-  10 KB masks a few times a second is cheaper and gives a filled area for free.
+  10 KB masks a few times a second is cheaper.
 - **Autoscaling the trend to the window's own min/max.** It jumps whenever a new extreme scrolls in
   or out, which reads as movement at a glance. The face's range is stable and matches the dial.
 - **A window setting in the XML.** It is a driving preference, the same for every face.

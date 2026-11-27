@@ -214,10 +214,9 @@ export function renderTrend(m) {
         pts.push([x + i, yOf(m.source.min + Math.min(1, f) * span)]);
     }
     const line = pts.map(([px, py]) => `${n(px)},${n(py)}`).join(' ');
-    const fill = t.fill ?? mixBlack(t.color, 30);
     let out = `<g data-section="trend">` +
         `<line x1="${x}" y1="${y + h - 1}" x2="${x + w - 1}" y2="${y + h - 1}" stroke="${mixBlack(t.color, 30)}" stroke-width="2"/>` +
-        `<polygon points="${x},${y + h} ${line} ${x + w - 1},${y + h}" fill="${fill}"/>`;
+        (t.fill ? `<polygon points="${x},${y + h} ${line} ${x + w - 1},${y + h}" fill="${t.fill}"/>` : '');
     if (t.alertMarks) {
         for (const a of m.alerts) {
             if (a.above === null || a.above <= m.source.min || a.above >= m.source.max) continue;

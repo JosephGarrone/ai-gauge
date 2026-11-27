@@ -237,7 +237,7 @@ typedef struct {
         uint16_t      height_px;
         uint16_t      line_width_px;
         gauge_color_t color;         /**< The trace. */
-        bool          has_fill;      /**< False: the fill is the trace colour at 30%. */
+        bool          has_fill;      /**< False: a line only, no fill (the default). */
         gauge_color_t fill;          /**< Under the trace. */
         bool          alert_marks;   /**< A dashed line at each `above` alert, in its colour. */
     } trend;

@@ -56,7 +56,7 @@ dirties only its own box rather than the dial behind it.
 
 A face's `<trend>` sparkline keeps one column per pixel of history. Samples accumulate into the
 current column; when its slice of the window (window / width: 150 ms at 30 s and 200 px) is up, the
-column closes, two A8 masks (fill and trace) are rebuilt from the ring on the CPU, and only the
+column closes, the trace's A8 mask (and the fill's, if the face has one) is rebuilt from the ring on the CPU, and only the
 strip's own object is invalidated. Between columns it costs nothing. It sits in the gap under the
 dial, which the needle's box does not reach. See
 [ADR 0014](adr/0014-glanceable-burn-in-aware-dial.md).

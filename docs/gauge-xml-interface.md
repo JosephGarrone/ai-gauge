@@ -270,7 +270,7 @@ A sparkline of recent readings. Omit it and there is none. The history length is
 | `height` | int | `50` | Clamped to at least 8, with a warning |
 | `line-width` | int | `3` | |
 | `color` | colour | `#17caff` | Trace; the baseline is this at 30% |
-| `fill` | colour | trace at 30% | Omit to derive it |
+| `fill` | colour | none | Fill under the trace; omit for a line only |
 | `alert-marks` | bool | `true` | Dashed line at each `above` alert strictly inside the range |
 
 ### `<alert>` — 0–4
