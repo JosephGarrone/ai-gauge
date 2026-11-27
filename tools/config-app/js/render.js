@@ -170,14 +170,23 @@ export function renderFace(m, prefix = 'face') {
 
     return `<defs>${ticks.defs}</defs>` +
         `<rect width="${PANEL.width}" height="${PANEL.height}" fill="${m.face.background}" data-section="dial"/>` +
-        bands + ticks.body + labelsLayer(m) + titles + renderIcon(m) + renderTrend(m);
+        bands + ticks.body + labelsLayer(m) + titles + renderTrend(m);
 }
 
-/** The face's icon, drawn as authored and centred on (x, y): baked into the background. */
-export function renderIcon(m) {
+/**
+ * The face's icon, drawn as authored and centred on (x, y). Parts without their own colour take
+ * the icon's, or the alert colour while the needle flashes (gauge_render.c, icon_draw_cb).
+ */
+export function renderIcon(m, alert = null) {
     if (!m.icon) return '';
     const x = m.icon.x ?? CX;
-    return `<g transform="translate(${x} ${m.icon.y})" data-section="icon">${shapeParts(m.icon.shape, '#ffffff')}</g>`;
+    const s = m.icon.shape;
+    const parts = s.parts.map((p) => {
+        const fill = p.color ?? alert ?? s.color ?? '#ffffff';
+        if (p.kind === 'circle') return `<circle cx="${n(p.cx)}" cy="${n(p.cy)}" r="${n(p.r)}" fill="${fill}"/>`;
+        return `<polygon points="${p.points.map(([px, py]) => `${n(px)},${n(py)}`).join(' ')}" fill="${fill}" fill-rule="nonzero"/>`;
+    }).join('');
+    return `<g transform="translate(${x} ${m.icon.y})" data-section="icon">${parts}</g>`;
 }
 
 /** Where the trend strip sits: explicit, or centred in the gap under the dial (gauge_render.c). */
@@ -343,6 +352,6 @@ export function renderStaticSvg(m, value, { prefix = 'thumb', size = PANEL.width
     const deg = valueToDeg(m, value);
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PANEL.width} ${PANEL.height}" width="${size}" height="${size}">` +
         `<clipPath id="${prefix}-clip"><circle cx="${CX}" cy="${CY}" r="${PANEL.cx}"/></clipPath>` +
-        `<g clip-path="url(#${prefix}-clip)">${renderFace(m, prefix)}${renderNeedle(m, deg)}${renderHub(m)}` +
+        `<g clip-path="url(#${prefix}-clip)">${renderFace(m, prefix)}${renderIcon(m)}${renderNeedle(m, deg)}${renderHub(m)}` +
         `${m.readout ? renderReadout(m, value) : ''}</g></svg>`;
 }

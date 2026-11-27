@@ -207,7 +207,9 @@ on the scale is unaffected by it.
 
 A symbol baked into the pre-rendered face, such as a turbo or an exhaust thermometer: the same
 `<polygon>` and `<circle>` parts as a custom shape ([Shapes](#shapes)), drawn as authored (not
-rotated) and centred on `x`, `y`. It costs nothing per frame. The shipped faces put one above the
+rotated) and centred on `x`, `y`. It is its own small object over the face, repainted only when
+its colour changes: **parts without a colour of their own take the alert colour, flashing with the
+needle**, while an alert is active, and the icon's `color` otherwise. The shipped faces put one above the
 hub in place of a word like "BOOST", the way the cluster's own telltales do.
 
 | Attribute | Type | Default | Meaning |

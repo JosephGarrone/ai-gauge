@@ -261,7 +261,8 @@ The gauge hides the peak figure unless the user turns it on in its settings.
 ### `<icon>` — at most one
 
 A static symbol baked into the face: `<polygon>` / `<circle>` children exactly as in a shape slot
-(§4), drawn unrotated and centred on (`x`, `y`). Omit it, or give it no parts, for none.
+(§4), drawn unrotated and centred on (`x`, `y`). Omit it, or give it no parts, for none. Parts
+without their own `color` flash in the active alert's colour along with the needle.
 
 | Attribute | Type | Default | Notes |
 |---|---|---|---|

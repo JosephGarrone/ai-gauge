@@ -83,6 +83,8 @@ struct gauge_render_t {
     /* Custom needle and hub. Unused unless cfg.needle.shape / hub_shape is set. */
     shape_sprite_t    needle_parts[GAUGE_SHAPE_MAX_PARTS];
     shape_sprite_t    hub_parts[GAUGE_SHAPE_MAX_PARTS];
+    shape_sprite_t    icon_parts[GAUGE_SHAPE_MAX_PARTS];
+    lv_obj_t         *icon;         /**< Its own object, so it can take the alert colour. */
     float            *raster_acc;   /**< PSRAM scratch, sized for the largest part. Owned. */
     gauge_shape_vec_t outline[GAUGE_SHAPE_MAX_OUTLINE]; /**< Here, not on a task stack. */
     float             needle_extent;
@@ -360,6 +362,13 @@ static void prepare_shapes(gauge_render_t *g)
     if (ok && gauge_shape_is_set(&c->needle.hub_shape)) {
         ok = init_sprites(g->hub_parts, &c->needle.hub_shape, c->needle.color, &need);
     }
+    if (ok && c->icon.shape.part_count > 0) {
+        ok = init_sprites(g->icon_parts, &c->icon.shape, (gauge_color_t){0xff, 0xff, 0xff}, &need);
+        /* Parts without a colour of their own take the alert colour, as the needle does. */
+        for (uint8_t i = 0; ok && i < c->icon.shape.part_count; i++) {
+            g->icon_parts[i].follows_alert = !c->icon.shape.parts[i].has_color;
+        }
+    }
     if (ok && need > 0) {
         g->raster_acc = heap_caps_malloc(need * sizeof(float), MALLOC_CAP_SPIRAM);
         ok            = (g->raster_acc != NULL);
@@ -369,11 +378,18 @@ static void prepare_shapes(gauge_render_t *g)
         ESP_LOGW(TAG, "no PSRAM for the custom needle; using the built-in one");
         free_sprites(g->needle_parts);
         free_sprites(g->hub_parts);
+        free_sprites(g->icon_parts);
         free(g->raster_acc);
         g->raster_acc                 = NULL;
         c->needle.shape.part_count     = 0;
         c->needle.hub_shape.part_count = 0;
+        c->icon.shape.part_count       = 0;
         return;
+    }
+
+    for (uint8_t i = 0; i < c->icon.shape.part_count; i++) {
+        float ix = (c->icon.x == INT16_MIN) ? (float)g->cx : (float)c->icon.x;
+        raster_sprite(g, &g->icon_parts[i], &c->icon.shape, i, 0.0f, ix, (float)c->icon.y);
     }
 
     for (uint8_t i = 0; i < c->needle.hub_shape.part_count; i++) {
@@ -468,36 +484,6 @@ static void draw_shaped_ticks(gauge_render_t *g, const gauge_shape_t *shape, flo
         }
     }
 
-    free(acc);
-    free(cov);
-}
-
-/* An icon from its shape, unrotated, centred on (ox, oy), blended into the face canvas. */
-static void draw_icon(gauge_render_t *g, const gauge_shape_t *shape, float ox, float oy)
-{
-    size_t need = 0;
-    for (uint8_t i = 0; i < shape->part_count; i++) {
-        int32_t w, h;
-        gauge_shape_max_size(shape, i, &w, &h);
-        if ((size_t)w * (size_t)h > need) {
-            need = (size_t)w * (size_t)h;
-        }
-    }
-    float   *acc = heap_caps_malloc(need * sizeof(float), MALLOC_CAP_SPIRAM);
-    uint8_t *cov = heap_caps_malloc(need, MALLOC_CAP_SPIRAM);
-    if (acc != NULL && cov != NULL) {
-        lv_draw_buf_t *dst = lv_canvas_get_draw_buf(g->face);
-        for (uint8_t i = 0; i < shape->part_count; i++) {
-            gauge_shape_rect_t r;
-            size_t             n = gauge_shape_outline(shape, i, 0.0f, ox, oy, g->outline);
-            gauge_shape_bounds(g->outline, n, &r);
-            gauge_shape_rasterize(g->outline, n, &r, acc, cov);
-            gauge_color_t white = {0xff, 0xff, 0xff};
-            blend_mask(dst, &r, cov, to_lv(gauge_shape_part_color(shape, i, white, NULL)));
-        }
-    } else {
-        ESP_LOGW(TAG, "no PSRAM to draw the icon; skipping it");
-    }
     free(acc);
     free(cov);
 }
@@ -651,11 +637,6 @@ static void render_face(gauge_render_t *g)
 
     lv_canvas_finish_layer(cv, &layer);
 
-    /* --- icon: blended straight into the canvas, after LVGL's own drawing has landed --- */
-    if (c->icon.shape.part_count > 0) {
-        float ix = (c->icon.x == INT16_MIN) ? (float)g->cx : (float)c->icon.x;
-        draw_icon(g, &c->icon.shape, ix, (float)c->icon.y);
-    }
 }
 
 /* ------------------------------------------------------------------- needle --------- */
@@ -707,6 +688,26 @@ static void needle_draw_cb(lv_event_t *e)
         dsc.p[1]  = g->tri[1];
         dsc.p[2]  = g->tri[2];
         lv_draw_triangle(layer, &dsc);
+    }
+}
+
+/* The colour the needle and icon flash in right now, or NULL when no alert is showing. */
+static const lv_color_t *alert_color(const gauge_render_t *g, lv_color_t *buf)
+{
+    if (!(g->alert_active && g->alert_phase && g->active_alert_idx >= 0)) {
+        return NULL;
+    }
+    *buf = to_lv(g->cfg.alerts[g->active_alert_idx].color);
+    return buf;
+}
+
+static void icon_draw_cb(lv_event_t *e)
+{
+    gauge_render_t *g     = lv_event_get_user_data(e);
+    lv_layer_t     *layer = lv_event_get_layer(e);
+    lv_color_t      buf;
+    if (layer != NULL) {
+        draw_sprites(g, layer, g->icon_parts, g->cfg.icon.shape.part_count, alert_color(g, &buf));
     }
 }
 
@@ -1507,6 +1508,9 @@ static void apply_alert_style(gauge_render_t *g)
     if (g->needle != NULL && g->prev_valid) {
         lv_obj_invalidate_area(g->needle, &g->prev_bbox);
     }
+    if (g->icon != NULL) {
+        lv_obj_invalidate(g->icon); /* it flashes with the needle */
+    }
 
     if (g->readout == NULL) {
         return;
@@ -1632,6 +1636,26 @@ esp_err_t gauge_render_create(lv_obj_t *parent, const gauge_config_t *cfg,
     /* --- sparkline strip: over the face, under the needle --- */
     if (cfg->trend.present) {
         trend_create(g, parent);
+    }
+
+    /* --- icon: over the face, under the needle; repainted only when the alert colour changes --- */
+    if (g->cfg.icon.shape.part_count > 0) {
+        g->icon = lv_obj_create(parent);
+        if (g->icon != NULL) {
+            lv_obj_remove_style_all(g->icon);
+            lv_obj_remove_flag(g->icon, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_remove_flag(g->icon, LV_OBJ_FLAG_CLICKABLE);
+            lv_area_t box = g->icon_parts[0].area;
+            for (uint8_t i = 1; i < g->cfg.icon.shape.part_count; i++) {
+                box.x1 = LV_MIN(box.x1, g->icon_parts[i].area.x1);
+                box.y1 = LV_MIN(box.y1, g->icon_parts[i].area.y1);
+                box.x2 = LV_MAX(box.x2, g->icon_parts[i].area.x2);
+                box.y2 = LV_MAX(box.y2, g->icon_parts[i].area.y2);
+            }
+            lv_obj_set_pos(g->icon, box.x1, box.y1);
+            lv_obj_set_size(g->icon, lv_area_get_width(&box), lv_area_get_height(&box));
+            lv_obj_add_event_cb(g->icon, icon_draw_cb, LV_EVENT_DRAW_MAIN, g);
+        }
     }
 
     /* --- peak marker: under the needle, over the face --- */
@@ -1807,6 +1831,9 @@ void gauge_render_destroy(gauge_render_t *g)
     if (g->trend != NULL) {
         lv_obj_delete(g->trend);
     }
+    if (g->icon != NULL) {
+        lv_obj_delete(g->icon);
+    }
     if (g->hub != NULL) {
         lv_obj_delete(g->hub);
     }
@@ -1819,6 +1846,7 @@ void gauge_render_destroy(gauge_render_t *g)
 
     free_sprites(g->needle_parts);
     free_sprites(g->hub_parts);
+    free_sprites(g->icon_parts);
     free(g->raster_acc);
     free(g->trend_cols);
     free(g->trend_fill_cov);

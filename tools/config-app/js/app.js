@@ -7,7 +7,7 @@
 import { BLANK_XML, EXAMPLES } from './examples.js';
 import { parseGauge } from './parse.js';
 import {
-    renderFace, renderGuides, renderHub, renderNeedle, renderPeakMarker, renderPeakText, renderReadout,
+    renderFace, renderGuides, renderHub, renderIcon, renderNeedle, renderPeakMarker, renderPeakText, renderReadout,
     renderStaticSvg,
 } from './render.js';
 import {
@@ -1059,7 +1059,7 @@ function frame(now) {
         const dynamic = `${deg.toFixed(3)}|${st.peak}|${needleAlertColor(m, st)}|${readoutColor(m, st)}|${st.displayed}`;
         if (dynamic !== lastDynamic) {
             try {
-                layers.needle.innerHTML = renderNeedle(m, deg, needleAlertColor(m, st));
+                layers.needle.innerHTML = renderIcon(m, needleAlertColor(m, st)) + renderNeedle(m, deg, needleAlertColor(m, st));
                 layers.peak.innerHTML = renderPeakMarker(m, st.peak);
                 layers.readout.innerHTML = renderReadout(m, st.displayed, readoutColor(m, st));
                 layers.peaktext.innerHTML = renderPeakText(m, st.peak);

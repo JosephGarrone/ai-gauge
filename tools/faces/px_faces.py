@@ -27,6 +27,10 @@ OFF_WHITE = "#ebf0f2"  # IpcWhite: the readout, the one thing that changes
 ART = "#b0b4b6"
 RED_ART = "#cc2626"
 MUTED = "#8f9aa0"      # caption: secondary text, a cool grey beside the off-white
+# The green of Ford's "system on" telltales, for the icon above the hub. Slightly below full
+# saturation and brightness: it is static artwork, so it wears the AMOLED (see ART below). The icon
+# turns the alert colour, flashing with the needle, while an alert is active.
+TELLTALE_GREEN = "#1fb24a"
 RED = "#ff3030"        # IpcRedBright: redline ring and pointers, alert
 AMBER = "#ffb000"      # IpcAmber: peak marker
 NEEDLE = "#17caff"     # NeedleGaugeViewModel's default needle colour
@@ -230,7 +234,7 @@ def face(gid, comment, channel, unit, vmax, major, minor, red_from, caption, ico
     <labels every="{major}" font="{label_font}" color="{ART}" radius="{label_r}"/>
   </face>
 
-  <icon y="{ICON_Y}" color="{MUTED}">
+  <icon y="{ICON_Y}" color="{TELLTALE_GREEN}">
 {scaled(icon)}
   </icon>
 

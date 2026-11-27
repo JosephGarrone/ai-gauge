@@ -40,7 +40,7 @@ static const char s_default_xml[] =
     "    </ticks>"
     "    <labels every=\"5\" font=\"montserrat_32\" color=\"#b0b4b6\" radius=\"172\"/>"
     "  </face>"
-    "  <icon y=\"162\" color=\"#8f9aa0\">"
+    "  <icon y=\"162\" color=\"#1fb24a\">"
     "    <polygon points=\"2.9,-24.65 36.25,-24.65 36.25,-12.32 2.9,-12.32\"/>"
     "    <circle r=\"24.65\"/>"
     "    <circle r=\"18.12\" color=\"#000000\"/>"
