@@ -45,7 +45,7 @@ The owner also asked for a running chart of the last 30/60/120 s.
    board, a fault) counts as running.
 
 7. **What a gauge measures is an icon, not a word** (`<icon>`, a static shape baked into the face):
-   a turbo for boost, a thermometer over a tailpipe for EGT, above the hub. The unit stays as text
+   a turbo for boost and Ford's *High Exhaust System Temperature* telltale for EGT, above the hub. The unit stays as text
    under the readout, since the digits-only font cannot carry it.
 
 ## Alternatives rejected

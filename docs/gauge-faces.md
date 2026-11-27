@@ -41,7 +41,8 @@ What was carried over, measured on the photo as fractions of the ring's outer ra
 ### Deliberate departures
 
 - **An icon above the hub says what the gauge measures** (2026-11-27): a turbo's compressor housing
-  for boost, a thermometer beside a tailpipe with heat rising for EGT, in the muted `#8f9aa0`, about
+  for boost, and for EGT Ford's own *High Exhaust System Temperature* telltale (a thermometer in an
+  exhaust stream with three puffs), redrawn from a reference the owner supplied, in the muted `#8f9aa0`, about
   60 px across, centred at y 162 (`<icon>`). The cluster's telltales are symbols, not words. The
   needle passes over it, which is fine for static artwork.
 - **The unit sits under the readout** ("PSI", "°C"), in `montserrat_22` and a muted `#8f9aa0`, not ~0.5 R

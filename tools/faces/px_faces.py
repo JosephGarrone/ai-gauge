@@ -90,21 +90,68 @@ TURBO_ICON = """    <polygon points="2,-17 25,-17 25,-8.5 2,-8.5"/>
     <polygon points="-1.6,-3.6 1.6,-3.6 6,-11 2.6,-12"/>
     <polygon points="1.6,3.6 -1.6,3.6 -6,11 -2.6,12"/>"""
 
-# EGT: a thermometer beside an exhaust tailpipe with heat rising off it, the usual pyrometer symbol.
-def _wave(x):
-    """A 2.6 px zigzag rising from y 0 to y -18, as a closed polygon."""
-    c = [(x, 0), (x + 3.2, -4.5), (x, -9), (x + 3.2, -13.5), (x, -18)]
-    left = [(px - 1.6, py) for px, py in c]
-    right = [(px + 1.6, py) for px, py in reversed(c)]
-    return " ".join(f"{px:g},{py:g}" for px, py in left + right)
+# EGT: Ford's "High Exhaust System Temperature" telltale, as on the owner's cluster: a thermometer
+# with three graduations standing in an exhaust stream (two dashes above a sloping line) that
+# leaves as three puffs of gas. Laid out in the telltale's own proportions (EGT_SRC, measured on a
+# reference image, ~460 x 375 units), then fitted to ~52 px.
+#
+# A slot holds 6 parts and 64 points, and this symbol has 9 pieces, so pieces that share a part
+# are joined by a zero-width bridge: out along one edge and straight back. The rasteriser
+# accumulates signed area, so the two bridge edges cancel exactly and leave no hairline.
+EGT_STROKE = 25          # line weight, source units
+EGT_FIT = 52 / 460       # source units to px, before ICON_SCALE
+EGT_CENTRE = (570, 442)  # middle of the symbol's bounding box, source units
 
 
-EGT_ICON = f"""    <polygon points="-19,-17 -12,-17 -12,6 -19,6"/>
-    <circle cx="-15.5" cy="9" r="7"/>
-    <polygon points="-4,8 19,8 23,15 -4,15"/>
-    <polygon points="{_wave(-1)}"/>
-    <polygon points="{_wave(7)}"/>
-    <polygon points="{_wave(15)}"/>"""
+def _egt_pt(x, y):
+    return ((x - EGT_CENTRE[0]) * EGT_FIT, (y - EGT_CENTRE[1]) * EGT_FIT)
+
+
+def _bar(x1, y1, x2, y2, w=EGT_STROKE):
+    """A straight stroke from (x1, y1) to (x2, y2), as a 4-point outline."""
+    import math
+    dx, dy = x2 - x1, y2 - y1
+    n = math.hypot(dx, dy)
+    ox, oy = -dy / n * w / 2, dx / n * w / 2
+    return [(x1 + ox, y1 + oy), (x2 + ox, y2 + oy), (x2 - ox, y2 - oy), (x1 - ox, y1 - oy)]
+
+
+def _puff(cx, cy, r=45, w=EGT_STROKE, a0=-115, a1=115, n=5):
+    """A ')'-shaped arc opening to the left, as a band n points along each edge."""
+    import math
+    angs = [math.radians(a0 + (a1 - a0) * k / (n - 1)) for k in range(n)]
+    outer = [(cx + (r + w / 2) * math.cos(a), cy + (r + w / 2) * math.sin(a)) for a in angs]
+    inner = [(cx + (r - w / 2) * math.cos(a), cy + (r - w / 2) * math.sin(a)) for a in reversed(angs)]
+    return outer + inner
+
+
+def _join(*pieces):
+    """Several outlines as one polygon, joined by zero-width bridges back to the first point."""
+    out = list(pieces[0])
+    for piece in pieces[1:]:
+        out += [pieces[0][0], piece[0]] + list(piece[1:]) + [piece[0]]
+    return out
+
+
+def _poly(pts):
+    return " ".join(f"{x:.2f},{y:.2f}".replace(".00", "") for x, y in (_egt_pt(*q) for q in pts))
+
+
+# Thermometer: stem 255..470 at x 480, graduations at y 300/335/370 out to x 535.
+_W2 = EGT_STROKE / 2
+_STEM = [(480 - _W2, 255), (480 + _W2, 255),
+         (480 + _W2, 300 - 7), (538, 300 - 7), (538, 300 + 7), (480 + _W2, 300 + 7),
+         (480 + _W2, 335 - 7), (538, 335 - 7), (538, 335 + 7), (480 + _W2, 335 + 7),
+         (480 + _W2, 370 - 7), (538, 370 - 7), (538, 370 + 7), (480 + _W2, 370 + 7),
+         (480 + _W2, 470), (480 - _W2, 470)]
+_BULB_C, _BULB_R = _egt_pt(480, 475), 35 * EGT_FIT
+
+EGT_ICON = f"""    <polygon points="{_poly(_STEM)}"/>
+    <circle cx="{_BULB_C[0]:.2f}" cy="{_BULB_C[1]:.2f}" r="{_BULB_R:.2f}"/>
+    <polygon points="{_poly(_join(_bar(348, 458, 410, 443), _bar(552, 410, 614, 395)))}"/>
+    <polygon points="{_poly(_bar(345, 503, 615, 563))}"/>
+    <polygon points="{_poly(_join(_puff(655, 385), _puff(660, 575)))}"/>
+    <polygon points="{_poly(_puff(745, 485))}"/>"""
 
 
 # Drawn at ~40 px, then scaled up so they read at a glance from the driver's seat.

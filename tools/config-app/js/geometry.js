@@ -162,7 +162,39 @@ const samePoint = (a, b) => a[0] === b[0] && a[1] === b[1];
  * editor refuses self-intersection rather than preview it differently. Zero-length edges from
  * repeated vertices are ignored: they fill nothing either way.
  */
+/*
+ * Split a polygon that revisits a vertex into its loops. Pieces joined by a zero-width bridge (out
+ * along one edge and straight back, as the shipped EGT icon does to fit 9 pieces into 6 parts)
+ * come apart here, and the bridge itself is left as a loop of two points, which has no area. Both
+ * the device's signed-area rasteriser and SVG's nonzero fill draw such a polygon as its pieces.
+ */
+export function splitLoops(points) {
+    const loops = [];
+    let rest = points.slice();
+    for (let found = true; found;) {
+        found = false;
+        for (let i = 0; i < rest.length && !found; i++) {
+            for (let j = i + 1; j < rest.length; j++) {
+                if (samePoint(rest[i], rest[j])) {
+                    loops.push(rest.slice(i, j));
+                    rest = [...rest.slice(0, i + 1), ...rest.slice(j + 1)];
+                    found = true;
+                    break;
+                }
+            }
+        }
+    }
+    loops.push(rest);
+    return loops.filter((l) => l.length >= 3);
+}
+
 export function polygonSelfIntersects(points) {
+    const loops = splitLoops(points);
+    if (loops.length > 1) return loops.some((l) => simpleLoopIntersects(l));
+    return simpleLoopIntersects(points);
+}
+
+function simpleLoopIntersects(points) {
     const pts = points.filter((p, i) => !samePoint(p, points[(i + 1) % points.length]));
     const n = pts.length;
     if (n < 4) return n === 3 && orient(pts[0], pts[1], pts[2]) === 0 && false;

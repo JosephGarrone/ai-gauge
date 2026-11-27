@@ -216,7 +216,9 @@ hub in place of a word like "BOOST", the way the cluster's own telltales do.
 | `y` | int | `0` | Centre |
 | `color` | colour | `#ffffff` | For parts that do not set their own |
 
-An icon with no parts is no icon. A repeated `<icon>` replaces the earlier one. Parts count
+Pieces that do not touch can share a part through a zero-width bridge (out along one edge and
+straight back): both edges cancel, so nothing is drawn along it. The shipped EGT icon does this to
+fit nine pieces into six parts. An icon with no parts is no icon. A repeated `<icon>` replaces the earlier one. Parts count
 against the usual shape limits (6 parts, 64 points).
 
 ### `<trend>` (0..1)

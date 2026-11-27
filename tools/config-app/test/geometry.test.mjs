@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
-    builtinTickPolygon, flattenPath, labelRadius, polygonSelfIntersects, simplifyToBudget, stepCount,
-    tickRadius, valueToDeg,
+    builtinTickPolygon, flattenPath, labelRadius, polygonSelfIntersects, simplifyToBudget, splitLoops,
+    stepCount, tickRadius, valueToDeg,
 } from '../js/geometry.js';
 import { parseGauge } from '../js/parse.js';
 import { CLASSIC_BOOST, shippedFaces } from './corpus.mjs';
@@ -76,4 +76,13 @@ test('simplification fits the vertex budget', () => {
 
 test('built-in tick equivalent', () => {
     assert.deepEqual(builtinTickPolygon(20, 4), [[-2, 0], [2, 0], [2, 20], [-2, 20]]);
+});
+
+test('pieces joined by a zero-width bridge are not a self-intersection', () => {
+    const a = [[0, 0], [4, 0], [4, 2], [0, 2]];
+    const b = [[10, 0], [14, 0], [14, 2], [10, 2]];
+    const bridged = [...a, a[0], b[0], ...b.slice(1), b[0]];
+    assert.deepEqual(splitLoops(bridged), [a, b]);
+    assert.equal(polygonSelfIntersects(bridged), false);
+    assert.equal(polygonSelfIntersects([[0, 0], [4, 4], [4, 0], [0, 4]]), true, 'a bow tie still crosses');
 });
