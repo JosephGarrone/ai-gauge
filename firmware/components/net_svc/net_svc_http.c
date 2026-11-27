@@ -777,7 +777,9 @@ static esp_err_t sensors_get(httpd_req_t *req)
     }
     if (n > 0 && (size_t)n < body_len) {
         n += snprintf(body + n, body_len - (size_t)n,
-                      "},\"boost_fault\":\"%s\",\"egt_fault\":\"%s\",\"i2c_scan\":[",
+                      "},\"map_v\":%.3f,\"zero_kpa\":%.1f,\"boost_fault\":\"%s\","
+                      "\"egt_fault\":\"%s\",\"i2c_scan\":[",
+                      (double)snap->map_sensor_v, (double)snap->zero_kpa,
                       snap->boost_fault ? snap->boost_fault : "",
                       snap->egt_fault ? snap->egt_fault : "");
     }

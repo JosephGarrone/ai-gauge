@@ -40,7 +40,7 @@ with `tools/remote/gauge_remote.py`, masked to the round panel.
 | | |
 |---|---|
 | ![faces](images/settings/faces.png) **Faces**: one full-width button per stored face (a single buttonmatrix), the one on screen highlighted | ![sensors](images/settings/sensors.png) **Sensors**: live readings in native units. Tap the readout for the raw view |
-| ![sensors raw](images/settings/sensors-raw.png) **Sensors, raw**: ADC codes, pin volts, reads per second, bus scan ([sensor-frontend.md](sensor-frontend.md)) | ![calibrate](images/settings/calibrate.png) **Calibrate**: ‹ › picks the parameter, − and + either side of the value (hold to repeat, saved on release), and *Zero boost now* |
+| ![sensors raw](images/settings/sensors-raw.png) **Sensors, raw**: ADC codes, pin volts, reads per second, bus scan ([sensor-frontend.md](sensor-frontend.md)) | ![calibrate](images/settings/calibrate.png) **Calibrate**: ‹ › picks the parameter, − and + either side of the value (hold to repeat, saved on release), and *Zero boost now*, which reads *Units: bar / psi / kPa* on the pressure range |
 | ![network](images/settings/network.png) **Network**: connection details on separate lines, and *Reset network*, which takes two taps within 4 s | ![system](images/settings/system.png) **System**: firmware card (tap to check for updates, twice to install), FPS counter, frame rate, memory |
 
 **Display** has rotation and the frame-rate limit. The FPS counter moved to System, beside the

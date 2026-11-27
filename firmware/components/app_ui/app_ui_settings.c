@@ -79,28 +79,69 @@ static const char *TAG = "app_ui_settings";
  * Edited with one picker and one -/+ pair rather than a row each: a row per parameter cost 24KB of
  * internal RAM when it was tried (ADR 0009).
  */
-typedef enum { CAL_FLOAT, CAL_BOOL } cal_kind_t;
+typedef enum {
+    CAL_FLOAT,
+    CAL_BOOL,
+    CAL_OUTPUT,   /* map_v_lo and map_v_hi together, as one of k_cal_outputs */
+    CAL_PRESSURE, /* kPa, shown and stepped in the unit picked on the page (k_cal_units) */
+} cal_kind_t;
+
+/*
+ * A unit for the pressure range, and its - / + step at each end. Transducers are sold by nominal
+ * range in bar or psi, so stepping in the unit on the label lands on it: 60 psi, not 413.7 kPa.
+ */
+typedef struct {
+    const char *name;
+    float       kpa;              /* one unit, in kPa */
+    float       step_lo, step_hi; /* Pressure at min, Pressure at max */
+    const char *fmt;
+} cal_unit_t;
+
+static const cal_unit_t k_cal_units[] = {
+    {"bar", 100.0f,    0.1f,  0.5f,  "%.1f bar"},
+    {"psi", 6.894757f, 1.0f,  5.0f,  "%.0f psi"},
+    {"kPa", 1.0f,      10.0f, 50.0f, "%.0f kPa"},
+};
 
 typedef struct {
     const char *name;
     cal_kind_t  kind;
-    const char *fmt;
+    const char *fmt; /* CAL_FLOAT: value format */
     size_t      offset;
     float       step;
     float       scale;
+    const char *on, *off; /* CAL_BOOL: what true and false are called */
+    bool        hi;       /* CAL_PRESSURE: the top of the range, so the coarser step */
 } cal_param_t;
 
-#define CAL_F(name, fmt, field, step, scale) \
-    {name, CAL_FLOAT, fmt, offsetof(sensor_hub_cal_t, field), step, scale}
-#define CAL_B(name, field) {name, CAL_BOOL, NULL, offsetof(sensor_hub_cal_t, field), 0.0f, 0.0f}
+#define CAL_COUNT(a) (sizeof(a) / sizeof((a)[0]))
+#define CAL_F(n, f, fld, st_, sc)                                                         \
+    {.name = n, .kind = CAL_FLOAT, .fmt = f, .offset = offsetof(sensor_hub_cal_t, fld),  \
+     .step = st_, .scale = sc}
+#define CAL_B(n, fld, t, f) \
+    {.name = n, .kind = CAL_BOOL, .offset = offsetof(sensor_hub_cal_t, fld), .on = t, .off = f}
+#define CAL_P(n, fld, h) \
+    {.name = n, .kind = CAL_PRESSURE, .offset = offsetof(sensor_hub_cal_t, fld), .hi = h}
 
+static const struct {
+    float       v_lo, v_hi;
+    const char *label;
+} k_cal_outputs[] = {
+    {0.5f, 4.5f, "0.5-4.5 V"},
+    {0.0f, 5.0f, "0-5 V"},
+};
+
+/* The sensor first, then its fine trim, then everything else. */
 static const cal_param_t k_cal_params[] = {
-    CAL_B("Auto-zero at start", auto_zero),
-    CAL_F("Stored zero",        "%.1f kPa",       baro_kpa,     0.1f,   1.0f),
-    CAL_F("Sensor range",       "%.1f bar",       map_p_hi_kpa, 10.0f,  0.01f),
-    CAL_F("Output at 0 bar",    "%.2f V",         map_v_lo,     0.01f,  1.0f),
+    {.name = "MAP output", .kind = CAL_OUTPUT},
+    CAL_B("MAP reads",          map_gauge,   "Gauge", "Absolute"),
+    CAL_P("Pressure at min",    map_p_lo_kpa, false),
+    CAL_P("Pressure at max",    map_p_hi_kpa, true),
+    CAL_B("Auto-zero at start", auto_zero,   "On", "Off"),
+    CAL_F("Stored zero",        "%.1f kPa",       zero_kpa,     0.1f,   1.0f),
+    CAL_F("Output at min",      "%.2f V",         map_v_lo,     0.01f,  1.0f),
     CAL_F("Output at max",      "%.2f V",         map_v_hi,     0.01f,  1.0f),
-    CAL_B("Ratiometric",        ratiometric),
+    CAL_B("Ratiometric",        ratiometric, "On", "Off"),
     CAL_F("Boost smoothing",    "%.0f ms",        boost_tau_ms, 10.0f,  1.0f),
     CAL_F("EGT offset",         "%+.1f " DEG "C", egt_offset_c, 0.5f,   1.0f),
     CAL_F("EGT smoothing",      "%.0f ms",        egt_tau_ms,   50.0f,  1.0f),
@@ -108,7 +149,7 @@ static const cal_param_t k_cal_params[] = {
     CAL_F("Supply divider",     "%.3f",           supply_div,   0.002f, 1.0f),
     CAL_F("Ignition divider",   "%.3f",           ignition_div, 0.01f,  1.0f),
 };
-#define CAL_PARAM_COUNT (sizeof(k_cal_params) / sizeof(k_cal_params[0]))
+#define CAL_PARAM_COUNT CAL_COUNT(k_cal_params)
 
 /* ------------------------------------------------------------------ state ---------- */
 
@@ -137,6 +178,7 @@ EXT_RAM_BSS_ATTR static struct {
     lv_obj_t *sensor_msg;
     lv_obj_t *cal_name;
     lv_obj_t *cal_value;
+    lv_obj_t *cal_action; /* label of the button under - / +: "Units: bar" or "Zero boost now" */
     lv_obj_t *net_label;
     lv_obj_t *net_reset_btn;
     lv_obj_t *net_reset_label;
@@ -149,6 +191,7 @@ EXT_RAM_BSS_ATTR static struct {
     bool        net_reset_armed;
     bool        sensor_raw;
     size_t      cal_index;
+    size_t      cal_unit; /* index into k_cal_units, for both ends of the pressure range */
 
     char  gauge_ids[GAUGE_STORE_MAX_GAUGES][GAUGE_CONFIG_MAX_ID_LEN];
     const char *gauge_map[2 * GAUGE_STORE_MAX_GAUGES + 1];
@@ -345,6 +388,7 @@ static void close_page(void)
     g.sensor_msg      = NULL;
     g.cal_name        = NULL;
     g.cal_value       = NULL;
+    g.cal_action      = NULL;
     g.net_label       = NULL;
     g.net_reset_btn   = NULL;
     g.net_reset_label = NULL;
@@ -571,7 +615,9 @@ static void format_sensor_summary(char *buf, size_t len, const sensor_hub_snapsh
                    (double)snap->map_sensor_v);
         n = append(buf, len, n, "\nBoost %.1f kPa", (double)ch[SENSOR_HUB_CH_BOOST].value);
     } else if (snap->ads1115_ok) {
-        n = append(buf, len, n, "\nBoost: %s", snap->boost_fault ? snap->boost_fault : "--");
+        /* The volts still show: they are what tells a wrong sensor setting from a wiring fault. */
+        n = append(buf, len, n, "\nBoost: %s (%.3f V)", snap->boost_fault ? snap->boost_fault : "--",
+                   (double)snap->map_sensor_v);
     }
     if (ch[SENSOR_HUB_CH_EGT].valid) {
         n = append(buf, len, n, "\nEGT %.0f " DEG "C (%.0f uV)", (double)ch[SENSOR_HUB_CH_EGT].value,
@@ -587,7 +633,7 @@ static void format_sensor_summary(char *buf, size_t len, const sensor_hub_snapsh
         n = append(buf, len, n, "\nSupply %.2f V", (double)ch[SENSOR_HUB_CH_SENSOR_SUPPLY].value);
         n = append(buf, len, n, "\nIgnition %.1f V", (double)ch[SENSOR_HUB_CH_IGNITION].value);
     }
-    n = append(buf, len, n, "\nZero %.1f kPa%s", (double)snap->baro_kpa,
+    n = append(buf, len, n, "\nZero %.1f kPa%s", (double)snap->zero_kpa,
                snap->auto_zeroed ? " (auto)" : "");
     if (snap->ads1115_ok && !snap->alert_ok) {
         n = append(buf, len, n, "\nALERT line silent");
@@ -651,6 +697,37 @@ static void build_sensors(lv_obj_t *p)
 
 /* ---- Calibrate ---- */
 
+/* Whether @p kpa is a whole number of @p step in unit @p u. */
+static bool cal_on_grid(float kpa, const cal_unit_t *u, float step)
+{
+    float n = kpa / u->kpa / step;
+    return fabsf(n - roundf(n)) < 0.01f;
+}
+
+/* The unit the range was set in, so the page opens in it: the first whose steps both ends sit on. */
+static size_t cal_unit_guess(const sensor_hub_cal_t *cal)
+{
+    for (size_t i = 0; i < CAL_COUNT(k_cal_units); i++) {
+        const cal_unit_t *u = &k_cal_units[i];
+        if (cal_on_grid(cal->map_p_hi_kpa, u, u->step_hi) && cal_on_grid(cal->map_p_lo_kpa, u, u->step_lo)) {
+            return i;
+        }
+    }
+    return CAL_COUNT(k_cal_units) - 1;
+}
+
+/* Which of k_cal_outputs the transfer function's voltages are, or -1 once trimmed. */
+static int cal_output_index(const sensor_hub_cal_t *cal)
+{
+    for (size_t i = 0; i < CAL_COUNT(k_cal_outputs); i++) {
+        if (fabsf(cal->map_v_lo - k_cal_outputs[i].v_lo) < 0.005f &&
+            fabsf(cal->map_v_hi - k_cal_outputs[i].v_hi) < 0.005f) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
 static void cal_refresh(void)
 {
     if (g.cal_value == NULL) {
@@ -658,17 +735,38 @@ static void cal_refresh(void)
     }
     const cal_param_t *prm = &k_cal_params[g.cal_index];
     lv_label_set_text(g.cal_name, prm->name);
+    if (prm->kind == CAL_PRESSURE) {
+        lv_label_set_text_fmt(g.cal_action, "Units: %s", k_cal_units[g.cal_unit].name);
+    } else {
+        lv_label_set_text(g.cal_action, "Zero boost now");
+    }
 
     sensor_hub_cal_t cal;
     sensor_hub_get_cal(&cal);
     void *field = (char *)&cal + prm->offset;
-    if (prm->kind == CAL_BOOL) {
-        lv_label_set_text(g.cal_value, *(bool *)field ? "On" : "Off");
+    if (prm->kind == CAL_OUTPUT) {
+        int i = cal_output_index(&cal);
+        lv_label_set_text(g.cal_value, i < 0 ? "Custom" : k_cal_outputs[i].label);
+    } else if (prm->kind == CAL_BOOL) {
+        lv_label_set_text(g.cal_value, *(bool *)field ? prm->on : prm->off);
+    } else if (prm->kind == CAL_PRESSURE) {
+        const cal_unit_t *u = &k_cal_units[g.cal_unit];
+        /* + 0.0f, here and below, turns -0 into 0, so no "-0 psi" */
+        lv_label_set_text_fmt(g.cal_value, u->fmt, (double)(*(float *)field / u->kpa + 0.0f));
     } else {
-        char buf[32];
-        snprintf(buf, sizeof(buf), prm->fmt, (double)(*(float *)field * prm->scale));
-        lv_label_set_text(g.cal_value, buf);
+        lv_label_set_text_fmt(g.cal_value, prm->fmt, (double)(*(float *)field * prm->scale + 0.0f));
     }
+}
+
+/* On a pressure parameter the button under - / + cycles the unit; elsewhere it zeroes boost. */
+static void cal_action_clicked_cb(lv_event_t *e)
+{
+    if (k_cal_params[g.cal_index].kind != CAL_PRESSURE) {
+        zero_boost_clicked_cb(e);
+        return;
+    }
+    g.cal_unit = (g.cal_unit + 1) % CAL_COUNT(k_cal_units);
+    cal_refresh();
 }
 
 static void cal_pick_cb(lv_event_t *e)
@@ -692,8 +790,21 @@ static void cal_step_cb(lv_event_t *e)
     sensor_hub_cal_t   cal;
     sensor_hub_get_cal(&cal);
     void *field = (char *)&cal + prm->offset;
-    if (prm->kind == CAL_BOOL) {
+    if (prm->kind == CAL_OUTPUT) {
+        /* Cycles; from a trimmed (custom) pair, + lands on the first and - on the last. */
+        int n = (int)CAL_COUNT(k_cal_outputs);
+        int i = cal_output_index(&cal);
+        i     = (i < 0) ? (dir > 0 ? 0 : n - 1) : (i + dir + n) % n;
+        cal.map_v_lo = k_cal_outputs[i].v_lo;
+        cal.map_v_hi = k_cal_outputs[i].v_hi;
+    } else if (prm->kind == CAL_BOOL) {
         *(bool *)field = (dir > 0);
+    } else if (prm->kind == CAL_PRESSURE) {
+        /* As below, on the grid of the unit on show; sensor_hub clamps to what the sensor can mean. */
+        const cal_unit_t *u    = &k_cal_units[g.cal_unit];
+        float             step = prm->hi ? u->step_hi : u->step_lo;
+        float            *f    = field;
+        *f                     = roundf(*f / u->kpa / step + (float)dir) * step * u->kpa;
     } else {
         /* Snap to the step grid, so repeated taps land on round numbers rather than drifting. */
         float *f = field;
@@ -748,8 +859,14 @@ static void build_calibrate(lv_obj_t *p)
         }
     }
 
-    /* Zeroing is calibration too, and needs the engine off: the result says if it refused. */
-    text_button(p, LV_PCT(100), CONTROL_H, "Zero boost now", zero_boost_clicked_cb, NULL);
+    /*
+     * Zeroing is calibration too, and needs the engine off: the result says if it refused. On the
+     * pressure range the same button picks the unit instead, so the page gains no widgets (ADR 0009).
+     */
+    sensor_hub_cal_t cal;
+    sensor_hub_get_cal(&cal);
+    g.cal_unit   = cal_unit_guess(&cal);
+    g.cal_action = text_button(p, LV_PCT(100), CONTROL_H, "", cal_action_clicked_cb, NULL);
     g.sensor_msg = wrap_label(p, &st.body, "");
     lv_obj_set_style_text_font(g.sensor_msg, FONT_CAPTION, 0);
     lv_obj_set_style_text_align(g.sensor_msg, LV_TEXT_ALIGN_CENTER, 0);

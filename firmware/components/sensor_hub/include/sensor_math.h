@@ -66,6 +66,20 @@ bool sensor_math_egt_celsius(float probe_v, float cold_junction_c, float *egt_c)
 float sensor_math_linear(float v_out, float v_lo, float p_lo, float v_hi, float p_hi);
 
 /**
+ * @brief Below what output, in volts, a MAP signal counts as disconnected.
+ *
+ * The divider pulls a disconnected signal to 0V. That only tells a missing sensor from a real
+ * reading if the sensor's output at the lowest pressure it can see, @p p_floor, sits clear of 0V:
+ * true of a 0.5-4.5V sensor, and of a 0-5V absolute one, but not of a 0-5V gauge sensor, which
+ * outputs 0V at rest. The threshold is half that floor output, at most 0.25V.
+ *
+ * @param p_floor Lowest pressure the sensor can plausibly see, in its own reference. Clamped to
+ *                @p p_lo, since the output cannot go below @p v_lo.
+ * @return The threshold, or 0 if a disconnected sensor cannot be detected this way.
+ */
+float sensor_math_map_open_v(float v_lo, float p_lo, float v_hi, float p_hi, float p_floor);
+
+/**
  * @brief One step of a first-order low-pass filter with time constant @p tau_ms.
  *
  * @p tau_ms of 0 passes the input straight through. @p dt_ms is the time since the last sample.

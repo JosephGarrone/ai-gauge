@@ -145,6 +145,27 @@ float sensor_math_linear(float v_out, float v_lo, float p_lo, float v_hi, float 
     return p_lo + (v_out - v_lo) * (p_hi - p_lo) / span;
 }
 
+/* An unplugged input reads ~1 mV; below this a floor is too close to 0V to separate from it. */
+#define MAP_OPEN_MIN_V 0.02f
+#define MAP_OPEN_MAX_V 0.25f
+
+float sensor_math_map_open_v(float v_lo, float p_lo, float v_hi, float p_hi, float p_floor)
+{
+    float span = p_hi - p_lo;
+    if (fabsf(span) < 1e-6f) {
+        return 0.0f;
+    }
+    if (p_floor < p_lo) {
+        p_floor = p_lo;
+    }
+    float v_floor = v_lo + (p_floor - p_lo) * (v_hi - v_lo) / span;
+    float open_v  = v_floor * 0.5f;
+    if (open_v < MAP_OPEN_MIN_V) {
+        return 0.0f;
+    }
+    return (open_v > MAP_OPEN_MAX_V) ? MAP_OPEN_MAX_V : open_v;
+}
+
 float sensor_math_lowpass(float prev, float in, float dt_ms, float tau_ms)
 {
     if (tau_ms <= 0.0f || dt_ms <= 0.0f) {

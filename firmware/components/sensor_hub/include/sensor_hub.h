@@ -10,8 +10,8 @@
  *
  * | Channel         | Native | Source |
  * |---|---|---|
- * | `boost`         | kPa    | MAP absolute minus the zero reference (gauge pressure) |
- * | `map`           | kPa    | MAP absolute |
+ * | `boost`         | kPa    | Sensor pressure minus the zero reference (gauge pressure) |
+ * | `map`           | kPa    | MAP absolute (boost + 101.325 kPa for a gauge sensor) |
  * | `egt`           | C      | AIN3 thermocouple + TMP1075 cold junction |
  * | `ignition`      | V      | AIN2, the fused ignition feed |
  * | `sensor_supply` | V      | AIN1, the current-limited 5V to the MAP sensor |
@@ -48,11 +48,15 @@ typedef struct {
  * here rather than in a constant (docs/sensor-frontend.md, Scaling).
  */
 typedef struct {
-    /* MAP sensor transfer function, output volts referred to a 5.00V supply. */
-    float map_v_lo;      /**< Output at map_p_lo_kpa. JRP 7-bar: 0.5V (assumed, unverified). */
-    float map_v_hi;      /**< Output at map_p_hi_kpa. JRP 7-bar: 4.5V (assumed, unverified). */
-    float map_p_lo_kpa;  /**< Absolute pressure at map_v_lo. */
-    float map_p_hi_kpa;  /**< Absolute pressure at map_v_hi. JRP 7-bar: 800 kPa (0-8 bar abs). */
+    /*
+     * MAP sensor transfer function: output volts referred to a 5.00V supply, against pressure in
+     * the sensor's own reference (absolute, or relative to atmosphere if map_gauge).
+     */
+    float map_v_lo;      /**< Output at map_p_lo_kpa. JRP 7-bar: 0V (measured roughly in the car). */
+    float map_v_hi;      /**< Output at map_p_hi_kpa. JRP 7-bar: 5V (assumed with the above). */
+    float map_p_lo_kpa;  /**< Pressure at map_v_lo. Negative for a gauge sensor that reads vacuum. */
+    float map_p_hi_kpa;  /**< Pressure at map_v_hi. JRP 7-bar: 800 kPa (0-8 bar abs). */
+    bool  map_gauge;     /**< The sensor reads gauge pressure (vented to atmosphere), not absolute. */
     bool  ratiometric;   /**< Scale the MAP output by the measured supply (AIN1) rather than 5.00V. */
 
     /* Divider ratios, (Rtop + Rbottom) / Rbottom. Nominal from the schematic; trim to a DMM. */
@@ -60,9 +64,12 @@ typedef struct {
     float supply_div;    /**< R8/R9, 10k/10k: 2.0 */
     float ignition_div;  /**< R11/R12, 100k/20k: 6.0 */
 
-    /* Boost zero: atmospheric pressure, subtracted from MAP to give gauge pressure. */
-    float baro_kpa;      /**< Last zero captured by hand (or the default). */
-    bool  auto_zero;     /**< Re-zero at startup if MAP then reads plausibly atmospheric. */
+    /*
+     * Boost zero: what the sensor reads at rest, subtracted to give boost. Atmospheric pressure
+     * for an absolute sensor; close to 0 (its offset) for a gauge one.
+     */
+    float zero_kpa;      /**< Last zero captured by hand (or the default). */
+    bool  auto_zero;     /**< Re-zero at startup if the sensor then reads plausibly at rest. */
 
     float egt_offset_c;  /**< Added to the computed EGT. Trim against boiling water. */
 
@@ -124,9 +131,9 @@ typedef struct {
 
     float    map_sensor_v; /**< MAP output at the connector, volts (after undoing the divider). */
     float    tc_uv;        /**< Voltage across the thermocouple, microvolts. */
-    float    map_slow_kpa; /**< MAP absolute, heavily filtered: what a zero captures. */
-    float    baro_kpa;     /**< Zero reference in use. */
-    bool     auto_zeroed;  /**< baro_kpa came from this startup's auto-zero. */
+    float    map_slow_kpa; /**< Sensor pressure in its own reference, heavily filtered: what a zero captures. */
+    float    zero_kpa;     /**< Zero reference in use. */
+    bool     auto_zeroed;  /**< zero_kpa came from an auto-zero since startup. */
     const char *boost_fault; /**< Why boost is invalid, or NULL. Static string. */
     const char *egt_fault;   /**< Why EGT is invalid, or NULL. Static string. */
     uint32_t i2c_errors;   /**< Failed transactions since startup. */
@@ -173,6 +180,10 @@ void sensor_hub_get_cal(sensor_hub_cal_t *out);
 /**
  * @brief Apply new calibration immediately. Values are clamped to sane ranges.
  *
+ * Switching between absolute and gauge resets the stored zero to that reference's default. Any
+ * change to the transfer function drops the zero in use back to the stored one and runs the
+ * auto-zero again, since a zero taken through the old function no longer means anything.
+ *
  * Not persisted until sensor_hub_save_cal(), so a stepper can apply every tap and save once on
  * release.
  */
@@ -189,8 +200,9 @@ esp_err_t sensor_hub_save_cal(void);
 /**
  * @brief Take the current MAP reading as atmospheric: boost reads zero from here on.
  *
- * Refused unless the board is online, MAP is valid and the reading is plausibly atmospheric (so a
- * tap while under boost cannot set a wildly wrong zero). Saves on success.
+ * Refused unless the board is online, MAP is valid and the reading is plausibly at rest:
+ * atmospheric for an absolute sensor, near 0 for a gauge one (so a tap while under boost cannot
+ * set a wildly wrong zero). Saves on success.
  *
  * @param msg Filled with a one-line result for the user.
  */

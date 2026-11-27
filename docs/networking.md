@@ -64,7 +64,7 @@ Served on port 80, at most four concurrent connections.
 | `OPTIONS` | `/api/config/<id>` | CORS preflight, answered for loopback origins only (below) |
 | `POST` | `/api/wifi` | Form-encoded `ssid` and `password`; used by the setup page |
 | `POST` | `/api/ota` | Raw application image as the body |
-| `GET` | `/api/sensors` | Sensor board state: per-input raw ADC code, pin voltage, reads/s and count; channel values; faults; last I2C bus scan |
+| `GET` | `/api/sensors` | Sensor board state: per-input raw ADC code, pin voltage, reads/s and count; channel values; MAP volts at the connector (`map_v`) and the zero in use (`zero_kpa`); faults; last I2C bus scan |
 | `GET` | `/api/update` | `{"state","running","latest","progress","message","repo"}`, see [Updates from GitHub](#updates-from-github) |
 | `POST` | `/api/update/check` | Look for a newer release now (`202`; `409` with no connection or while busy) |
 | `POST` | `/api/update/install` | Install the release a check found (`202`; `409` if there is none) |

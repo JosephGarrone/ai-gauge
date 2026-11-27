@@ -31,7 +31,8 @@ a render loop that already has almost no internal RAM to spare.
    ranges, including the exponential term), inverted by Newton's method. That avoids a second set
    of inverse-polynomial coefficients, which could not be checked against a primary source here.
    The result is as accurate as the reference function, and host tests hold it to the NIST table.
-6. **The zero is captured at key-on only if MAP reads as atmosphere** (60–110 kPa). A restart
+6. **The zero is captured at key-on only if MAP reads as atmosphere** (60–110 kPa; for a gauge
+   sensor, near 0: [ADR 0013](0013-selectable-map-sensor-types.md)). A restart
    under boost keeps the stored zero rather than adopting a wrong one. A manual "Zero boost now"
    applies the same check and is saved.
 7. **Calibration belongs to `sensor_hub`, in its own NVS namespace** (`sensor_cal`, one versioned
@@ -55,5 +56,6 @@ a render loop that already has almost no internal RAM to spare.
 - Removing audio also removed the ~900 ms that audio setup had spent before WiFi started. WiFi
   then failed intermittently while the first frames were still rendering. It now waits 1 s after
   the UI comes up; 6 of 6 boots got all 6 RX buffers.
-- The thresholds in `sensor_hub.c` (open probe above 60 mV, MAP signal outside 0.25–4.85 V,
+- The thresholds in `sensor_hub.c` (open probe above 60 mV, MAP signal outside 0.25–4.85 V, now
+  derived from the sensor's transfer function ([ADR 0013](0013-selectable-map-sensor-types.md)),
   supply outside 4.5–5.5 V) are engineering choices. They are unverified until the board exists.

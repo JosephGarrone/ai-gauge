@@ -35,22 +35,45 @@ LittleFS) into `firmware/managed_components/`. That directory is generated and g
 
 ## Flash and monitor
 
-```bash
-idf.py -C firmware -p COM<N> flash monitor
+### Windows (PowerShell)
+
+Run from the repository root, in a PowerShell session where `export.ps1` has been
+dot-sourced as in [Build](#build). The environment does not persist, so a new window needs it
+again.
+
+```powershell
+# Find the board's COM port: list ports, plug the board in, list again
+[System.IO.Ports.SerialPort]::GetPortNames()
+
+# More detail (device names), if several ports are present
+Get-CimInstance Win32_PnPEntity | Where-Object Name -match '\(COM\d+\)' | Select-Object Name
+
+idf.py -C firmware -p COM5 flash monitor      # substitute your port
 ```
 
-Exit the monitor with `Ctrl+]`.
+Exit the monitor with `Ctrl+]`. Only one program can hold the port: close any other serial
+monitor (including the VSCode extension's) before flashing, or the flash fails with
+*"could not open port ... Access is denied"*.
+
+### Linux and macOS
+
+```bash
+idf.py -C firmware -p /dev/ttyACM0 flash monitor
+```
 
 If the board is not detected, hold **BOOT** while pressing **RESET** to force download mode.
 
 ## Flashing a CI artifact
 
 CI produces a single merged image containing bootloader, partition table, application and
-filesystem — see [ci-release.md](ci-release.md).
+filesystem — see [ci-release.md](ci-release.md). In PowerShell, with the ESP-IDF environment
+loaded (it provides `esptool`):
 
-```bash
-esptool.py --chip esp32s3 -p COM<N> write_flash 0x0 ai-gauge-merged.bin
+```powershell
+python -m esptool --chip esp32s3 -p COM5 write_flash 0x0 .\ai-gauge-merged.bin
 ```
+
+Without ESP-IDF installed, `pip install esptool` provides the same command.
 
 Or flash a tagged release straight from a Chromium browser via the ESP Web Tools page, with
 no toolchain installed at all.
@@ -124,5 +147,6 @@ ctest --test-dir build/host-tests --output-on-failure
 | `Target esp32s3 not supported` | BSP needs IDF ≥5.5 — check `idf.py --version` |
 | Blank display, no errors | PSRAM config — the octal PSRAM settings in `sdkconfig.defaults` are required |
 | Screen shows the dial once, goes black, and the COM port disappears | Not enough USB current. Once WiFi starts, the radio plus the lit AMOLED can exceed what a front-panel port or hub supplies, and the port shuts off. Use a rear motherboard port. Confirmed on hardware: the same board ran indefinitely from a rear port. In a vehicle the gauge runs from its own 12V-to-5V supply, not a PC port |
+| `could not open port 'COMn'` / `Access is denied` | Another serial monitor holds the port; close it, or check the port number |
 | Boot loop after flashing | Partition table changed without erasing; run `idf.py -C firmware erase-flash` first |
 | Poor frame rate | See [performance.md](performance.md); confirm `CONFIG_COMPILER_OPTIMIZATION_PERF` and the dual draw units are set |

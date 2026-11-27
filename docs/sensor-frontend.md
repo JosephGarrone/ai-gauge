@@ -46,11 +46,14 @@ sensor for a gauge that displays 0-60 PSI, and the JRP gauge offers a **boost se
 feature. A manual exists (`JRP-GearX-Oil-Pressure-Volts-Boost(30INHG-30PSI)-(0-30PSI)-(0-60PSI).pdf`,
 linked from the product page) but could not be machine-read here.
 
-> **Open items — verify before wiring anything:**
+> **Open items:**
 > - Pinout and wire colours (in the manual).
-> - The transfer function. "0-5V" in a listing often means the 0.5-4.5V ratiometric convention;
->   the scaling below assumes that, and it must be confirmed by measurement.
-> - Absolute versus gauge pressure: see below.
+> - The range: 0–8 bar absolute per JRP, but the first in-car readings fit 0–7 bar slightly
+>   better. See [Verification](#verification).
+
+**Other sensors are a settings change.** Settings → Calibrate selects the output (0.5–4.5V or
+0–5V), the reference (absolute or gauge) and the range, including compound vacuum-and-boost
+sensors that start at −1 bar or −15 psi ([ADR 0013](adr/0013-selectable-map-sensor-types.md)).
 
 **ADC:** ADS1115 — 16-bit, differential, programmable gain, internal reference, 250 SPS.
 
@@ -80,13 +83,14 @@ With `PGA = ±4.096V`, the ADS1115 gives `4.096V / 32768 = 125µV` per count.
 ```
 V_adc    = counts × 4.096 / 32768
 V_sensor = V_adc × (R1 + R2) / R2          = V_adc × 2.0
-P_abs    = (V_sensor - 0.5) / 4.0 × 8.0    # bar absolute; assumed 0.5V = 0, 4.5V = 8 bar abs
+P_abs    = V_sensor / 5.0 × 8.0            # bar absolute; 0V = 0, 5V = 8 bar abs
 PSI      = (P_abs - P_zero) × 14.5038         # P_zero captured at key-on, engine off
 ```
 
 **The sensor spans 0—8 bar absolute** (−1 to +7 bar gauge, about −14.5 to +101.5 PSI). 0—60 PSI is
-only the display range of the gauge face. The 0.5—4.5V endpoints are the usual convention for this
-class of sensor but are still an assumption until measured.
+only the display range of the gauge face. The output is **0–5V**, not the 0.5–4.5V the firmware
+first assumed: at idle in the car it read about 0.35V, where 0.5–4.5V would put atmosphere at 1.0V
+at the connector, or 0.5V at the pin ([ADR 0013](adr/0013-selectable-map-sensor-types.md)).
 
 Both the divider ratio and the sensor transfer function are **configuration, not constants** —
 they live in `sensor_hub` calibration settings so a different sensor is a settings change, not
@@ -115,8 +119,12 @@ pressure in the system, subtracts atmospheric pressure. The firmware does the sa
 `P_zero` at key-on with the engine off. That also corrects for altitude and weather, which a fixed
 14.7 PSI offset would not.
 
-Expected signal at rest, if the 0.5—4.5V convention holds: `0.5 + 4.0 × (1/8) — about 1.0V`. A
-measurement confirms the transfer function.
+Expected signal at rest, engine off: `5.0 × (1/8)`, about **0.63V** for 0–8 bar, or 0.71V if
+the sensor is in fact 0–7 bar.
+
+A **gauge** sensor is vented to atmosphere and reads 0 at rest. With *MAP reads: Gauge*, the zero
+is the sensor's own offset (accepted within ±15 kPa), and `map` is reported as boost + 101.325 kPa,
+since nothing measures the barometer.
 
 Note that JRP's 7-bar and 3-bar sensors use different calibrations and the connectors look alike;
 the firmware's scaling constants must match the sensor actually fitted.
@@ -217,7 +225,7 @@ Required:
 |---|---|---|
 | Sensor board absent | ADS1115 and TMP1075 both NACK (re-probed every 2s) | Simulated sweep while no board has ever answered (if built in), else dashes. Settings shows "Board not detected" |
 | Board lost after being seen | 5 consecutive failed transactions | All its channels invalid; bus reset; re-probed every 2s. Never falls back to the simulator |
-| MAP unplugged or shorted | Sensor output below 0.25V or above 4.85V | `boost` invalid, reason on settings |
+| MAP unplugged or shorted | Output below half what the sensor gives at 10 kPa abs (capped at 0.25V), or above the larger of 4.85V and its top output + 0.25V | `boost` invalid, reason on settings. **Not detectable for a 0–5V gauge sensor**, which outputs 0V at rest: unplugged, it reads 0 boost |
 | Sensor supply collapsed | AIN1 × 2 outside 4.5–5.5V (TPS2553 limiting) | `boost` invalid when ratiometric |
 | Thermocouple open circuit | AIN3 above 60mV (R18 pulls it to saturation) | Channel invalid; readout shows dashes |
 | Cold-junction sensor missing | No TMP1075 at 0x4F, nor any address 0x48–0x4E with die ID 0x7500 | `egt` invalid; `boost` unaffected |
@@ -255,16 +263,22 @@ holding repeats, and the value is saved on release. *Zero boost now* is on the s
 
 | Parameter | Default | Use |
 |---|---|---|
-| Auto-zero at start | on | Zero boost 1.5s after the MAP reading appears, if it reads 60–110 kPa |
-| Stored zero | 101.3 kPa | Used when auto-zero is off or refuses; set by *Zero boost now* |
-| Sensor range | 8.0 bar abs | Pressure at *Output at max* |
-| Output at 0 bar / at max | 0.50 / 4.50 V | Sensor transfer function, referred to 5.00V |
+| MAP output | 0–5 V | 0.5–4.5 V or 0–5 V; sets both output trims. *Custom* once they are trimmed |
+| MAP reads | Absolute | *Gauge* for a sensor vented to atmosphere. Switching resets the stored zero |
+| Pressure at min / max | 0 / 8.0 bar | *Units* picks bar, psi or kPa; − and + step 0.1 / 1 / 10 at the min and 0.5 / 5 / 50 at the max. Min is −102 kPa to 1950 kPa (not below 0 for an absolute sensor), max at least 50 kPa above min, up to 2000 kPa |
+| Auto-zero at start | on | Zero boost 1.5s after the MAP reading appears, if it reads 60–110 kPa (absolute) or within ±15 kPa (gauge). Re-runs whenever the sensor settings above, or the output trims below, change |
+| Stored zero | 101.3 kPa | Used when auto-zero is off or refuses; set by *Zero boost now*. 0 for a gauge sensor |
+| Output at min / at max | 0.00 / 5.00 V | Fine trim of the transfer function, referred to 5.00V |
 | Ratiometric | on | Scale the output by the measured supply |
 | Boost / EGT smoothing | 20 / 300 ms | First-order filter time constant, before the face's own damping |
 | EGT offset | 0 °C | Trim against boiling water |
 | MAP / supply / ignition divider | 2.000 / 2.000 / 6.000 | Set to the DMM-measured ratio |
 
-Settings → Sensors shows live readings in native units (MAP kPa and connector volts,
+The blob is version 2. A version 1 blob (the 0.5–4.5V assumption) is discarded at boot, and the
+defaults apply.
+
+Settings → Sensors shows live readings in native units (MAP kPa and connector volts, the volts
+also while MAP is faulted,
 EGT and probe µV, cold junction, supply, ignition, the zero in use), plus any fault, so each
 value can be checked against a meter.
 
@@ -286,7 +300,11 @@ Record measured results here as the hardware is built.
 
 - [x] Identify the sensor: JRP 7-bar, 0-5V, 3-wire MAP sensor (from the kit listing)
 - [ ] Confirm connector pinout and wire colours from the manual
-- [ ] Measure the output voltage at rest to establish the transfer function
+- [~] Output voltage: about 0.35V at idle and 0.45–0.5V on a no-load rev (2026-10, in the car, rough,
+      previous firmware). That rules out 0.5–4.5V, so the default is now 0–5V. Still to do: read
+      *Settings → Sensors* with the engine off (the connector volts in brackets). About 0.63V means
+      0–8 bar, and about 0.71V means 0–7 bar. Then set *Pressure at max* to match.
+- [x] Ignition: about 13.5V with the engine running (2026-10, in the car)
 - [x] Absolute or gauge referenced: **absolute**, 0—8 bar (JRP sensor specification)
 - [ ] Measure the actual divider ratio with a DMM and store it as the calibration value
 - [ ] Verify ADS1115 → PSI against a known pressure reference at several points

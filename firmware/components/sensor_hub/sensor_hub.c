@@ -99,9 +99,15 @@ static const char *TAG = "sensor_hub";
 
 /* ---------------------------------------------------------------- plausibility ---- */
 
-/* The MAP divider's bottom resistor pulls an unplugged signal to 0V; a live sensor never gets there. */
-#define MAP_SIGNAL_MIN_V   0.25f
+/*
+ * The MAP divider's bottom resistor pulls an unplugged signal to 0V. Whether that can be told from a
+ * real reading depends on the sensor (sensor_math_map_open_v()): it is judged at the lowest pressure
+ * an engine can pull, 10 kPa abs, or that much below atmosphere for a gauge sensor.
+ */
+#define MAP_FLOOR_ABS_KPA  10.0f
+/* Above this, or a quarter volt past the sensor's top output, the signal is shorted high. */
 #define MAP_SIGNAL_MAX_V   4.85f
+#define MAP_OVER_MARGIN_V  0.25f
 /* The buck makes 5.02V; much below that the TPS2553 is limiting, which means a harness fault. */
 #define SUPPLY_MIN_V       4.5f
 #define SUPPLY_MAX_V       5.5f
@@ -114,6 +120,12 @@ static const char *TAG = "sensor_hub";
 /* What a zero will accept as atmospheric: ~4000 m altitude to a deep low at sea level. */
 #define ATMOSPHERE_MIN_KPA 60.0f
 #define ATMOSPHERE_MAX_KPA 110.0f
+/* A gauge sensor has no barometer: `map` is reported against the standard atmosphere. */
+#define STD_ATMOSPHERE_KPA 101.325f
+/* What a zero will accept as a gauge sensor's offset at rest, about 2 psi either way. */
+#define GAUGE_ZERO_MAX_KPA 15.0f
+/* -30 inHg, the bottom of a compound (vacuum and boost) sensor's range, with a little to spare. */
+#define MAP_P_MIN_KPA      (-102.0f)
 
 #define MAP_SLOW_TAU_MS   1000.0f
 #define SUPPLY_TAU_MS     200.0f
@@ -125,20 +137,21 @@ static const char *TAG = "sensor_hub";
 #define NVS_NAMESPACE "sensor_cal"
 #define NVS_KEY_CAL   "cal"
 #define NVS_KEY_VER   "ver"
-#define CAL_VERSION   1
+#define CAL_VERSION   2 /* 2: map_gauge added, baro_kpa became zero_kpa */
 
 void sensor_hub_cal_defaults(sensor_hub_cal_t *cal)
 {
     *cal = (sensor_hub_cal_t){
-        .map_v_lo     = 0.50f,
-        .map_v_hi     = 4.50f,
+        .map_v_lo     = 0.0f,
+        .map_v_hi     = 5.0f,
         .map_p_lo_kpa = 0.0f,
         .map_p_hi_kpa = 800.0f,
+        .map_gauge    = false,
         .ratiometric  = true,
         .map_div      = 2.0f,
         .supply_div   = 2.0f,
         .ignition_div = 6.0f,
-        .baro_kpa     = 101.325f,
+        .zero_kpa     = STD_ATMOSPHERE_KPA,
         .auto_zero    = true,
         .egt_offset_c = 0.0f,
         .boost_tau_ms = 20.0f,
@@ -162,12 +175,14 @@ static void cal_sanitise(sensor_hub_cal_t *c)
         c->map_v_hi = clampf(c->map_v_lo + 0.5f, 0.0f, 5.0f);
         c->map_v_lo = c->map_v_hi - 0.5f;
     }
-    c->map_p_lo_kpa = clampf(c->map_p_lo_kpa, 0.0f, 2000.0f);
-    c->map_p_hi_kpa = clampf(c->map_p_hi_kpa, 50.0f, 2000.0f);
+    /* Only a gauge sensor reads below its zero; an absolute one cannot read below vacuum. */
+    c->map_p_lo_kpa = clampf(c->map_p_lo_kpa, c->map_gauge ? MAP_P_MIN_KPA : 0.0f, 1950.0f);
+    c->map_p_hi_kpa = clampf(c->map_p_hi_kpa, c->map_p_lo_kpa + 50.0f, 2000.0f);
     c->map_div      = clampf(c->map_div, 1.0f, 20.0f);
     c->supply_div   = clampf(c->supply_div, 1.0f, 20.0f);
     c->ignition_div = clampf(c->ignition_div, 1.0f, 30.0f);
-    c->baro_kpa     = clampf(c->baro_kpa, ATMOSPHERE_MIN_KPA, ATMOSPHERE_MAX_KPA);
+    c->zero_kpa     = c->map_gauge ? clampf(c->zero_kpa, -GAUGE_ZERO_MAX_KPA, GAUGE_ZERO_MAX_KPA)
+                                   : clampf(c->zero_kpa, ATMOSPHERE_MIN_KPA, ATMOSPHERE_MAX_KPA);
     c->egt_offset_c = clampf(c->egt_offset_c, -50.0f, 50.0f);
     c->boost_tau_ms = clampf(c->boost_tau_ms, 0.0f, 2000.0f);
     c->egt_tau_ms   = clampf(c->egt_tau_ms, 0.0f, 5000.0f);
@@ -195,8 +210,9 @@ static struct {
 
     portMUX_TYPE     cal_lock;
     sensor_hub_cal_t cal;        /* guarded by cal_lock */
-    float            baro_active; /* guarded by cal_lock */
+    float            zero_active; /* guarded by cal_lock */
     bool             auto_zeroed; /* guarded by cal_lock */
+    bool             rezero;      /* guarded by cal_lock: the transfer function changed, auto-zero again */
     bool             cal_dirty;   /* UI task only */
     bool             cal_loaded;  /* app_main task, before the sensor task exists */
 
@@ -493,8 +509,17 @@ static void probe(task_state_t *t)
     }
 }
 
+/* Whether a filtered reading looks like the sensor at rest, so it can be taken as the zero. */
+static bool zero_plausible(const sensor_hub_cal_t *cal, float kpa)
+{
+    if (cal->map_gauge) {
+        return fabsf(kpa) <= GAUGE_ZERO_MAX_KPA;
+    }
+    return kpa >= ATMOSPHERE_MIN_KPA && kpa <= ATMOSPHERE_MAX_KPA;
+}
+
 static void sample_map(task_state_t *t, sensor_hub_snapshot_t *snap, const sensor_hub_cal_t *cal,
-                       float baro, int64_t now)
+                       float zero, int64_t now)
 {
     int16_t   counts;
     esp_err_t err = ads_convert(0, ADS_PGA_4V096, ADS_DR_475, 475.0f, &counts);
@@ -523,9 +548,12 @@ static void sample_map(task_state_t *t, sensor_hub_snapshot_t *snap, const senso
             v_ref = v_sensor * 5.0f / t->supply_v;
         }
     }
-    if (v_sensor < MAP_SIGNAL_MIN_V) {
+    float p_floor = cal->map_gauge ? MAP_FLOOR_ABS_KPA - STD_ATMOSPHERE_KPA : MAP_FLOOR_ABS_KPA;
+    float open_v  = sensor_math_map_open_v(cal->map_v_lo, cal->map_p_lo_kpa, cal->map_v_hi,
+                                           cal->map_p_hi_kpa, p_floor);
+    if (v_sensor < open_v) {
         fault = "No MAP signal";
-    } else if (v_sensor > MAP_SIGNAL_MAX_V) {
+    } else if (v_sensor > fmaxf(MAP_SIGNAL_MAX_V, cal->map_v_hi + MAP_OVER_MARGIN_V)) {
         fault = "MAP signal too high";
     }
 
@@ -541,42 +569,46 @@ static void sample_map(task_state_t *t, sensor_hub_snapshot_t *snap, const senso
         return;
     }
 
-    float p_abs = sensor_math_linear(v_ref, cal->map_v_lo, cal->map_p_lo_kpa, cal->map_v_hi,
-                                     cal->map_p_hi_kpa);
+    /* In the sensor's own reference: absolute, or gauge if cal->map_gauge. */
+    float p = sensor_math_linear(v_ref, cal->map_v_lo, cal->map_p_lo_kpa, cal->map_v_hi,
+                                 cal->map_p_hi_kpa);
     if (!t->map_seen) {
-        t->map_kpa      = p_abs;
-        t->map_slow_kpa = p_abs;
+        t->map_kpa      = p;
+        t->map_slow_kpa = p;
         t->map_seen     = true;
     } else {
-        t->map_kpa      = sensor_math_lowpass(t->map_kpa, p_abs, TICK_MS, cal->boost_tau_ms);
-        t->map_slow_kpa = sensor_math_lowpass(t->map_slow_kpa, p_abs, TICK_MS, MAP_SLOW_TAU_MS);
+        t->map_kpa      = sensor_math_lowpass(t->map_kpa, p, TICK_MS, cal->boost_tau_ms);
+        t->map_slow_kpa = sensor_math_lowpass(t->map_slow_kpa, p, TICK_MS, MAP_SLOW_TAU_MS);
     }
     t->map_samples++;
     snap->map_slow_kpa = t->map_slow_kpa;
 
     /*
      * Key-on zero, as the JRP gauge does it (docs/sensor-frontend.md). Only when the reading looks
-     * like atmosphere: a restart under boost keeps the stored zero instead of adopting a bad one.
+     * like the sensor at rest: a restart under boost keeps the stored zero instead of adopting a
+     * bad one.
      */
     if (!t->auto_zero_done && t->map_samples >= AUTO_ZERO_SAMPLES) {
         t->auto_zero_done = true;
         if (cal->auto_zero) {
-            if (t->map_slow_kpa >= ATMOSPHERE_MIN_KPA && t->map_slow_kpa <= ATMOSPHERE_MAX_KPA) {
+            if (zero_plausible(cal, t->map_slow_kpa)) {
                 taskENTER_CRITICAL(&s.cal_lock);
-                s.baro_active = t->map_slow_kpa;
+                s.zero_active = t->map_slow_kpa;
                 s.auto_zeroed = true;
                 taskEXIT_CRITICAL(&s.cal_lock);
-                baro = t->map_slow_kpa;
-                ESP_LOGI(TAG, "auto-zero: atmosphere %.1f kPa", (double)baro);
+                zero = t->map_slow_kpa;
+                ESP_LOGI(TAG, "auto-zero: at rest %.1f kPa", (double)zero);
             } else {
-                ESP_LOGW(TAG, "auto-zero skipped: MAP %.1f kPa is not atmospheric; keeping %.1f kPa",
-                         (double)t->map_slow_kpa, (double)baro);
+                ESP_LOGW(TAG, "auto-zero skipped: MAP %.1f kPa is not at rest; keeping %.1f kPa",
+                         (double)t->map_slow_kpa, (double)zero);
             }
         }
     }
 
-    snap->ch[SENSOR_HUB_CH_MAP]   = (sensor_hub_reading_t){t->map_kpa, true, now};
-    snap->ch[SENSOR_HUB_CH_BOOST] = (sensor_hub_reading_t){t->map_kpa - baro, true, now};
+    float boost = t->map_kpa - zero;
+    float map   = cal->map_gauge ? boost + STD_ATMOSPHERE_KPA : t->map_kpa;
+    snap->ch[SENSOR_HUB_CH_MAP]   = (sensor_hub_reading_t){map, true, now};
+    snap->ch[SENSOR_HUB_CH_BOOST] = (sensor_hub_reading_t){boost, true, now};
 }
 
 static void sample_supply(task_state_t *t, sensor_hub_snapshot_t *snap, const sensor_hub_cal_t *cal,
@@ -723,15 +755,27 @@ static void sensor_task(void *arg)
             t.next_probe_us = now + (int64_t)PROBE_EVERY_MS * 1000;
         }
 
+        /*
+         * The request is taken under the same lock as the calibration it came with, so the filters
+         * restart on the first sample through the new transfer function, never one before or after.
+         */
         sensor_hub_cal_t cal;
-        float            baro;
+        float            zero;
+        bool             rezero;
         taskENTER_CRITICAL(&s.cal_lock);
-        cal  = s.cal;
-        baro = s.baro_active;
+        cal      = s.cal;
+        zero     = s.zero_active;
+        rezero   = s.rezero;
+        s.rezero = false;
         taskEXIT_CRITICAL(&s.cal_lock);
+        if (rezero) {
+            t.auto_zero_done = false;
+            t.map_samples    = 0;
+            t.map_seen       = false;
+        }
 
         if (t.ads_ok) {
-            sample_map(&t, &snap, &cal, baro, now);
+            sample_map(&t, &snap, &cal, zero, now);
 
             switch (tick % SLOT_COUNT) {
             case SLOT_EGT:      sample_egt(&t, &snap, &cal, now); break;
@@ -754,7 +798,7 @@ static void sensor_task(void *arg)
                         : atomic_load(&s.seen)   ? SENSOR_HUB_LOST
                                                  : SENSOR_HUB_SEARCHING;
         taskENTER_CRITICAL(&s.cal_lock);
-        snap.baro_kpa    = s.baro_active;
+        snap.zero_kpa    = s.zero_active;
         snap.auto_zeroed = s.auto_zeroed;
         taskEXIT_CRITICAL(&s.cal_lock);
 
@@ -788,7 +832,7 @@ static void cal_load(void)
     }
     s.cal_loaded = true;
     sensor_hub_cal_defaults(&s.cal);
-    s.baro_active = s.cal.baro_kpa;
+    s.zero_active = s.cal.zero_kpa;
 
     nvs_handle_t h;
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) {
@@ -803,9 +847,10 @@ static void cal_load(void)
         nvs_get_blob(h, NVS_KEY_CAL, &stored, &len) == ESP_OK && len == sizeof(stored)) {
         cal_sanitise(&stored);
         s.cal         = stored;
-        s.baro_active = stored.baro_kpa;
+        s.zero_active = stored.zero_kpa;
         ESP_LOGI(TAG, "calibration loaded");
     } else {
+        /* Version 1 assumed a 0.5-4.5V absolute sensor; its values are not worth carrying over. */
         ESP_LOGW(TAG, "stored calibration unreadable or from another version; using defaults");
     }
     nvs_close(h);
@@ -999,17 +1044,33 @@ void sensor_hub_get_cal(sensor_hub_cal_t *out)
 void sensor_hub_set_cal(const sensor_hub_cal_t *cal)
 {
     cal_load();
+    sensor_hub_cal_t old;
+    sensor_hub_get_cal(&old);
+
     sensor_hub_cal_t c = *cal;
+    /* A zero in one reference is meaningless in the other: start from that reference's default. */
+    if (c.map_gauge != old.map_gauge) {
+        c.zero_kpa = c.map_gauge ? 0.0f : STD_ATMOSPHERE_KPA;
+    }
     cal_sanitise(&c);
+
+    bool transfer = c.map_v_lo != old.map_v_lo || c.map_v_hi != old.map_v_hi ||
+                    c.map_p_lo_kpa != old.map_p_lo_kpa || c.map_p_hi_kpa != old.map_p_hi_kpa ||
+                    c.map_gauge != old.map_gauge;
 
     taskENTER_CRITICAL(&s.cal_lock);
     bool changed = memcmp(&c, &s.cal, sizeof(c)) != 0;
-    /* A zero typed in by hand takes over from this startup's auto-zero. */
-    if (c.baro_kpa != s.cal.baro_kpa) {
-        s.baro_active = c.baro_kpa;
+    /*
+     * A zero typed in by hand takes over from this startup's auto-zero, and so does the stored one
+     * when the transfer function changes, until the auto-zero below has run again through the new
+     * one.
+     */
+    if (transfer || c.zero_kpa != s.cal.zero_kpa) {
+        s.zero_active = c.zero_kpa;
         s.auto_zeroed = false;
     }
-    s.cal = c;
+    s.rezero = s.rezero || transfer;
+    s.cal    = c;
     taskEXIT_CRITICAL(&s.cal_lock);
 
     if (changed) {
@@ -1031,20 +1092,23 @@ esp_err_t sensor_hub_zero_boost(char *msg, size_t msg_len)
         return ESP_ERR_INVALID_STATE;
     }
 
+    sensor_hub_cal_t cal;
+    sensor_hub_get_cal(&cal);
+
     float kpa = snap.map_slow_kpa;
-    if (kpa < ATMOSPHERE_MIN_KPA || kpa > ATMOSPHERE_MAX_KPA) {
-        snprintf(msg, msg_len, "Not zeroed: %.0f kPa is not atmospheric. Engine off?", (double)kpa);
+    if (!zero_plausible(&cal, kpa)) {
+        snprintf(msg, msg_len, cal.map_gauge ? "Not zeroed: %+.0f kPa is too far from 0. Engine off?"
+                                             : "Not zeroed: %.0f kPa is not atmospheric. Engine off?",
+                 (double)kpa);
         return ESP_ERR_INVALID_STATE;
     }
 
-    sensor_hub_cal_t cal;
-    sensor_hub_get_cal(&cal);
-    cal.baro_kpa = kpa;
+    cal.zero_kpa = kpa;
     sensor_hub_set_cal(&cal);
 
     /* set_cal only hands over when the value changed; make sure this zero is the one in use. */
     taskENTER_CRITICAL(&s.cal_lock);
-    s.baro_active = s.cal.baro_kpa;
+    s.zero_active = s.cal.zero_kpa;
     s.auto_zeroed = false;
     taskEXIT_CRITICAL(&s.cal_lock);
 

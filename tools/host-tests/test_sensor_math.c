@@ -122,13 +122,36 @@ static void test_tmp1075_decoding(void)
 
 static void test_map_transfer(void)
 {
-    /* JRP 7-bar as documented: 0.5 V = 0 kPa abs, 4.5 V = 800 kPa abs. */
+    /* 0.5-4.5V over 0-8 bar abs: 0.5 V = 0 kPa abs, 4.5 V = 800 kPa abs. */
     CHECK(NEAR(sensor_math_linear(0.5f, 0.5f, 0.0f, 4.5f, 800.0f), 0.0, 1e-4), "bottom");
     CHECK(NEAR(sensor_math_linear(4.5f, 0.5f, 0.0f, 4.5f, 800.0f), 800.0, 1e-3), "top");
     CHECK(NEAR(sensor_math_linear(1.0f, 0.5f, 0.0f, 4.5f, 800.0f), 100.0, 1e-3),
           "1.0 V is about atmospheric");
     /* Degenerate span must not divide by zero. */
     CHECK(sensor_math_linear(1.0f, 2.0f, 5.0f, 2.0f, 9.0f) == 5.0f, "zero span");
+
+    /* 0-5V over 0-8 bar abs: atmosphere is 0.63 V. */
+    CHECK(NEAR(sensor_math_linear(0.625f, 0.0f, 0.0f, 5.0f, 800.0f), 100.0, 1e-3), "0-5V abs");
+    /* Compound gauge sensor, -30 inHg to 30 psi on 0.5-4.5V: 0 psi g sits a third of the way up. */
+    CHECK(NEAR(sensor_math_linear(0.5f + 4.0f * 101.59f / 308.43f, 0.5f, -101.59f, 4.5f, 206.84f),
+               0.0, 1e-2),
+          "compound zero");
+}
+
+static void test_map_open_threshold(void)
+{
+    /* Floors of 10 kPa abs, or 91 kPa of vacuum for a gauge sensor. */
+    CHECK(NEAR(sensor_math_map_open_v(0.5f, 0.0f, 4.5f, 800.0f, 10.0f), 0.25, 1e-6),
+          "0.5-4.5V abs: capped at 0.25 V");
+    CHECK(NEAR(sensor_math_map_open_v(0.0f, 0.0f, 5.0f, 800.0f, 10.0f), 0.03125, 1e-6),
+          "0-5V abs: half the 10 kPa output");
+    CHECK(sensor_math_map_open_v(0.0f, 0.0f, 5.0f, 413.69f, -91.0f) == 0.0f,
+          "0-5V gauge: 0 V at rest, undetectable");
+    CHECK(NEAR(sensor_math_map_open_v(0.5f, 0.0f, 4.5f, 413.69f, -91.0f), 0.25, 1e-6),
+          "0.5-4.5V gauge: floor clamps to the 0.5 V bottom");
+    CHECK(NEAR(sensor_math_map_open_v(0.5f, -101.59f, 4.5f, 206.84f, -91.0f), 0.25, 1e-6),
+          "compound: capped");
+    CHECK(sensor_math_map_open_v(0.0f, 0.0f, 5.0f, 0.0f, 0.0f) == 0.0f, "zero span");
 }
 
 static void test_lowpass(void)
@@ -176,6 +199,7 @@ int main(void)
         {"ads1115_scaling",             test_ads1115_scaling},
         {"tmp1075_decoding",            test_tmp1075_decoding},
         {"map_transfer",                test_map_transfer},
+        {"map_open_threshold",          test_map_open_threshold},
         {"lowpass",                     test_lowpass},
         {"units",                       test_units},
     };
