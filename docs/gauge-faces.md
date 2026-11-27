@@ -45,8 +45,8 @@ What was carried over, measured on the photo as fractions of the ring's outer ra
   caption there was crossed by the needle constantly; below the hub it labels the number instead.
   The lower half reads top-down as value, unit, (peak, when turned on), sparkline.
 - **Sized for the A-pillar** (2026-11-27). The gauge is read at a glance from the driver's seat, so
-  the readout is an 80 px whole number (`montserrat_digits_80`, top at y 262), the caption 22 px
-  (centre 338), and the peak figure, when the user turns it on, 20 px at y 352. Nothing on the dial
+  the readout is an 80 px whole number (`montserrat_digits_80`, top at y 258), the caption 22 px
+  (centre 342), and the peak figure, when the user turns it on, 20 px at y 356. Nothing on the dial
   is smaller than the numerals except that optional peak figure.
 - **A sparkline** (`<trend>`, 200 × 50 px at y 378) fills the gap under the dial: the reading over
   the last 30/60/120 s across the face's range, with the redline dashed.

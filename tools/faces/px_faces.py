@@ -42,9 +42,9 @@ GAP_DEG = 1.4                       # break in the ring at each half-major
 # Sized for a glance from the driver's seat on the A-pillar: an 80 px whole-number readout and a 22 px
 # caption, with the sparkline in the gap under the dial.
 READOUT_FONT = "montserrat_digits_80"  # digits only: tools/fonts/make_digits_font.py
-READOUT_Y = 262                     # top edge of the number (58 px tall)
-CAPTION_Y = 338                     # centre of the caption, just under the number
-PEAK_Y = 352                        # top edge of the peak value, when the user turns it on
+READOUT_Y = 258                     # top edge of the number (58 px tall)
+CAPTION_Y = 342                     # centre of the caption, 14 px clear of the number
+PEAK_Y = 356                        # top edge of the peak value, when the user turns it on
 TREND_Y = 378                       # top edge of the sparkline strip
 TREND_W, TREND_H = 200, 50
 TICK_GAP = 6                        # renderer: tick circle = band inner edge - 6 px

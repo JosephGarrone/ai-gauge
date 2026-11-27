@@ -41,9 +41,9 @@ static const char s_default_xml[] =
     "    <labels every=\"5\" font=\"montserrat_32\" color=\"#b0b4b6\" radius=\"172\"/>"
     "  </face>"
     "  <needle style=\"taper\" length=\"180\" width=\"12\" color=\"#17caff\" pivot-radius=\"16\"/>"
-    "  <readout y=\"262\" font=\"montserrat_digits_80\" format=\"%.0f\" color=\"#ebf0f2\"/>"
-    "  <title text=\"BOOST  PSI\" y=\"338\" font=\"montserrat_22\" color=\"#8f9aa0\"/>"
-    "  <peak color=\"#ffb000\" length=\"16\" width=\"5\" value-y=\"352\" font=\"montserrat_20\" format=\"%.0f\"/>"
+    "  <readout y=\"258\" font=\"montserrat_digits_80\" format=\"%.0f\" color=\"#ebf0f2\"/>"
+    "  <title text=\"BOOST  PSI\" y=\"342\" font=\"montserrat_22\" color=\"#8f9aa0\"/>"
+    "  <peak color=\"#ffb000\" length=\"16\" width=\"5\" value-y=\"356\" font=\"montserrat_20\" format=\"%.0f\"/>"
     "  <trend y=\"378\" width=\"200\" height=\"50\" line-width=\"3\" color=\"#17caff\"/>"
     "  <alert above=\"26\" flash-hz=\"2\" color=\"#ff3030\"/>"
     "</gauge>";

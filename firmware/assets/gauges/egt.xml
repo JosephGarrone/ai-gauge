@@ -38,10 +38,10 @@
     </hub>
   </needle>
 
-  <readout y="262" font="montserrat_digits_80" format="%.0f" color="#ebf0f2"/>
-  <title text="EGT  °C" y="338" font="montserrat_22" color="#8f9aa0"/>
+  <readout y="258" font="montserrat_digits_80" format="%.0f" color="#ebf0f2"/>
+  <title text="EGT  °C" y="342" font="montserrat_22" color="#8f9aa0"/>
 
-  <peak color="#ffb000" length="16" width="5" value-y="352" font="montserrat_20" format="%.0f"/>
+  <peak color="#ffb000" length="16" width="5" value-y="356" font="montserrat_20" format="%.0f"/>
   <trend y="378" width="200" height="50" line-width="3" color="#17caff"/>
   <alert above="750" flash-hz="2" color="#ff3030"/>
 </gauge>
