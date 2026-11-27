@@ -1,7 +1,7 @@
 # ADR 0014: A glanceable, burn-in-aware dial
 
-**Status:** accepted, 2026-11-27. Built and host-tested; **not yet run on hardware** (the gauge was
-in the car, off the network).
+**Status:** accepted, 2026-11-27. Flashed and measured on the bench board: 66.4–66.9 fps
+([performance.md](../performance.md)). The engine-off screen has not been seen with a real ignition feed.
 
 ## Context
 
@@ -66,9 +66,9 @@ The owner also asked for a running chart of the last 30/60/120 s.
 
 - Each pixel-shift step redraws the whole dial once: one dropped frame every few minutes.
 - The trend adds a ~210 × 60 px repaint up to 7 times a second at 30 s (about 3% of the screen per
-  repaint). Expected to be cheap; **to be measured on hardware** (performance.md).
+  repaint). Measured: no change to the frame rate (performance.md).
 - The 80 px readout's box is bigger than the 48 px one, so a changing number dirties more; whole
-  numbers change less often, which offsets it. **To be measured.**
+  numbers change less often, which more than offsets it: 5.2% dirty against 13.2% before.
 - The Faces page now carries the four readout settings below the face list, and Display carries
   pixel shift and the engine-off switch. Both pages scroll. They exist only while open (ADR 0011),
   so the extra ~12 widgets cost internal RAM only then (~3.6 KB).
