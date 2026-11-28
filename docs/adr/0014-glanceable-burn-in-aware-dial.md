@@ -35,7 +35,7 @@ The owner also asked for a running chart of the last 30/60/120 s.
    one-column-per-pixel ring of means only when a column completes, and drawn as two recoloured
    images plus a few lines. The strip is its own object, repainted only then.
 6. **Burn-in:** the shipped faces' static artwork is drawn at 75% (`#b0b4b6`, redline `#cc2626`);
-   **pixel shift** moves the whole dial tile around a 3 px orbit every 1/3/10 minutes (setting,
+   **pixel shift** moves the whole dial (a box inside the dial tile, not the tile itself, since 2026-11-28) around a 3 px orbit every 1/3/10 minutes (setting,
    default 3) with LVGL's translate style; and when the ignition feed stays below 12.9 V for 15 s,
    an opaque **engine-off screen** on `lv_layer_top()` hides the dial and leaves the panel black
    apart from a small bordered box, "DISPLAY OFF / saving the screen / tap to wake" in 20 px, that

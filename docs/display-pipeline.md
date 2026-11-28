@@ -63,7 +63,9 @@ dial, which the needle's box does not reach. See
 
 ### 3b. Pixel shift redraws the dial once per step
 
-Burn-in protection translates the whole dial tile by up to 3 px, every few minutes. Each step is a
+Burn-in protection translates the whole dial by up to 3 px, every few minutes. It moves a full-size
+box inside the dial tile, never the tile: the tileview finds its tiles by exact position, and a
+translated tile made the settings' Done button do nothing (fixed 2026-11-28). Each step is a
 full-screen repaint (one dropped frame); the renderer then recomputes the needle, arc head and peak
 marker's cached screen coordinates (`gauge_render_parent_moved`), so their tight dirty boxes stay
 correct. The arc fill works in canvas coordinates and moves with the canvas.

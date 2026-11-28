@@ -71,6 +71,7 @@ static struct {
     lv_obj_t *tileview;
     lv_obj_t *tile_gauge;
     lv_obj_t *tile_settings;
+    lv_obj_t *dial;            /**< Full-size box on the dial tile holding the gauge; pixel shift moves it. */
 
     gauge_render_t *gauge;
     lv_obj_t       *fps_badge; /**< On the dial tile, optional. */
@@ -192,12 +193,17 @@ static const int8_t k_shift_orbit[][2] = {
 };
 #define SHIFT_STEPS (sizeof(k_shift_orbit) / sizeof(k_shift_orbit[0]))
 
+/*
+ * The box inside the tile moves, never the tile: the tileview finds its tiles by exact position, so
+ * a translated tile made lv_tileview_set_tile_by_index() find nothing and Done stopped returning to
+ * the dial after the first shift step (2026-11-28).
+ */
 static void shift_to(uint8_t step)
 {
     s.shift_step = step % SHIFT_STEPS;
-    lv_obj_set_style_translate_x(s.tile_gauge, k_shift_orbit[s.shift_step][0], LV_PART_MAIN);
-    lv_obj_set_style_translate_y(s.tile_gauge, k_shift_orbit[s.shift_step][1], LV_PART_MAIN);
-    lv_obj_update_layout(s.tile_gauge);
+    lv_obj_set_style_translate_x(s.dial, k_shift_orbit[s.shift_step][0], LV_PART_MAIN);
+    lv_obj_set_style_translate_y(s.dial, k_shift_orbit[s.shift_step][1], LV_PART_MAIN);
+    lv_obj_update_layout(s.dial);
     gauge_render_parent_moved(s.gauge);
     lv_obj_invalidate(s.tile_gauge);
 }
@@ -567,7 +573,19 @@ esp_err_t app_ui_create(const gauge_config_t *cfg, const board_profile_t *board)
     lv_obj_set_style_bg_color(s.tile_gauge, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s.tile_gauge, LV_OPA_COVER, LV_PART_MAIN);
 
-    esp_err_t err = gauge_render_create(s.tile_gauge, cfg, board, &s.gauge);
+    /*
+     * The gauge lives in a full-size box on the tile, which pixel shift translates. Not clickable or
+     * scrollable, so taps and swipes still reach the tile and the tileview.
+     */
+    s.dial = lv_obj_create(s.tile_gauge);
+    ESP_RETURN_ON_FALSE(s.dial != NULL, ESP_ERR_NO_MEM, TAG, "dial box failed");
+    lv_obj_remove_style_all(s.dial);
+    lv_obj_set_size(s.dial, LV_PCT(100), LV_PCT(100));
+    lv_obj_remove_flag(s.dial, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(s.dial, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s.dial, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+    esp_err_t err = gauge_render_create(s.dial, cfg, board, &s.gauge);
     ESP_RETURN_ON_ERROR(err, TAG, "gauge_render_create failed");
     gauge_render_set_alert_cb(s.gauge, s.alert_cb, s.alert_cb_user);
 
@@ -575,7 +593,7 @@ esp_err_t app_ui_create(const gauge_config_t *cfg, const board_profile_t *board)
      * FPS badge. Created regardless so the toggle has something to act on, but hidden by
      * default -- anything permanently on the dial tile costs frame budget on every update.
      */
-    s.fps_badge = lv_label_create(s.tile_gauge);
+    s.fps_badge = lv_label_create(s.dial);
     lv_label_set_text(s.fps_badge, "-- fps");
     lv_obj_set_style_text_font(s.fps_badge, &lv_font_montserrat_16, LV_PART_MAIN);
     lv_obj_set_style_text_color(s.fps_badge, lv_color_hex(0x00c853), LV_PART_MAIN);
@@ -619,7 +637,7 @@ esp_err_t app_ui_set_config(const gauge_config_t *cfg)
      * PSRAM allocation for the face -- the gauge on screen keeps working rather than the
      * driver being left with nothing.
      */
-    esp_err_t err = gauge_render_create(s.tile_gauge, cfg, s.board, &replacement);
+    esp_err_t err = gauge_render_create(s.dial, cfg, s.board, &replacement);
     ESP_RETURN_ON_ERROR(err, TAG, "could not build the replacement gauge");
 
     s.gauge = replacement;
