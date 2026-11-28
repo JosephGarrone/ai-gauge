@@ -8,13 +8,13 @@
   <panel shape="round" width="466" height="466"/>
   <source channel="egt" unit="C" min="0" max="900" damping="0.88"/>
 
-  <face start-angle="235" sweep="250" background="#05090b" radius="158">
-    <band from="0" to="900" color="#042d36" width="2" radius="128"/>
+  <face start-angle="235" sweep="250" background="#05090b" radius="204">
+    <band from="0" to="900" color="#042d36" width="2" radius="174"/>
     <band from="0" to="900" color="#0b2031" width="26"/>
     <band from="380" to="440" color="#b3990f" width="7"/>
     <band from="440" to="500" color="#b3690f" width="7"/>
     <band from="500" to="900" color="#be2226" width="7"/>
-    <ticks major-every="150" minor-every="50" color="#596267" radius="162">
+    <ticks major-every="150" minor-every="50" color="#596267" radius="208">
       <major-shape>
         <polygon points="-1.25,0 1.25,0 1.25,-14 -1.25,-14"/>
       </major-shape>
@@ -22,7 +22,7 @@
         <polygon points="-0.75,0 0.75,0 0.75,-7 -0.75,-7"/>
       </minor-shape>
     </ticks>
-    <labels every="150" font="montserrat_26" color="#969ea2" radius="204"/>
+    <labels every="150" font="montserrat_26" color="#969ea2" radius="138"/>
   </face>
 
   <arc width="26" color="#00d2f0" start-color="#0065b0" glow="10" head-color="#ffffff" head-width="4" lit-ticks="true" lit-color="#ebf0f2"/>

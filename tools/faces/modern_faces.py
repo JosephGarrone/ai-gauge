@@ -7,9 +7,8 @@ The look is the obd-display Modern dashboard's arcs (src/desktop/ObdDisplay.Desk
 Gauges/ArcGauge.cs, laid out in ModernDashboardView.axaml, palette from Styles/Colors.axaml): a thick
 lit band in place of a needle, fading up from Ford blue to the reading's colour, over a soft glow,
 with a white head bar, the warning and danger stretches as a slim stripe on the band's outer edge,
-and ticks and numerals outside the band that light as the fill passes them. The boost arc is
-mirrored (it runs anticlockwise), as on the dashboard; the EGT arc runs clockwise, like the
-dashboard's RPM arc, so a pair of gauges reads as the dashboard's two arcs.
+ticks outside the band and numerals inside it, both lit as the fill passes them. Both arcs run
+clockwise: the dashboard mirrors its boost arc only because it sits on the right of the page.
 
 The icons come from px_faces.py, so the two styles share them. Design notes: docs/gauge-faces.md.
 """
@@ -50,13 +49,13 @@ STRIPE_ALPHA = 0xb0 / 255   # the dashboard's warning tint; danger is a little s
 DANGER_ALPHA = 0xd0 / 255
 
 # ---------------------------------------------------------------- geometry
-# ArcGauge's proportions at its 276 px size, scaled to the 466 px round panel. Its band is 16 px on
-# a 276 px control; here 26 px, with the band's outer edge at 158 so that the ticks, a gap and the
-# numerals fit outside it within the panel's safe area. The numerals at 3 and 9 o'clock decide it:
-# set sideways to the radius, a three-digit EGT numeral is ~50 px wide, and it has to clear both the
-# tick under it (by 4 px) and the panel's edge.
+# ArcGauge's band and tick proportions (16 px band and 0.55x ticks on a 276 px control), scaled to
+# the 466 px round panel. The numerals sit inside the band (owner's call, 2026-11-28), so the band
+# moves out to the rim: its outer edge at 204, the ticks outside it to 222, within the 225 px safe
+# area. The numerals ring the inside of the glow; at 3 and 9 o'clock, where a numeral is set
+# sideways to the radius, its box has to stay inside the glow (r 168), which sets their radius.
 SWEEP = 250              # as on the dashboard, but centred: 125 degrees either side of 12
-BAND_OUT = 158           # the face radius: outer edge of the band
+BAND_OUT = 204           # the face radius: outer edge of the band
 BAND_W = 26
 GLOW = 10                # ArcGauge's five glow passes reach 2..10 px past the band
 STRIPE_W = 7             # ArcGauge: max(3, thickness * 0.28)
@@ -138,21 +137,19 @@ def face(gid, comment, channel, unit, vmax, major, minor, zones, alerts, caption
 """
 
 
-BOOST = dict(gid="boost_modern", comment="Boost gauge, 0-30 PSI, redline from 26: the Modern dashboard's mirrored boost arc.",
+BOOST = dict(gid="boost_modern", comment="Boost gauge, 0-30 PSI, redline from 26: after the Modern dashboard's boost arc.",
              channel="boost", unit="psi", vmax=30, major=5, minor=1,
              zones=[(26, "#e62323")], alerts=[(26, px_faces.RED, 2)], caption="psi", icon=px_faces.TURBO_ICON,
-             # Mirrored: the fill starts at the lower right and runs anticlockwise over the top.
-             start=SWEEP / 2, sweep=-SWEEP,
-             label_font="montserrat_32", label_r=202)
+             start=360 - SWEEP / 2, sweep=SWEEP,
+             label_font="montserrat_32", label_r=142)
 EGT = dict(gid="egt_modern", comment="Exhaust gas temperature gauge, 0-900 C: yellow from 380, orange from 440, red above 500.",
            channel="egt", unit="C", vmax=900, major=150, minor=50,
            zones=[(380, px_faces.YELLOW), (440, px_faces.ORANGE), (500, "#e62323")],
            alerts=[(380, px_faces.YELLOW, 0), (440, px_faces.ORANGE, 0), (500, px_faces.RED, 2)],
            caption="°C", icon=px_faces.EGT_ICON,
-           # Clockwise, as the dashboard's RPM arc: the pair reads as its two arcs.
            start=360 - SWEEP / 2, sweep=SWEEP,
-           # Three-digit numerals: a size down, and pulled in to clear the panel's edge at 3 and 9.
-           label_font="montserrat_26", label_r=204)
+           # Three-digit numerals: a size down, and pulled in so the widest stay clear of the glow.
+           label_font="montserrat_26", label_r=138)
 
 
 if __name__ == "__main__":

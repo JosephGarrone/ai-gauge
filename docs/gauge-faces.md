@@ -7,7 +7,7 @@ do.
 |---|---|---|
 | `boost.xml` | PX Ranger style, 0–30 psi, redline 26 | `tools/faces/px_faces.py` |
 | `egt.xml` | PX Ranger style, 0–900 °C, yellow 380 / orange 440 / red 500 | `tools/faces/px_faces.py` |
-| `boost_modern.xml` | Modern style (lit arc, mirrored), 0–30 psi, redline 26 | `tools/faces/modern_faces.py` |
+| `boost_modern.xml` | Modern style (lit arc), 0–30 psi, redline 26 | `tools/faces/modern_faces.py` |
 | `egt_modern.xml` | Modern style (lit arc), 0–900 °C, yellow 380 / orange 440 / red 500 | `tools/faces/modern_faces.py` |
 | `boost_custom.xml` | Hand-written test face for every custom-shape feature | no |
 | built-in fallback (`gauge_config_default.c`) | PX boost face with the built-in needle | `px_faces.py --default` |
@@ -113,16 +113,15 @@ On the gauge, 2026-11-28, values fed over UDP telemetry.
 
 | Dashboard | Here |
 |---|---|
-| A thick band in place of a needle, fading from `IpcBlue` #0065b0 to `IpcCyanBright` #00d2f0 | 26 px band, outer edge at 158 px, same colours. The fade runs along the **scale**, not along the fill (see below) |
+| A thick band in place of a needle, fading from `IpcBlue` #0065b0 to `IpcCyanBright` #00d2f0 | 26 px band at the rim, outer edge at 204 px, same colours. The fade runs along the **scale**, not along the fill (see below) |
 | A glow of five faint passes reaching 2–10 px past the band | An analytic glow, 21% at the band's edge falling to 0 at 10 px, computed per pixel once |
 | A white head bar, 3.5 px over a 9 px halo of the fill at 45% | `#ffffff` 4 px over a 9 px halo at 45% |
 | The whole fill amber or red past the thresholds, fading up from 35% of that colour | The same, from the face's alerts: boost red above 26; EGT yellow from 380, orange from 440, red above 500. Steady; the readout and icon flash in red as on the PX faces |
 | Warning and danger as a slim stripe on the band's outer edge (`#b0ffb000`, `#d0e62323` over the track) | 7 px stripes, the tints pre-mixed over the track `#0b2031`: yellow, orange and red for EGT |
-| A hairline guide inside the band (`#3300bee1`) | A 2 px band at radius 128 (a 1 px arc breaks up on the panel), `#042d36` |
-| Ticks outside the band, majors 0.55 × band long, minors half; lit (white, minors in the fill colour) once passed | 14 and 7 px shaped ticks hanging outward from radius 162; lit as a whole as the fill reaches each |
-| Numerals outside the ticks in `IpcGrey`, white once passed | `montserrat_32` (boost) and `montserrat_26` (EGT, three digits) in `#969ea2`, swapped to `#ebf0f2` |
-| The boost arc mirrored, running anticlockwise | `start-angle="125" sweep="-250"` |
-| The RPM arc clockwise | EGT, clockwise, so a pair of gauges reads as the dashboard's two arcs |
+| A hairline guide inside the band (`#3300bee1`) | A 2 px band at radius 174 (a 1 px arc breaks up on the panel), `#042d36` |
+| Ticks outside the band, majors 0.55 × band long, minors half; lit (white, minors in the fill colour) once passed | 14 and 7 px shaped ticks hanging outward from radius 208, to 222; lit as a whole as the fill reaches each |
+| Numerals outside the ticks in `IpcGrey`, white once passed | **Inside the band** (owner's call, 2026-11-28), ringing the inside of the glow at radius 142 (`montserrat_32`, boost) and 138 (`montserrat_26`, EGT's three digits), in `#969ea2`, swapped to `#ebf0f2`. With the numerals inside, the band moves out to the rim |
+| The boost arc mirrored, running anticlockwise | **Both run clockwise** (`start-angle="235" sweep="250"`). The dashboard mirrors its boost arc only because it sits on the right of the page (owner, 2026-11-28). The schema keeps the negative sweep for a face that wants it |
 | Near-black ground `#05090b`, nothing boxed | The same. On the AMOLED it is close to off, and nothing on the face has a box |
 
 Kept from the PX faces, at the same sizes ([ADR 0014](adr/0014-glanceable-burn-in-aware-dial.md)): the icon

@@ -45,8 +45,8 @@ Files live on the LittleFS `storage` partition at `/storage/gauges/<id>.xml`.
 
 A face using custom tick, needle and hub shapes is in
 [../firmware/assets/gauges/boost_custom.xml](../firmware/assets/gauges/boost_custom.xml); see
-[Shapes](#shapes). A face that shows the value as a lit arc instead of a needle, mirrored to run
-anticlockwise, is [../firmware/assets/gauges/boost_modern.xml](../firmware/assets/gauges/boost_modern.xml);
+[Shapes](#shapes). A face that shows the value as a lit arc instead of a needle is
+[../firmware/assets/gauges/boost_modern.xml](../firmware/assets/gauges/boost_modern.xml);
 see [`<arc>`](#arc-01).
 
 ## Elements

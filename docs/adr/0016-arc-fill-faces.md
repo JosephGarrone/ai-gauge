@@ -11,7 +11,7 @@ repository: `ArcGauge.cs`, `ModernDashboardView.axaml`). Its dials have no needl
 thick lit band whose length is the value, fading from Ford blue at its start to the reading's
 colour at its head, over a soft glow, with a white head bar, the warning and danger stretches as a
 slim stripe on the band's outer edge, and the ticks and numerals it has passed lit. The boost arc
-is mirrored and runs anticlockwise.
+is mirrored and runs anticlockwise, but only because of where it sits on the page.
 
 The renderer was built around a pre-rendered face and a small moving needle
 ([ADR 0003](0003-static-background-plus-needle-sprite.md)). A filled arc is the opposite case: the
@@ -41,9 +41,10 @@ pixel of the fill whenever the value moves.
 5. **Ticks and labels light whole.** A tick's pixels take its own value as their key, and each
    label has a lit and an unlit tile swapped as the fill passes it, so nothing is ever half lit.
 6. **The faces are generated** by `tools/faces/modern_faces.py`, a sibling of `px_faces.py` that
-   shares its icons. The boost arc is mirrored, as on the dashboard; the EGT arc runs clockwise,
-   like the dashboard's RPM arc, so a pair reads as its two arcs. Both are 250° arcs, centred on
-   the round panel rather than leaning inward as the dashboard's do in their frames.
+   shares its icons. Both arcs run clockwise: the dashboard mirrors its boost arc only for its
+   place on the page (owner, 2026-11-28). The numerals sit inside the band and the ticks outside,
+   with the band at the rim. Both are 250° arcs, centred on the round panel rather than leaning
+   inward as the dashboard's do in their frames.
 
 ## Alternatives rejected
 
