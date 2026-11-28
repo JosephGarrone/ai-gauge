@@ -101,6 +101,8 @@ a bolt-on.
 An `lv_tileview` with two vertically stacked tiles:
 
 - **Tile 0 — dial.** The gauge. Optimised per [display-pipeline.md](display-pipeline.md).
+  A sideways swipe (`LV_EVENT_GESTURE`, stopped at the dial tile with `GESTURE_BUBBLE` cleared)
+  steps to the next stored face with the same channel (`on_gauge_step()` in `app_main.c`).
   A tap (`LV_EVENT_SHORT_CLICKED`) clears the peak. A long-press shows the session min/max for
   3s, and a second long-press while shown resets them. `SHORT_CLICKED` rather than `CLICKED`
   because LVGL also sends `CLICKED` when a long press is released. Min/max lives in

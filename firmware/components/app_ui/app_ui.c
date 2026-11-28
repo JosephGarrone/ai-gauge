@@ -75,6 +75,7 @@ static struct {
 
     gauge_render_t *gauge;
     lv_obj_t       *fps_badge; /**< On the dial tile, optional. */
+    app_ui_gauge_step_cb_t gauge_step_cb; /**< Swipe left/right on the dial. */
 
     lv_timer_t *shift_timer;   /**< Pixel shift; NULL when off. */
     uint8_t     shift_step;
@@ -482,6 +483,28 @@ static void dial_tapped_cb(lv_event_t *e)
     }
 }
 
+/*
+ * A sideways swipe on the dial steps to the next face showing the same reading (PX to Modern and
+ * back, say). The tileview scrolls only vertically, so LVGL reports a horizontal swipe as a gesture
+ * rather than a scroll. The swipe is not a tap: dial_tapped_cb() ignores a finger that moved.
+ */
+static void dial_gesture_cb(lv_event_t *e)
+{
+    (void)e;
+    lv_indev_t *indev = lv_indev_active();
+    if (indev == NULL) {
+        return;
+    }
+    lv_dir_t dir = lv_indev_get_gesture_dir(indev);
+    if (dir != LV_DIR_LEFT && dir != LV_DIR_RIGHT) {
+        return;
+    }
+    lv_indev_wait_release(indev);
+    if (s.gauge_step_cb != NULL) {
+        s.gauge_step_cb(dir == LV_DIR_LEFT ? 1 : -1);
+    }
+}
+
 /* Long-press recalls min/max; a second long-press while it is showing resets them. */
 static void dial_long_pressed_cb(lv_event_t *e)
 {
@@ -570,6 +593,9 @@ esp_err_t app_ui_create(const gauge_config_t *cfg, const board_profile_t *board)
     lv_obj_add_event_cb(s.tile_gauge, dial_pressed_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_add_event_cb(s.tile_gauge, dial_tapped_cb, LV_EVENT_SHORT_CLICKED, NULL);
     lv_obj_add_event_cb(s.tile_gauge, dial_long_pressed_cb, LV_EVENT_LONG_PRESSED, NULL);
+    /* LVGL hands a gesture up to the first ancestor that does not bubble it; stop it at the tile. */
+    lv_obj_remove_flag(s.tile_gauge, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_add_event_cb(s.tile_gauge, dial_gesture_cb, LV_EVENT_GESTURE, NULL);
     lv_obj_set_style_bg_color(s.tile_gauge, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s.tile_gauge, LV_OPA_COVER, LV_PART_MAIN);
 
@@ -670,6 +696,11 @@ void app_ui_set_gauge_list(const char (*ids)[GAUGE_CONFIG_MAX_ID_LEN], int count
 void app_ui_set_gauge_selected_cb(app_ui_gauge_selected_cb_t cb)
 {
     settings_set_gauge_selected_cb(cb);
+}
+
+void app_ui_set_gauge_step_cb(app_ui_gauge_step_cb_t cb)
+{
+    s.gauge_step_cb = cb;
 }
 
 void app_ui_set_network_reset_cb(app_ui_network_reset_cb_t cb)

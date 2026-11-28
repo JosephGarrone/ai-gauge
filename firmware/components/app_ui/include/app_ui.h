@@ -89,6 +89,16 @@ typedef void (*app_ui_gauge_selected_cb_t)(const char *id);
 void app_ui_set_gauge_selected_cb(app_ui_gauge_selected_cb_t cb);
 
 /**
+ * @brief Called when the user swipes left or right on the dial.
+ *
+ * Runs on the LVGL task. @p step is +1 for a swipe to the left (the next face) and -1 for one to
+ * the right. The handler is expected to switch to the next face that shows the same channel.
+ */
+typedef void (*app_ui_gauge_step_cb_t)(int step);
+
+void app_ui_set_gauge_step_cb(app_ui_gauge_step_cb_t cb);
+
+/**
  * @brief Called when the user confirms "Reset network" on the settings page.
  *
  * Runs on the LVGL task. The button asks for a second tap before calling this, so the handler

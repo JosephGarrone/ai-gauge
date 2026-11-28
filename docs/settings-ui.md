@@ -22,6 +22,9 @@ with `tools/remote/gauge_remote.py`, masked to the round panel.
 | ![home](images/settings/home.png) | ![display](images/settings/display.png) |
 
 - **Swipe up from the dial** for the settings home, and swipe down or tap **Done** to return.
+- **Swipe left or right on the dial** to step to the next stored face that shows the same reading
+  (boost to boost, EGT to EGT), wrapping round in the Faces list's order. The choice is saved, as a
+  pick from Faces is. Nothing happens if no other face shows that reading.
 - **Home:** brightness on an arc around the top rim, six round buttons, and **Done** at the bottom
   centre.
   - The arc is the setting used most in a car (day, dusk, night) and the biggest target on the

@@ -318,6 +318,50 @@ static void on_gauge_selected(const char *id)
     app_ui_set_warning(err[0] != '\0' ? err : NULL);
 }
 
+/*
+ * Runs on the LVGL task, from a sideways swipe on the dial: switch to the next (or previous) stored
+ * face that shows the same channel, wrapping round, in the picker's order. Each candidate is
+ * loaded to read its channel; a dozen small files at most, on a deliberate gesture.
+ */
+static void on_gauge_step(int step)
+{
+    if (s_active_id[0] == '\0') {
+        return; /* the built-in face is not in the list */
+    }
+    gauge_store_list_t *list = heap_caps_malloc(sizeof(*list), MALLOC_CAP_SPIRAM);
+    gauge_config_t     *cfg  = heap_caps_malloc(sizeof(*cfg), MALLOC_CAP_SPIRAM);
+    if (list == NULL || cfg == NULL) {
+        free(list);
+        free(cfg);
+        return;
+    }
+    gauge_store_list(list);
+
+    int cur = -1;
+    for (int i = 0; i < list->count; i++) {
+        if (strcmp(list->ids[i], s_active_id) == 0) {
+            cur = i;
+        }
+    }
+    char next[GAUGE_CONFIG_MAX_ID_LEN] = "";
+    for (int k = 1; cur >= 0 && k < list->count && next[0] == '\0'; k++) {
+        int  j = ((cur + step * k) % list->count + list->count) % list->count;
+        char err[GAUGE_STORE_ERR_LEN];
+        if (gauge_store_load(list->ids[j], cfg, err, sizeof(err)) == ESP_OK &&
+            strcmp(cfg->source.channel, s_active_cfg->source.channel) == 0) {
+            strlcpy(next, list->ids[j], sizeof(next));
+        }
+    }
+    free(cfg);
+
+    if (next[0] != '\0') {
+        ESP_LOGI(TAG, "swipe: '%s' -> '%s'", s_active_id, next);
+        on_gauge_selected(next);
+        app_ui_set_gauge_list(list->ids, list->count, s_active_id); /* the picker follows */
+    }
+    free(list);
+}
+
 /* --------------------------------------------------------------- draw buffers ------- */
 
 /*
@@ -1010,6 +1054,7 @@ void app_main(void)
     gauge_store_list(&list);
     app_ui_set_gauge_list(list.count > 0 ? list.ids : NULL, list.count, loaded_id);
     app_ui_set_gauge_selected_cb(on_gauge_selected);
+    app_ui_set_gauge_step_cb(on_gauge_step);
     app_ui_set_network_reset_cb(on_network_reset);
     app_ui_set_firmware_tap_cb(on_firmware_tap);
 #if CONFIG_AI_GAUGE_REMOTE_CONTROL

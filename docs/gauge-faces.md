@@ -17,7 +17,8 @@ its style's proportions, and its outputs have to stay one design. `modern_faces.
 and alert colours from `px_faces.py`, so the two styles share them.
 
 Every face is picked the same way: Settings → Faces lists every file on the gauge, and the editor
-can upload any of them. A gauge updated over the air does not get new shipped faces on its storage
+can upload any of them. Swiping left or right on the dial steps between the faces that show the
+same reading, so the PX and Modern boost faces are one swipe apart. A gauge updated over the air does not get new shipped faces on its storage
 (OTA writes the app, not LittleFS): open them from the editor's examples, which ship in the app
 image, and upload them.
 
