@@ -144,6 +144,31 @@ struct gauge_render_t {
     lv_color_t     trend_fill_color;
     bool           trend_head_valid;
     lv_point_t     trend_head;      /**< Newest point, strip-relative, for the dot. */
+
+    /* The <arc> fill, drawn into the face canvas itself. See the "arc" section below. */
+    bool                 arc_on;
+    int32_t              arc_outer;        /**< Outer edge of the band. */
+    int32_t              arc_r_in, arc_r_out; /**< The annulus the fill can light. */
+    int32_t              arc_y1, arc_y2;   /**< Its rows. */
+    struct arc_row      *arc_rows;         /**< PSRAM. Per row: the annulus's runs. */
+    uint32_t             arc_n;            /**< Pixels in the annulus. */
+    uint16_t            *arc_unlit;        /**< PSRAM planes, one entry per annulus pixel. */
+    uint16_t            *arc_key;
+    uint8_t             *arc_lit;
+    uint8_t             *arc_mark;
+    struct arc_label    *arc_labels;       /**< PSRAM. */
+    uint16_t             arc_label_count;
+    uint16_t             arc_cur;          /**< Key the fill reaches; 0 = nothing lit. */
+    float                arc_margin;       /**< Half a tick, as a fraction of the scale. */
+    uint16_t             arc_lut[256];     /**< The fade along the scale, for the current zone. */
+    lv_color_t           arc_fill;         /**< The fill's colour in the current zone. */
+    uint16_t             arc_lit565;
+    int8_t               arc_zone;         /**< Alert index the colours are for; -1 = none. */
+    uint32_t             arc_zone_ms;
+    lv_obj_t            *head;             /**< The bright bar at the fill's end. */
+    bool                 head_valid;
+    lv_point_precise_t   head_p1, head_p2;
+    lv_area_t            head_bbox;
 };
 
 LV_FONT_DECLARE(lv_font_montserrat_digits_80)
@@ -442,7 +467,7 @@ static void blend_mask(lv_draw_buf_t *dst, const gauge_shape_rect_t *r, const ui
 
 /* Ticks from a custom shape, each with its origin on the tick circle and pointing outwards. */
 static void draw_shaped_ticks(gauge_render_t *g, const gauge_shape_t *shape, float step,
-                              int32_t count, int32_t tick_outer)
+                              int32_t count, int32_t tick_outer, const lv_color_t *ink)
 {
     const gauge_config_t *c    = &g->cfg;
     size_t                need = 0;
@@ -481,7 +506,8 @@ static void draw_shaped_ticks(gauge_render_t *g, const gauge_shape_t *shape, flo
 
             gauge_shape_bounds(g->outline, n, &r);
             gauge_shape_rasterize(g->outline, n, &r, acc, cov);
-            blend_mask(dst, &r, cov, to_lv(gauge_shape_part_color(shape, i, color, NULL)));
+            blend_mask(dst, &r, cov,
+                       ink ? *ink : to_lv(gauge_shape_part_color(shape, i, color, NULL)));
         }
     }
 
@@ -491,12 +517,116 @@ static void draw_shaped_ticks(gauge_render_t *g, const gauge_shape_t *shape, flo
 
 /* ------------------------------------------------------------- face pre-render ------ */
 
-static void render_face(gauge_render_t *g)
+/* What render_face() draws. The arc fill renders ticks and labels on their own to capture them. */
+#define FACE_BANDS  (1u << 0)
+#define FACE_MINOR  (1u << 1)
+#define FACE_MAJOR  (1u << 2)
+#define FACE_LABELS (1u << 3)
+#define FACE_TITLES (1u << 4)
+#define FACE_ALL    (FACE_BANDS | FACE_MINOR | FACE_MAJOR | FACE_LABELS | FACE_TITLES)
+
+/* An LVGL arc from value @p from to @p to, whichever way the scale runs. */
+static void draw_value_arc(gauge_render_t *g, lv_layer_t *layer, float from, float to,
+                           int32_t radius, int32_t width, lv_color_t color)
+{
+    float a0 = value_to_deg(g, from);
+    float a1 = value_to_deg(g, to);
+    if (a1 < a0) { /* an anticlockwise scale: LVGL always draws clockwise from start to end */
+        float t = a0;
+        a0      = a1;
+        a1      = t;
+    }
+    int32_t s = arc_deg(a0);
+    int32_t e = arc_deg(a1);
+    while (s < 0) {
+        s += 360;
+        e += 360;
+    }
+
+    lv_draw_arc_dsc_t dsc;
+    lv_draw_arc_dsc_init(&dsc);
+    dsc.color       = color;
+    dsc.width       = width;
+    dsc.radius      = (uint16_t)radius;
+    dsc.center.x    = g->cx;
+    dsc.center.y    = g->cy;
+    dsc.start_angle = s;
+    dsc.end_angle   = e;
+    dsc.opa         = LV_OPA_COVER;
+    lv_draw_arc(layer, &dsc);
+}
+
+/* The circle ticks hang inward from: the face's, or just inside the bands drawn at the face radius. */
+static int32_t tick_outer_radius(const gauge_render_t *g)
+{
+    const gauge_config_t *c = &g->cfg;
+    if (c->face.ticks.radius_px > 0) {
+        return c->face.ticks.radius_px;
+    }
+    int32_t widest = 0;
+    for (uint8_t i = 0; i < c->face.band_count; i++) {
+        const gauge_band_t *b = &c->face.bands[i];
+        if ((b->radius_px == 0 || b->radius_px == g->radius) && b->width_px > widest) {
+            widest = b->width_px;
+        }
+    }
+    return g->radius - widest - (widest ? 6 : 0);
+}
+
+/* How far a major tick reaches inward from the tick circle. */
+static int32_t major_tick_reach(const gauge_render_t *g)
+{
+    const gauge_config_t *c = &g->cfg;
+    return gauge_shape_is_set(&c->face.ticks.major_shape)
+        ? (int32_t)ceilf(gauge_shape_max_y(&c->face.ticks.major_shape))
+        : c->face.ticks.major_len_px;
+}
+
+/* Label i's value, text and centre. False past the last label, or if there are none. */
+static bool label_at(const gauge_render_t *g, int32_t i, float *v, char *text, size_t len,
+                     int32_t *x, int32_t *y)
+{
+    const gauge_config_t *c = &g->cfg;
+    if (!c->face.labels.present) {
+        return false;
+    }
+    float step = (c->face.labels.every > 0.0f) ? c->face.labels.every : c->face.ticks.major_every;
+    if (step <= 0.0f) {
+        return false;
+    }
+    int32_t count = (int32_t)((c->source.max - c->source.min) / step);
+    if (count > 100) {
+        if (i == 0) {
+            ESP_LOGW(TAG, "label step %.3f yields too many labels, skipping", (double)step);
+        }
+        return false;
+    }
+    if (i > count) {
+        return false;
+    }
+    const lv_font_t *font = font_by_name(c->face.labels.font);
+    int32_t          r    = c->face.labels.radius_px;
+    if (r <= 0) {
+        r = tick_outer_radius(g) - major_tick_reach(g) - lv_font_get_line_height(font);
+    }
+    *v = c->source.min + (float)i * step;
+    snprintf(text, len, c->face.labels.format, (double)*v);
+    polar(g->cx, g->cy, (float)r, value_to_deg(g, *v), x, y);
+    return true;
+}
+
+/*
+ * Draw the face into the canvas. @p what picks the parts. @p ink, when set, draws the ticks in that
+ * one colour on black, which is how the arc fill captures their coverage; @p label_ink does the same
+ * for the labels (on the face's own background unless @p ink is set too).
+ */
+static void render_face(gauge_render_t *g, unsigned what, const lv_color_t *ink,
+                        const lv_color_t *label_ink)
 {
     const gauge_config_t *c  = &g->cfg;
     lv_obj_t             *cv = g->face;
 
-    lv_canvas_fill_bg(cv, to_lv(c->face.background), LV_OPA_COVER);
+    lv_canvas_fill_bg(cv, ink ? lv_color_black() : to_lv(c->face.background), LV_OPA_COVER);
 
     lv_layer_t layer;
     lv_canvas_init_layer(cv, &layer);
@@ -505,24 +635,11 @@ static void render_face(gauge_render_t *g)
     int32_t cy = g->cy;
 
     /* --- colour bands --- */
-    int32_t widest_band = 0;
-    for (uint8_t i = 0; i < c->face.band_count; i++) {
-        const gauge_band_t *b = &c->face.bands[i];
-
-        lv_draw_arc_dsc_t dsc;
-        lv_draw_arc_dsc_init(&dsc);
-        dsc.color       = to_lv(b->color);
-        dsc.width       = b->width_px;
-        dsc.radius      = (uint16_t)g->radius;
-        dsc.center.x    = cx;
-        dsc.center.y    = cy;
-        dsc.start_angle = arc_deg(value_to_deg(g, b->from));
-        dsc.end_angle   = arc_deg(value_to_deg(g, b->to));
-        dsc.opa         = LV_OPA_COVER;
-        lv_draw_arc(&layer, &dsc);
-
-        if (b->width_px > widest_band) {
-            widest_band = b->width_px;
+    if (what & FACE_BANDS) {
+        for (uint8_t i = 0; i < c->face.band_count; i++) {
+            const gauge_band_t *b = &c->face.bands[i];
+            draw_value_arc(g, &layer, b->from, b->to, b->radius_px ? b->radius_px : g->radius,
+                           b->width_px, to_lv(b->color));
         }
     }
 
@@ -532,8 +649,7 @@ static void render_face(gauge_render_t *g)
      */
     lv_canvas_finish_layer(cv, &layer);
 
-    /* Ticks and labels sit inside the band ring so they never collide with it. */
-    int32_t tick_outer = g->radius - widest_band - (widest_band ? 6 : 0);
+    int32_t tick_outer = tick_outer_radius(g);
 
     /* --- ticks --- */
     if (c->face.ticks.present) {
@@ -542,6 +658,9 @@ static void render_face(gauge_render_t *g)
 
         /* Minor ticks first, so major ticks draw over them where they coincide. */
         for (int pass = 0; pass < 2; pass++) {
+            if (!(what & (pass == 0 ? FACE_MINOR : FACE_MAJOR))) {
+                continue;
+            }
             float step = (pass == 0) ? c->face.ticks.minor_every
                                      : c->face.ticks.major_every;
             if (step <= 0.0f) {
@@ -564,7 +683,7 @@ static void render_face(gauge_render_t *g)
             }
 
             if (gauge_shape_is_set(shape)) {
-                draw_shaped_ticks(g, shape, step, count, tick_outer);
+                draw_shaped_ticks(g, shape, step, count, tick_outer, ink);
                 continue;
             }
 
@@ -579,7 +698,7 @@ static void render_face(gauge_render_t *g)
 
                 lv_draw_line_dsc_t dsc;
                 lv_draw_line_dsc_init(&dsc);
-                dsc.color = to_lv(gauge_config_tick_color(c, v));
+                dsc.color = ink ? *ink : to_lv(gauge_config_tick_color(c, v));
                 dsc.width = width;
                 dsc.opa   = LV_OPA_COVER;
                 dsc.p1.x  = x1;
@@ -595,49 +714,26 @@ static void render_face(gauge_render_t *g)
     lv_canvas_init_layer(cv, &layer);
 
     /* --- numeric labels --- */
-    if (c->face.labels.present) {
-        float step = (c->face.labels.every > 0.0f) ? c->face.labels.every
-                                                   : c->face.ticks.major_every;
-        if (step > 0.0f) {
-            const lv_font_t *font = font_by_name(c->face.labels.font);
-
-            int32_t r = c->face.labels.radius_px;
-            if (r <= 0) {
-                /* A shaped major tick reaches as far inward as its largest y. */
-                int32_t major_reach = gauge_shape_is_set(&c->face.ticks.major_shape)
-                    ? (int32_t)ceilf(gauge_shape_max_y(&c->face.ticks.major_shape))
-                    : c->face.ticks.major_len_px;
-                r = tick_outer - major_reach - lv_font_get_line_height(font);
-            }
-
-            int32_t count = (int32_t)((c->source.max - c->source.min) / step);
-            if (count > 100) {
-                ESP_LOGW(TAG, "label step %.3f yields too many labels, skipping",
-                         (double)step);
-            } else {
-                for (int32_t i = 0; i <= count; i++) {
-                    float v = c->source.min + (float)i * step;
-
-                    char text[16];
-                    snprintf(text, sizeof(text), c->face.labels.format, (double)v);
-
-                    int32_t x, y;
-                    polar(cx, cy, (float)r, value_to_deg(g, v), &x, &y);
-                    draw_text(&layer, text, font, to_lv(c->face.labels.color), x, y);
-                }
-            }
+    if (what & FACE_LABELS) {
+        const lv_font_t *font = font_by_name(c->face.labels.font);
+        float            v;
+        char             text[16];
+        int32_t          x, y;
+        for (int32_t i = 0; label_at(g, i, &v, text, sizeof(text), &x, &y); i++) {
+            draw_text(&layer, text, font, label_ink ? *label_ink : to_lv(c->face.labels.color), x, y);
         }
     }
 
     /* --- static titles (baked in, so they cost nothing per frame) --- */
-    for (uint8_t i = 0; i < c->title_count; i++) {
-        const gauge_title_t *t = &c->titles[i];
-        int32_t x = (t->x == INT16_MIN) ? cx : t->x;
-        draw_text(&layer, t->text, font_by_name(t->font), to_lv(t->color), x, t->y);
+    if (what & FACE_TITLES) {
+        for (uint8_t i = 0; i < c->title_count; i++) {
+            const gauge_title_t *t = &c->titles[i];
+            int32_t x = (t->x == INT16_MIN) ? cx : t->x;
+            draw_text(&layer, t->text, font_by_name(t->font), to_lv(t->color), x, t->y);
+        }
     }
 
     lv_canvas_finish_layer(cv, &layer);
-
 }
 
 /* ------------------------------------------------------------------- needle --------- */
@@ -780,6 +876,9 @@ static void update_needle(gauge_render_t *g)
 {
     const gauge_config_t *c = &g->cfg;
 
+    if (g->needle == NULL) {
+        return; /* style="none": an <arc> fill shows the value */
+    }
     if (gauge_shape_is_set(&c->needle.shape)) {
         update_needle_shape(g);
         return;
@@ -1493,8 +1592,13 @@ static void update_readout(gauge_render_t *g)
     const gauge_config_t *c = &g->cfg;
 
     if (!g->valid) {
-        /* Dashes, not a stale number: admit the sensor is gone. */
-        lv_label_set_text(g->readout, "---");
+        /*
+         * Dashes, not a stale number: admit the sensor is gone. Compared first, like the number
+         * below: set every tick, the dashes repainted their box at the full frame rate.
+         */
+        if (strcmp(lv_label_get_text(g->readout), "---") != 0) {
+            lv_label_set_text(g->readout, "---");
+        }
         return;
     }
 
@@ -1603,6 +1707,638 @@ static void evaluate_alerts(gauge_render_t *g)
     apply_alert_style(g);
 }
 
+/* ---------------------------------------------------------------------- arc --------- */
+
+/*
+ * The <arc> fill: the value as a lit band along the scale. See ADR 0016 and
+ * docs/display-pipeline.md ("The arc fill").
+ *
+ * Everything the fill can light lies in an annulus around the scale. At create, every pixel of
+ * that annulus gets:
+ *   - unlit: what the face shows there with no fill (the face as render_face() drew it);
+ *   - key:   where along the scale it lights, 1..65535. Band and glow pixels take their own angle;
+ *            tick pixels take their tick's value, so a tick lights whole as the fill reaches it;
+ *   - lit:   band coverage (128 + 0..127) or, outside the band, glow strength (0..127);
+ *   - mark:  lit-tick coverage (0..127), bit 7 set for a major tick (lit colour) rather than a
+ *            minor (the fill colour).
+ * The face canvas is then the live picture: when the value moves, only the pixels whose key lies
+ * between the old and the new value are rewritten, lit or unlit, and only their bounding box is
+ * invalidated. Labels light whole, from two small pre-rendered tiles each.
+ */
+
+#define ARC_KEY_SCALE  65534.0f
+#define ARC_GLOW_OPA   0.21f   /* glow strength at the band's edge, falling to 0 at glow px out */
+#define ARC_GLOW_A     54      /* the same, out of 255 */
+#define ARC_RECOLOR_MS 250     /* a value sitting on a zone edge recolours the fill at most this often */
+
+typedef struct arc_row {
+    int16_t  xl1, xl2;  /**< First run of annulus pixels in the row (xl2 < xl1: none). */
+    int16_t  xr1, xr2;  /**< Second run, right of the hole (xr2 < xr1: none). */
+    uint32_t off;       /**< Index of the row's first pixel in the planes. */
+} arc_row_t;
+
+typedef struct arc_label {
+    lv_area_t area;     /**< Canvas coordinates. */
+    uint16_t  key;
+    bool      lit;
+    uint16_t *px_lit;   /**< PSRAM, w x h. */
+    uint16_t *px_unlit;
+} arc_label_t;
+
+static uint16_t arc_key(float frac)
+{
+    if (frac < 0.0f) {
+        frac = 0.0f;
+    } else if (frac > 1.0f) {
+        frac = 1.0f;
+    }
+    return (uint16_t)(lroundf(frac * ARC_KEY_SCALE) + 1);
+}
+
+/* Fraction along the scale of a canvas point, or a value above 1 in the dial's gap. */
+static float arc_frac_at(const gauge_render_t *g, float dx, float dy)
+{
+    float deg = atan2f(dx, -dy) * (180.0f / 3.14159265358979f); /* clockwise from 12 */
+    float sw  = g->cfg.face.sweep;
+    float rel = (sw >= 0.0f) ? deg - g->cfg.face.start_angle : g->cfg.face.start_angle - deg;
+    rel       = fmodf(rel, 360.0f);
+    if (rel < 0.0f) {
+        rel += 360.0f;
+    }
+    return rel / fabsf(sw);
+}
+
+static float value_frac(const gauge_render_t *g, float v)
+{
+    const gauge_config_t *c = &g->cfg;
+    return (v - c->source.min) / (c->source.max - c->source.min);
+}
+
+/*
+ * fg over bg at alpha a (0..255), in 32 steps: the three fields spread into one word so a single
+ * multiply blends them. A recolour runs this on every lit pixel, so it has to be cheap.
+ */
+static inline uint16_t blend565(uint16_t bg, uint16_t fg, uint32_t a)
+{
+    uint32_t a5 = (a + 4) >> 3;
+    if (a5 == 0) {
+        return bg;
+    }
+    if (a5 >= 32) {
+        return fg;
+    }
+    uint32_t b = ((uint32_t)bg | ((uint32_t)bg << 16)) & 0x07E0F81Fu;
+    uint32_t f = ((uint32_t)fg | ((uint32_t)fg << 16)) & 0x07E0F81Fu;
+    uint32_t r = ((((f - b) * a5) >> 5) + b) & 0x07E0F81Fu;
+    return (uint16_t)(r | (r >> 16));
+}
+
+static lv_color_t mix_color(lv_color_t a, lv_color_t b, float t)
+{
+    return lv_color_make((uint8_t)lroundf(a.red + (b.red - a.red) * t),
+                         (uint8_t)lroundf(a.green + (b.green - a.green) * t),
+                         (uint8_t)lroundf(a.blue + (b.blue - a.blue) * t));
+}
+
+/* The fill's colours for the zone the gauge is in: an active alert's colour, or the arc's own. */
+static void arc_set_zone(gauge_render_t *g, int8_t zone)
+{
+    const gauge_config_t *c = &g->cfg;
+    lv_color_t fill, start;
+    if (zone >= 0) {
+        /* As on the Modern dashboard: a zone fades up from a dark shade of its own colour. */
+        fill  = to_lv(c->alerts[zone].color);
+        start = mix_color(to_lv(c->face.background), fill, 0.35f);
+    } else {
+        fill  = to_lv(c->arc.color);
+        start = to_lv(c->arc.start_color);
+    }
+    for (int i = 0; i < 256; i++) {
+        g->arc_lut[i] = lv_color_to_u16(mix_color(start, fill, (float)i / 255.0f));
+    }
+    g->arc_fill = fill;
+    g->arc_zone = zone;
+}
+
+static inline uint16_t arc_compose(const gauge_render_t *g, uint32_t i, uint16_t fill)
+{
+    uint16_t c    = g->arc_unlit[i];
+    uint8_t  lit  = g->arc_lit[i];
+    uint8_t  mark = g->arc_mark[i];
+
+    if (lit >= 128) {
+        c = blend565(c, fill, ARC_GLOW_A);
+        c = blend565(c, g->arc_lut[g->arc_key[i] >> 8], (uint32_t)(lit - 128) * 2 + 1);
+    } else if (lit > 0) {
+        c = blend565(c, fill, lit);
+    }
+    if (mark & 0x7f) {
+        uint16_t ink = (mark & 0x80) ? g->arc_lit565 : fill;
+        c            = blend565(c, ink, (uint32_t)(mark & 0x7f) * 2 + 1);
+    }
+    return c;
+}
+
+static void area_grow(lv_area_t *a, bool *have, int32_t x, int32_t y)
+{
+    if (!*have) {
+        *a    = (lv_area_t){.x1 = x, .y1 = y, .x2 = x, .y2 = y};
+        *have = true;
+        return;
+    }
+    a->x1 = LV_MIN(a->x1, x);
+    a->y1 = LV_MIN(a->y1, y);
+    a->x2 = LV_MAX(a->x2, x);
+    a->y2 = LV_MAX(a->y2, y);
+}
+
+static void invalidate_canvas_area(gauge_render_t *g, const lv_area_t *canvas_area)
+{
+    lv_area_t fa;
+    lv_obj_get_coords(g->face, &fa);
+    lv_area_t a = *canvas_area;
+    lv_area_move(&a, fa.x1, fa.y1);
+    lv_obj_invalidate_area(g->face, &a);
+}
+
+/*
+ * Rewrite the annulus pixels inside @p box whose state differs between keys @p from and @p to (or
+ * every lit pixel, when @p all), in the state for g->arc_cur. Invalidates what changed.
+ */
+static void arc_repaint(gauge_render_t *g, const lv_area_t *box, uint16_t lo, uint16_t hi, bool all)
+{
+    lv_draw_buf_t *buf    = lv_canvas_get_draw_buf(g->face);
+    uint8_t       *data   = buf->data;
+    size_t         stride = buf->header.stride;
+    lv_area_t      dirty;
+    bool           have = false;
+    uint16_t       fill = lv_color_to_u16(g->arc_fill);
+
+    int32_t y1 = LV_MAX(box->y1, g->arc_y1);
+    int32_t y2 = LV_MIN(box->y2, g->arc_y2);
+    for (int32_t y = y1; y <= y2; y++) {
+        const arc_row_t *row = &g->arc_rows[y - g->arc_y1];
+        uint16_t        *px  = (uint16_t *)(data + (size_t)y * stride);
+        for (int run = 0; run < 2; run++) {
+            int32_t  r1   = run ? row->xr1 : row->xl1;
+            int32_t  r2   = run ? row->xr2 : row->xl2;
+            uint32_t base = row->off + (run ? (uint32_t)(row->xl2 - row->xl1 + 1) : 0);
+            int32_t  x1   = LV_MAX(r1, box->x1);
+            int32_t  x2   = LV_MIN(r2, box->x2);
+            for (int32_t x = x1; x <= x2; x++) {
+                uint32_t i = base + (uint32_t)(x - r1);
+                uint16_t k = g->arc_key[i];
+                if (k == 0) {
+                    continue; /* nothing to light here */
+                }
+                bool lit = (k <= g->arc_cur);
+                if (all ? !lit : !(k > lo && k <= hi)) {
+                    continue;
+                }
+                uint16_t c = lit ? arc_compose(g, i, fill) : g->arc_unlit[i];
+                if (px[x] != c) {
+                    px[x] = c;
+                    area_grow(&dirty, &have, x, y);
+                }
+            }
+        }
+    }
+    if (have) {
+        invalidate_canvas_area(g, &dirty);
+    }
+
+    for (uint16_t i = 0; i < g->arc_label_count; i++) {
+        arc_label_t *l   = &g->arc_labels[i];
+        bool         lit = (l->key <= g->arc_cur);
+        if (lit == l->lit) {
+            continue;
+        }
+        l->lit = lit;
+        const uint16_t *src = lit ? l->px_lit : l->px_unlit;
+        int32_t         w   = lv_area_get_width(&l->area);
+        for (int32_t y = l->area.y1; y <= l->area.y2; y++) {
+            memcpy(data + (size_t)y * stride + (size_t)l->area.x1 * 2,
+                   src + (size_t)(y - l->area.y1) * w, (size_t)w * 2);
+        }
+        invalidate_canvas_area(g, &l->area);
+    }
+}
+
+/* The canvas box holding the annulus between fractions f0 and f1 of the scale. */
+static void arc_sector_box(const gauge_render_t *g, float f0, float f1, lv_area_t *out)
+{
+    bool    have = false;
+    float   r[2] = {(float)g->arc_r_in, (float)g->arc_r_out};
+    float   sw   = g->cfg.face.sweep;
+    float   d0   = g->cfg.face.start_angle + f0 * sw;
+    float   d1   = g->cfg.face.start_angle + f1 * sw;
+    if (d1 < d0) {
+        float t = d0;
+        d0      = d1;
+        d1      = t;
+    }
+    for (int k = 0; k < 2; k++) {
+        int32_t x, y;
+        polar(g->cx, g->cy, r[k], d0, &x, &y);
+        area_grow(out, &have, x, y);
+        polar(g->cx, g->cy, r[k], d1, &x, &y);
+        area_grow(out, &have, x, y);
+    }
+    /* The outer circle's extremes, where the sector crosses 12, 3, 6 or 9 o'clock. */
+    for (float q = ceilf(d0 / 90.0f) * 90.0f; q <= d1; q += 90.0f) {
+        int32_t x, y;
+        polar(g->cx, g->cy, r[1], q, &x, &y);
+        area_grow(out, &have, x, y);
+    }
+    out->x1 -= 2;
+    out->y1 -= 2;
+    out->x2 += 2;
+    out->y2 += 2;
+}
+
+/* Move the fill to the displayed value, and the head bar with it. */
+static void arc_head_update(gauge_render_t *g);
+
+static void update_arc(gauge_render_t *g)
+{
+    if (!g->arc_on) {
+        return;
+    }
+
+    /* Zone first: a recolour repaints every lit pixel, so it is rate-limited at a zone's edge. */
+    if (g->active_alert_idx != g->arc_zone &&
+        (g->arc_zone_ms == 0 || lv_tick_elaps(g->arc_zone_ms) >= ARC_RECOLOR_MS)) {
+        arc_set_zone(g, g->active_alert_idx);
+        g->arc_zone_ms = lv_tick_get();
+        lv_area_t box  = {.x1 = 0, .y1 = 0, .x2 = g->board->width_px - 1, .y2 = g->board->height_px - 1};
+        arc_repaint(g, &box, 0, 0, true);
+        if (g->head_valid) {
+            lv_obj_invalidate_area(g->head, &g->head_bbox);
+        }
+    }
+
+    float    frac = value_frac(g, g->displayed);
+    uint16_t cur  = g->valid ? arc_key(frac) : 0;
+    if (cur != g->arc_cur) {
+        uint16_t lo = LV_MIN(cur, g->arc_cur);
+        uint16_t hi = LV_MAX(cur, g->arc_cur);
+        g->arc_cur  = cur;
+
+        /* Ticks light by their own value, so reach half a tick either side of the slice. */
+        float     f0 = (lo > 0 ? (float)(lo - 1) : 0.0f) / ARC_KEY_SCALE - g->arc_margin;
+        float     f1 = (float)(hi - 1) / ARC_KEY_SCALE + g->arc_margin;
+        lv_area_t box;
+        arc_sector_box(g, LV_MAX(f0, 0.0f), LV_MIN(f1, 1.0f), &box);
+        arc_repaint(g, &box, lo, hi, false);
+    }
+    arc_head_update(g);
+}
+
+/* ------------------------------------------------------------------- head bar ------ */
+
+static void head_draw_cb(lv_event_t *e)
+{
+    gauge_render_t *g     = lv_event_get_user_data(e);
+    lv_layer_t     *layer = lv_event_get_layer(e);
+    if (layer == NULL || !g->head_valid) {
+        return;
+    }
+
+    /* A halo in the fill's colour, then the bar: the brightest thing on the scale. */
+    lv_draw_line_dsc_t dsc;
+    lv_draw_line_dsc_init(&dsc);
+    dsc.p1          = g->head_p1;
+    dsc.p2          = g->head_p2;
+    dsc.round_start = 1;
+    dsc.round_end   = 1;
+    dsc.color       = g->arc_fill;
+    dsc.opa         = (lv_opa_t)115; /* 45% */
+    dsc.width       = g->cfg.arc.head_width_px + 5;
+    lv_draw_line(layer, &dsc);
+
+    dsc.color = to_lv(g->cfg.arc.head_color);
+    dsc.opa   = LV_OPA_COVER;
+    dsc.width = g->cfg.arc.head_width_px;
+    lv_draw_line(layer, &dsc);
+}
+
+static void arc_head_update(gauge_render_t *g)
+{
+    if (g->head == NULL) {
+        return;
+    }
+    float frac = value_frac(g, g->displayed);
+    bool  show = g->valid && frac > 0.001f;
+
+    lv_point_precise_t p1 = {0}, p2 = {0};
+    if (show) {
+        lv_area_t pa;
+        lv_obj_get_coords(g->parent, &pa);
+        float rad = DEG2RAD(value_to_deg(g, g->displayed));
+        float dx = sinf(rad), dy = -cosf(rad);
+        float ro = (float)g->arc_outer + 3.0f;
+        float ri = (float)(g->arc_outer - g->cfg.arc.width_px) - 3.0f;
+        p1       = (lv_point_precise_t){.x = pa.x1 + (int32_t)lroundf(g->cx + dx * ro),
+                                        .y = pa.y1 + (int32_t)lroundf(g->cy + dy * ro)};
+        p2       = (lv_point_precise_t){.x = pa.x1 + (int32_t)lroundf(g->cx + dx * ri),
+                                        .y = pa.y1 + (int32_t)lroundf(g->cy + dy * ri)};
+    }
+
+    if (show == g->head_valid && (!show || (memcmp(&p1, &g->head_p1, sizeof(p1)) == 0 &&
+                                            memcmp(&p2, &g->head_p2, sizeof(p2)) == 0))) {
+        return; /* same pixels */
+    }
+    if (g->head_valid) {
+        lv_obj_invalidate_area(g->head, &g->head_bbox);
+    }
+    g->head_valid = show;
+    if (!show) {
+        return;
+    }
+    g->head_p1        = p1;
+    g->head_p2        = p2;
+    int32_t   slack   = (g->cfg.arc.head_width_px + 5) / 2 + 3;
+    g->head_bbox      = (lv_area_t){
+        .x1 = LV_MIN(p1.x, p2.x) - slack, .y1 = LV_MIN(p1.y, p2.y) - slack,
+        .x2 = LV_MAX(p1.x, p2.x) + slack, .y2 = LV_MAX(p1.y, p2.y) + slack,
+    };
+    lv_obj_invalidate_area(g->head, &g->head_bbox);
+}
+
+/* --------------------------------------------------------------- arc set-up ------ */
+
+static void arc_free(gauge_render_t *g)
+{
+    for (uint16_t i = 0; i < g->arc_label_count; i++) {
+        free(g->arc_labels[i].px_lit);
+        free(g->arc_labels[i].px_unlit);
+    }
+    free(g->arc_labels);
+    free(g->arc_rows);
+    free(g->arc_unlit);
+    free(g->arc_key);
+    free(g->arc_lit);
+    free(g->arc_mark);
+    g->arc_labels      = NULL;
+    g->arc_label_count = 0;
+    g->arc_rows        = NULL;
+    g->arc_unlit       = NULL;
+    g->arc_key         = NULL;
+    g->arc_lit         = NULL;
+    g->arc_mark        = NULL;
+    g->arc_on          = false;
+}
+
+/* Read the canvas's coverage of a capture pass (white on black) into the mark plane. */
+static void arc_capture_marks(gauge_render_t *g, bool major)
+{
+    const gauge_config_t *c      = &g->cfg;
+    lv_draw_buf_t        *buf    = lv_canvas_get_draw_buf(g->face);
+    size_t                stride = buf->header.stride;
+    float                 step   = major ? c->face.ticks.major_every : c->face.ticks.minor_every;
+    float                 span   = c->source.max - c->source.min;
+
+    for (int32_t y = g->arc_y1; y <= g->arc_y2; y++) {
+        const arc_row_t *row = &g->arc_rows[y - g->arc_y1];
+        const uint16_t  *px  = (const uint16_t *)(buf->data + (size_t)y * stride);
+        for (int run = 0; run < 2; run++) {
+            int32_t  r1   = run ? row->xr1 : row->xl1;
+            int32_t  r2   = run ? row->xr2 : row->xl2;
+            uint32_t base = row->off + (run ? (uint32_t)(row->xl2 - row->xl1 + 1) : 0);
+            for (int32_t x = r1; x <= r2; x++) {
+                uint32_t cov = (px[x] >> 5) & 0x3f; /* green, 6 bits: white ink on black */
+                if (cov == 0) {
+                    continue;
+                }
+                uint32_t i = base + (uint32_t)(x - r1);
+                if (!major && (g->arc_mark[i] & 0x80)) {
+                    continue;
+                }
+                /* The tick's own value: it lights whole as the fill reaches it. */
+                float f = arc_frac_at(g, (float)(x - g->cx), (float)(y - g->cy));
+                if (f > 1.0f) {
+                    /* In the gap: the end it is nearer. */
+                    float past_end   = f - 1.0f;
+                    float before_min = 360.0f / fabsf(c->face.sweep) - f;
+                    f                = (past_end < before_min) ? 1.0f : 0.0f;
+                }
+                float v  = c->source.min + LV_CLAMP(0.0f, f, 1.0f) * span;
+                float vs = c->source.min + roundf((v - c->source.min) / step) * step;
+                g->arc_mark[i] = (uint8_t)((major ? 0x80 : 0) | (cov * 2 + (cov >> 5)));
+                g->arc_key[i]  = arc_key(value_frac(g, vs));
+            }
+        }
+    }
+}
+
+/* Copy a canvas box into a tile. */
+static void canvas_copy(gauge_render_t *g, const lv_area_t *a, uint16_t *dst)
+{
+    lv_draw_buf_t *buf = lv_canvas_get_draw_buf(g->face);
+    int32_t        w   = lv_area_get_width(a);
+    for (int32_t y = a->y1; y <= a->y2; y++) {
+        memcpy(dst + (size_t)(y - a->y1) * w,
+               buf->data + (size_t)y * buf->header.stride + (size_t)a->x1 * 2, (size_t)w * 2);
+    }
+}
+
+/*
+ * Build the fill's planes, then draw the face proper. Called in place of render_face(). A PSRAM
+ * shortfall leaves the face without its fill (and logs it) rather than failing the gauge.
+ */
+static void arc_prepare(gauge_render_t *g)
+{
+    const gauge_config_t *c = &g->cfg;
+    int32_t               W = g->board->width_px;
+    int32_t               H = g->board->height_px;
+
+    g->arc_outer   = c->arc.radius_px ? c->arc.radius_px : g->radius;
+    int32_t inner  = g->arc_outer - LV_MIN((int32_t)c->arc.width_px, g->arc_outer - 1);
+    int32_t r_in   = inner - c->arc.glow_px - 1;
+    int32_t r_out  = g->arc_outer + c->arc.glow_px + 1;
+    bool    ticks  = c->arc.lit_ticks && c->face.ticks.present;
+    if (ticks) {
+        /* Built-in ticks hang inward from the tick circle; shaped ones can reach either way. */
+        int32_t t_out = tick_outer_radius(g);
+        int32_t reach = LV_MAX(major_tick_reach(g), (int32_t)c->face.ticks.minor_len_px);
+        int32_t out   = 0;
+        const gauge_shape_t *shapes[2] = {&c->face.ticks.major_shape, &c->face.ticks.minor_shape};
+        for (int k = 0; k < 2; k++) {
+            if (gauge_shape_is_set(shapes[k])) {
+                int32_t e = (int32_t)ceilf(gauge_shape_extent(shapes[k]));
+                reach     = LV_MAX(reach, e);
+                out       = LV_MAX(out, e);
+            }
+        }
+        r_in  = LV_MIN(r_in, t_out - reach - 3);
+        r_out = LV_MAX(r_out, t_out + out + 3);
+    }
+    r_in         = LV_MAX(r_in, 0);
+    g->arc_r_in  = r_in;
+    g->arc_r_out = r_out;
+    g->arc_y1    = LV_MAX(g->cy - r_out, 0);
+    g->arc_y2    = LV_MIN(g->cy + r_out, H - 1);
+
+    /* Rows and their runs: pixels whose centre lies between r_in and r_out. */
+    g->arc_rows = heap_caps_calloc((size_t)(g->arc_y2 - g->arc_y1 + 1), sizeof(arc_row_t),
+                                   MALLOC_CAP_SPIRAM);
+    if (g->arc_rows == NULL) {
+        goto nomem;
+    }
+    uint32_t n = 0;
+    for (int32_t y = g->arc_y1; y <= g->arc_y2; y++) {
+        arc_row_t *row = &g->arc_rows[y - g->arc_y1];
+        int32_t    dy  = y - g->cy;
+        int32_t    xo  = (int32_t)floorf(sqrtf((float)(r_out * r_out - dy * dy)));
+        row->off       = n;
+        row->xl1       = (int16_t)LV_MAX(g->cx - xo, 0);
+        row->xr2       = (int16_t)LV_MIN(g->cx + xo, W - 1);
+        if (abs(dy) < r_in) {
+            int32_t xi = (int32_t)ceilf(sqrtf((float)(r_in * r_in - dy * dy)));
+            row->xl2   = (int16_t)(g->cx - xi);
+            row->xr1   = (int16_t)(g->cx + xi);
+        } else {
+            row->xl2 = row->xr2; /* one run */
+            row->xr1 = (int16_t)(row->xr2 + 1);
+        }
+        n += (uint32_t)LV_MAX(row->xl2 - row->xl1 + 1, 0) + (uint32_t)LV_MAX(row->xr2 - row->xr1 + 1, 0);
+    }
+    g->arc_n     = n;
+    g->arc_unlit = heap_caps_malloc((size_t)n * 2, MALLOC_CAP_SPIRAM);
+    g->arc_key   = heap_caps_calloc(n, 2, MALLOC_CAP_SPIRAM);
+    g->arc_lit   = heap_caps_calloc(n, 1, MALLOC_CAP_SPIRAM);
+    g->arc_mark  = heap_caps_calloc(n, 1, MALLOC_CAP_SPIRAM);
+    if (g->arc_unlit == NULL || g->arc_key == NULL || g->arc_lit == NULL || g->arc_mark == NULL) {
+        goto nomem;
+    }
+
+    /* Band and glow, from each pixel's distance to the band's edges. */
+    float glow = (float)c->arc.glow_px;
+    for (int32_t y = g->arc_y1; y <= g->arc_y2; y++) {
+        const arc_row_t *row = &g->arc_rows[y - g->arc_y1];
+        for (int run = 0; run < 2; run++) {
+            int32_t  r1   = run ? row->xr1 : row->xl1;
+            int32_t  r2   = run ? row->xr2 : row->xl2;
+            uint32_t base = row->off + (run ? (uint32_t)(row->xl2 - row->xl1 + 1) : 0);
+            for (int32_t x = r1; x <= r2; x++) {
+                float dx = (float)(x - g->cx), dy = (float)(y - g->cy);
+                float f  = arc_frac_at(g, dx, dy);
+                if (f > 1.0f) {
+                    continue; /* the dial's gap */
+                }
+                float    r   = sqrtf(dx * dx + dy * dy);
+                float    cov = fminf(r - (float)inner + 0.5f, (float)g->arc_outer - r + 0.5f);
+                uint32_t i   = base + (uint32_t)(x - r1);
+                if (cov > 0.0f) {
+                    g->arc_lit[i] = (uint8_t)(128 + lroundf(fminf(cov, 1.0f) * 127.0f));
+                } else if (glow > 0.0f && -cov < glow) {
+                    float a = ARC_GLOW_OPA * (1.0f + cov / glow);
+                    g->arc_lit[i] = (uint8_t)LV_MIN(lroundf(a * 255.0f), 127);
+                }
+                if (g->arc_lit[i] != 0) {
+                    g->arc_key[i] = LV_MAX(arc_key(f), 2); /* key 1 is for marks at the scale's start */
+                }
+            }
+        }
+    }
+
+    /* Ticks: render each kind alone, white on black, and read back its coverage. */
+    lv_color_t white = lv_color_white();
+    if (ticks) {
+        if (c->face.ticks.major_every > 0.0f) {
+            render_face(g, FACE_MAJOR, &white, &white);
+            arc_capture_marks(g, true);
+        }
+        if (c->face.ticks.minor_every > 0.0f) {
+            render_face(g, FACE_MINOR, &white, &white);
+            arc_capture_marks(g, false);
+        }
+        float span     = c->source.max - c->source.min;
+        float step     = c->face.ticks.minor_every > 0.0f ? c->face.ticks.minor_every
+                                                          : c->face.ticks.major_every;
+        g->arc_margin  = (step > 0.0f ? 0.5f * step / span : 0.0f) + 0.004f;
+    } else {
+        g->arc_margin = 0.004f;
+    }
+
+    /* Labels: a lit and an unlit tile each, swapped as the fill passes. */
+    lv_color_t lit_ink = to_lv(c->arc.lit_color);
+    uint16_t   count   = 0;
+    if (c->arc.lit_ticks && c->face.labels.present) {
+        float   v;
+        char    text[16];
+        int32_t x, y;
+        while (label_at(g, count, &v, text, sizeof(text), &x, &y)) {
+            count++;
+        }
+    }
+    if (count > 0) {
+        g->arc_labels = heap_caps_calloc(count, sizeof(arc_label_t), MALLOC_CAP_SPIRAM);
+        if (g->arc_labels == NULL) {
+            goto nomem;
+        }
+        const lv_font_t *font = font_by_name(c->face.labels.font);
+        /* The whole face with its labels lit, so a tile carries whatever else is in its box. */
+        render_face(g, FACE_ALL, NULL, &lit_ink);
+
+        for (uint16_t i = 0; i < count; i++) {
+            float   v;
+            char    text[16];
+            int32_t x, y;
+            label_at(g, i, &v, text, sizeof(text), &x, &y);
+            lv_point_t sz;
+            lv_text_get_size(&sz, text, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+            int32_t      lh = lv_font_get_line_height(font);
+            arc_label_t *l  = &g->arc_labels[i];
+            l->area = (lv_area_t){
+                .x1 = LV_MAX(x - sz.x / 2 - 3, 0), .y1 = LV_MAX(y - lh / 2 - 2, 0),
+                .x2 = LV_MIN(x + sz.x / 2 + 3, W - 1), .y2 = LV_MIN(y + lh / 2 + 2, H - 1),
+            };
+            l->key      = arc_key(value_frac(g, v));
+            size_t px   = (size_t)lv_area_get_width(&l->area) * lv_area_get_height(&l->area);
+            l->px_lit   = heap_caps_malloc(px * 2, MALLOC_CAP_SPIRAM);
+            l->px_unlit = heap_caps_malloc(px * 2, MALLOC_CAP_SPIRAM);
+            g->arc_label_count = (uint16_t)(i + 1);
+            if (l->px_lit == NULL || l->px_unlit == NULL) {
+                goto nomem;
+            }
+            canvas_copy(g, &l->area, l->px_lit);
+        }
+    }
+
+    /* The face proper, which is also the unlit picture. */
+    render_face(g, FACE_ALL, NULL, NULL);
+    {
+        lv_draw_buf_t *buf = lv_canvas_get_draw_buf(g->face);
+        for (int32_t y = g->arc_y1; y <= g->arc_y2; y++) {
+            const arc_row_t *row = &g->arc_rows[y - g->arc_y1];
+            const uint16_t  *px  = (const uint16_t *)(buf->data + (size_t)y * buf->header.stride);
+            int32_t          nl  = LV_MAX(row->xl2 - row->xl1 + 1, 0);
+            int32_t          nr  = LV_MAX(row->xr2 - row->xr1 + 1, 0);
+            memcpy(&g->arc_unlit[row->off], &px[row->xl1], (size_t)nl * 2);
+            if (nr > 0) {
+                memcpy(&g->arc_unlit[row->off + nl], &px[row->xr1], (size_t)nr * 2);
+            }
+        }
+    }
+    for (uint16_t i = 0; i < g->arc_label_count; i++) {
+        canvas_copy(g, &g->arc_labels[i].area, g->arc_labels[i].px_unlit);
+    }
+
+    g->arc_lit565 = lv_color_to_u16(lit_ink);
+    arc_set_zone(g, -1);
+    g->arc_cur = 0;
+    g->arc_on  = true;
+    ESP_LOGI(TAG, "arc fill: %" PRIu32 " px between r %" PRId32 " and %" PRId32 ", %u labels, %uKB",
+             n, r_in, r_out, (unsigned)g->arc_label_count, (unsigned)((size_t)n * 6 / 1024));
+    return;
+
+nomem:
+    ESP_LOGW(TAG, "no PSRAM for the arc fill; leaving it out");
+    arc_free(g);
+    render_face(g, FACE_ALL, NULL, NULL);
+}
+
 /* ------------------------------------------------------------------- public --------- */
 
 esp_err_t gauge_render_create(lv_obj_t *parent, const gauge_config_t *cfg,
@@ -1621,6 +2357,7 @@ esp_err_t gauge_render_create(lv_obj_t *parent, const gauge_config_t *cfg,
     g->board  = board;
     g->parent = parent;
     g->active_alert_idx = -1;
+    g->arc_zone         = -1;
 
     int32_t w = board->width_px;
     int32_t h = board->height_px;
@@ -1648,7 +2385,11 @@ esp_err_t gauge_render_create(lv_obj_t *parent, const gauge_config_t *cfg,
     lv_canvas_set_buffer(g->face, g->face_buf, w, h, LV_COLOR_FORMAT_RGB565);
     lv_obj_set_pos(g->face, 0, 0);
 
-    render_face(g);
+    if (g->cfg.arc.present) {
+        arc_prepare(g);
+    } else {
+        render_face(g, FACE_ALL, NULL, NULL);
+    }
 
     /* --- sparkline strip: over the face, under the needle --- */
     if (cfg->trend.present) {
@@ -1691,6 +2432,21 @@ esp_err_t gauge_render_create(lv_obj_t *parent, const gauge_config_t *cfg,
     g->needle_len = (cfg->needle.length_px > 0) ? cfg->needle.length_px
                                                 : (int32_t)((float)g->radius * 0.72f);
 
+    /* --- the arc fill's head bar: over the face, where a needle would be --- */
+    if (g->arc_on && cfg->arc.head_width_px > 0) {
+        g->head = lv_obj_create(parent);
+        if (g->head != NULL) {
+            lv_obj_remove_style_all(g->head);
+            lv_obj_remove_flag(g->head, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_remove_flag(g->head, LV_OBJ_FLAG_CLICKABLE);
+            int32_t reach = g->arc_outer + 8;
+            lv_obj_set_size(g->head, reach * 2, reach * 2);
+            lv_obj_set_pos(g->head, g->cx - reach, g->cy - reach);
+            lv_obj_add_event_cb(g->head, head_draw_cb, LV_EVENT_DRAW_MAIN, g);
+        }
+    }
+
+    if (g->cfg.needle.style != GAUGE_NEEDLE_NONE || gauge_shape_is_set(&g->cfg.needle.shape)) {
     g->needle = lv_obj_create(parent);
     ESP_GOTO_ON_FALSE(g->needle != NULL, ESP_ERR_NO_MEM, fail, TAG, "needle failed");
     lv_obj_remove_style_all(g->needle);
@@ -1708,6 +2464,7 @@ esp_err_t gauge_render_create(lv_obj_t *parent, const gauge_config_t *cfg,
             : g->needle_len + cfg->needle.tail_px + cfg->needle.width_px + 8;
         lv_obj_set_size(g->needle, reach * 2, reach * 2);
         lv_obj_set_pos(g->needle, g->cx - reach, g->cy - reach);
+    }
     }
 
     /* --- centre hub, above the needle --- */
@@ -1805,6 +2562,7 @@ esp_err_t gauge_render_create(lv_obj_t *parent, const gauge_config_t *cfg,
     g->displayed = cfg->source.min;
     update_readout(g);
     update_needle(g);
+    update_arc(g);
     set_peak_label(g);
 
     ESP_LOGI(TAG, "gauge '%s' ready: r=%" PRId32 " needle_len=%" PRId32 " face=%uKB%s",
@@ -1857,6 +2615,9 @@ void gauge_render_destroy(gauge_render_t *g)
     if (g->needle != NULL) {
         lv_obj_delete(g->needle);
     }
+    if (g->head != NULL) {
+        lv_obj_delete(g->head);
+    }
     if (g->face != NULL) {
         lv_obj_delete(g->face);
     }
@@ -1868,6 +2629,7 @@ void gauge_render_destroy(gauge_render_t *g)
     free(g->trend_cols);
     free(g->trend_fill_cov);
     free(g->trend_line_buf);
+    arc_free(g);
     free(g->face_buf);
     free(g);
 }
@@ -1915,6 +2677,7 @@ void gauge_render_set_value(gauge_render_t *g, float value, bool valid)
     update_needle(g);
     update_readout(g);
     evaluate_alerts(g);
+    update_arc(g);
 }
 
 float gauge_render_get_displayed(const gauge_render_t *g)
@@ -1973,6 +2736,10 @@ void gauge_render_parent_moved(gauge_render_t *g)
     g->prev_valid  = false;
     g->shape_valid = false;
     update_needle(g);
+    if (g->head_valid) {
+        g->head_valid = false; /* its points are screen coordinates: place it again */
+        arc_head_update(g);
+    }
     if (g->peak_marker != NULL && g->peak_valid) {
         g->peak_bbox_valid = false;
         place_peak_marker(g);

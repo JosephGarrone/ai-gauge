@@ -64,8 +64,31 @@ dial, which the needle's box does not reach. See
 ### 3b. Pixel shift redraws the dial once per step
 
 Burn-in protection translates the whole dial tile by up to 3 px, every few minutes. Each step is a
-full-screen repaint (one dropped frame); the renderer then recomputes the needle and peak marker's
-cached screen coordinates (`gauge_render_parent_moved`), so their tight dirty boxes stay correct.
+full-screen repaint (one dropped frame); the renderer then recomputes the needle, arc head and peak
+marker's cached screen coordinates (`gauge_render_parent_moved`), so their tight dirty boxes stay
+correct. The arc fill works in canvas coordinates and moves with the canvas.
+
+### 3c. The arc fill repaints only the slice it moved through
+
+A face with an `<arc>` has no needle: the value is a lit band along the scale
+([ADR 0016](adr/0016-arc-fill-faces.md)). It is drawn **into the face canvas itself**. At build time
+each pixel of the annulus the fill can light (band, glow, and the ticks it lights) is given its
+unlit colour, the point on the scale where it lights, and its band, glow and tick coverage, in
+PSRAM planes (~6 B per pixel; 326 KB for the shipped faces). When the value moves, only the pixels
+whose key lies between the old and new value are rewritten, lit or unlit, and only their bounding
+box is invalidated. Labels light whole, by swapping one of two small pre-rendered tiles. The head
+bar is its own object with a tight box, like the needle.
+
+Two rules keep it cheap:
+
+- **The fade is fixed to the scale.** A pixel's colour depends only on where it is on the scale,
+  so a moving value never recolours the rest of the fill. A head-relative fade (the obd-display
+  dashboard's) would recolour every lit pixel on every frame.
+- **A zone change recolours the whole fill, at most four times a second.** That repaint is one long
+  frame (~100k px, ~20 ms with the blit); the limit bounds what a value sitting on a zone's edge
+  can cost.
+
+Measured: a 1 Hz full-scale sweep holds 66.6 fps at 2.4% dirty, against ~13% for the needle.
 
 ### Frame-rate cap
 

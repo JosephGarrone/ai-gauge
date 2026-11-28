@@ -635,6 +635,59 @@ static void test_tick_band_color(void)
 #undef SAME
 }
 
+/* The arc fill and what goes with it: a mirrored sweep, radii on bands and ticks, no needle. */
+static void test_arc(void)
+{
+    gauge_config_t cfg;
+
+    CHECK(gauge_config_parse(MINIMAL, 0, &cfg) == GAUGE_CONFIG_OK, "minimal should parse");
+    CHECK(!cfg.arc.present, "arc should be off unless the element is present");
+    CHECK(cfg.face.ticks.radius_px == 0, "ticks radius defaults to derived");
+
+    CHECK(gauge_config_parse("<gauge version=\"1\" id=\"t\"><source channel=\"b\" min=\"0\" "
+                             "max=\"10\"/><arc/></gauge>", 0, &cfg) == GAUGE_CONFIG_OK,
+          "bare arc should parse");
+    CHECK(cfg.arc.present && cfg.arc.radius_px == 0 && cfg.arc.width_px == 26 && cfg.arc.glow_px == 10,
+          "arc geometry defaults");
+    CHECK(cfg.arc.color.g == 0xd2 && cfg.arc.start_color.b == 0xb0 && cfg.arc.head_width_px == 4,
+          "arc colour defaults");
+    CHECK(cfg.arc.lit_ticks && cfg.arc.lit_color.r == 0xeb, "lit ticks on by default");
+    CHECK(cfg.warning_count == 0, "unexpected warnings: %u", cfg.warning_count);
+
+    CHECK(gauge_config_parse("<gauge version=\"1\" id=\"t\"><source channel=\"b\" min=\"0\" max=\"30\"/>"
+                             "<face start-angle=\"125\" sweep=\"-250\" radius=\"158\">"
+                             "<band from=\"0\" to=\"30\" color=\"#042d36\" width=\"2\" radius=\"128\"/>"
+                             "<ticks major-every=\"5\" radius=\"162\"/></face>"
+                             "<arc radius=\"150\" width=\"20\" glow=\"8\" head-width=\"3\" lit-ticks=\"false\"/>"
+                             "<needle style=\"none\" pivot-radius=\"0\"/></gauge>",
+                             0, &cfg) == GAUGE_CONFIG_OK,
+          "arc face should parse");
+    CHECK(near(cfg.face.sweep, -250.0f), "negative sweep kept, was %f", (double)cfg.face.sweep);
+    CHECK(cfg.face.bands[0].radius_px == 128, "band radius");
+    CHECK(cfg.face.ticks.radius_px == 162, "ticks radius");
+    CHECK(cfg.arc.radius_px == 150 && cfg.arc.width_px == 20 && cfg.arc.glow_px == 8 &&
+              cfg.arc.head_width_px == 3 && !cfg.arc.lit_ticks,
+          "arc attributes");
+    CHECK(cfg.needle.style == GAUGE_NEEDLE_NONE && cfg.needle.pivot_radius_px == 0, "needle none");
+    CHECK(cfg.warning_count == 0, "unexpected warnings: %u", cfg.warning_count);
+
+    /* Glow over the limit and a zero width clamp, with a warning each; sweeps clamp by sign. */
+    CHECK(gauge_config_parse("<gauge version=\"1\" id=\"t\"><source channel=\"b\" min=\"0\" "
+                             "max=\"10\"/><arc glow=\"99\" width=\"0\"/></gauge>", 0, &cfg) == GAUGE_CONFIG_OK,
+          "clamped arc should parse");
+    CHECK(cfg.arc.glow_px == GAUGE_CONFIG_ARC_MAX_GLOW_PX && cfg.arc.width_px == 1, "arc clamps");
+    CHECK(cfg.warning_count == 2, "warnings: %u", cfg.warning_count);
+
+    CHECK(gauge_config_parse("<gauge version=\"1\" id=\"t\"><source channel=\"b\" min=\"0\" "
+                             "max=\"10\"/><face sweep=\"-400\"/></gauge>", 0, &cfg) == GAUGE_CONFIG_OK,
+          "over-long negative sweep should parse");
+    CHECK(near(cfg.face.sweep, -360.0f) && cfg.warning_count == 1, "clamped to -360");
+    CHECK(gauge_config_parse("<gauge version=\"1\" id=\"t\"><source channel=\"b\" min=\"0\" "
+                             "max=\"10\"/><face sweep=\"-0.5\"/></gauge>", 0, &cfg) == GAUGE_CONFIG_OK,
+          "tiny negative sweep should parse");
+    CHECK(near(cfg.face.sweep, -1.0f) && cfg.warning_count == 1, "clamped to -1");
+}
+
 int main(void)
 {
     struct {
@@ -653,6 +706,7 @@ int main(void)
         {"builtin_default_is_valid", test_builtin_default_is_valid},
         {"peak",                     test_peak},
         {"trend",                    test_trend},
+        {"arc",                      test_arc},
         {"icon",                     test_icon},
         {"tick_band_color",          test_tick_band_color},
         {"shapes_absent_by_default", test_shapes_absent_by_default},

@@ -14,7 +14,7 @@
  */
 
 import {
-    ERRORS, LIMITS, SCHEMA_VERSION, defaultAlert, defaultBand, defaultLabels, defaultModel,
+    ERRORS, LIMITS, SCHEMA_VERSION, defaultAlert, defaultArc, defaultBand, defaultLabels, defaultModel,
     defaultPeak, defaultReadout, defaultTicks, defaultTitle, defaultTrend,
 } from './schema.js';
 import { checkFormat } from './printf.js';
@@ -477,7 +477,10 @@ function parseFace(r, tag, m) {
     const start = r.float(tag, 'start-angle');
     if (start !== null) m.face.startAngle = f32(start % 360);
     const sweep = r.float(tag, 'sweep');
-    if (sweep !== null) m.face.sweep = r.clamp(sweep, 1, 360, 'face sweep');
+    // Negative runs anticlockwise (a mirrored dial); either way at least a degree.
+    if (sweep !== null) {
+        m.face.sweep = sweep < 0 ? r.clamp(sweep, -360, -1, 'face sweep') : r.clamp(sweep, 1, 360, 'face sweep');
+    }
     m.face.background = r.color(tag, 'background', m.face.background, 'face background');
     m.face.radius = r.px(tag, 'radius', m.face.radius, 'face');
 }
@@ -503,6 +506,7 @@ function parseBand(r, tag, m) {
     }
     band.color = r.color(tag, 'color', band.color, `band ${n} color`);
     band.width = r.px(tag, 'width', band.width, `band ${n}`);
+    band.radius = r.px(tag, 'radius', band.radius, `band ${n}`);
     m.bands.push(band);
 }
 
@@ -521,6 +525,7 @@ function parseTicks(r, tag, m) {
     t.minorWidth = r.px(tag, 'minor-width', t.minorWidth, 'ticks');
     t.color = r.color(tag, 'color', t.color, 'ticks color');
     t.bandColor = r.bool(tag, 'band-color') ?? t.bandColor;
+    t.radius = r.px(tag, 'radius', t.radius, 'ticks');
     m.ticks = t;
 }
 
@@ -538,7 +543,7 @@ function parseLabels(r, tag, m) {
 function parseNeedle(r, tag, m) {
     const n = m.needle;
     const style = r.str(tag, 'style', 16);
-    if (style === 'line' || style === 'arrow' || style === 'taper') {
+    if (style === 'line' || style === 'arrow' || style === 'taper' || style === 'none') {
         n.style = style;
     } else if (style !== null) {
         r.warn(`needle style '${style}' is unknown; kept ${n.style}`);
@@ -618,6 +623,29 @@ function parseTrend(r, tag, m) {
         t.height = LIMITS.trendMinPx;
     }
     m.trend = t;
+}
+
+function parseArc(r, tag, m) {
+    // A repeated <arc> keeps the earlier values, as the firmware's single struct does.
+    const a = m.arc ?? defaultArc();
+    a.radius = r.px(tag, 'radius', a.radius, 'arc');
+    a.width = r.px(tag, 'width', a.width, 'arc');
+    a.color = r.color(tag, 'color', a.color, 'arc color');
+    a.startColor = r.color(tag, 'start-color', a.startColor, 'arc start-color');
+    a.glow = r.px(tag, 'glow', a.glow, 'arc');
+    a.headColor = r.color(tag, 'head-color', a.headColor, 'arc head-color');
+    a.headWidth = r.px(tag, 'head-width', a.headWidth, 'arc');
+    a.litTicks = r.bool(tag, 'lit-ticks') ?? a.litTicks;
+    a.litColor = r.color(tag, 'lit-color', a.litColor, 'arc lit-color');
+    if (a.glow > LIMITS.arcMaxGlow) {
+        r.warn(`arc glow ${a.glow} is above ${LIMITS.arcMaxGlow}; clamped`);
+        a.glow = LIMITS.arcMaxGlow;
+    }
+    if (a.width === 0) {
+        r.warn('arc width 0: a fill needs some thickness; 1 used');
+        a.width = 1;
+    }
+    m.arc = a;
 }
 
 function parseAlert(r, tag, m) {
@@ -746,6 +774,8 @@ export function parseGauge(xml) {
             slot = tag.selfClosing ? null : s;
         } else if (name === 'trend') {
             parseTrend(r, tag, m);
+        } else if (name === 'arc') {
+            parseArc(r, tag, m);
         } else if (name === 'alert') {
             parseAlert(r, tag, m);
         }

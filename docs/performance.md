@@ -528,7 +528,39 @@ The full-screen repaint is what a pixel-shift step costs: one long frame, no cha
 rate. Internal free at `running`: 20,771 B, largest DMA block 12,800 B. Below the 13.2% / 5.9 ms of
 the original gate because whole-number readouts change less often than `%.1f` ones.
 
+### Modern arc faces, 2026-11-28
+
+[ADR 0016](adr/0016-arc-fill-faces.md): `boost_modern`, the arc fill drawn into the face buffer.
+Bench board, flashed over OTA, WiFi connected, rear board attached (so the engine-off screen
+covered the dial until a tap, and the measurements were taken inside the 60 s that a tap shows
+it). Values fed over UDP telemetry at 20 Hz, a sine sweep with a 2 s period; the face's damping
+(0.88 per 5 ms sample) turns that into motion on every frame. Nobody touching the screen.
+
+| Scenario | fps | Dirty | Render |
+|---|---|---|---|
+| Sweep 0→25→0 psi, 1 Hz each way, no zone crossing, 4 windows | **66.6** | 2.4–2.5% (5.3k px, max 28.9k) | 2.75–2.79 ms mean, 10.9 ms max |
+| Sweep 0→30→0 psi, crossing the 26 psi redline twice a second, 4 windows | **65.4–66.0** | 3.4–3.5% (7.5k px, max 108.5k) | 3.25–3.32 ms mean, 23.2 ms max |
+
+The max boxes in the second row are the redline recolour: every lit pixel repainted, one long
+frame. The first version of the blend (exact division by 255, three channels) took ~25 ms render
+plus the recolour itself on the LVGL task and held 53–57 fps on the same sweep; the 32-step
+packed blend in `blend565()` brought it to the figures above.
+
+From the boot log: `arc fill: 55800 px between r 121 and 180, 7 labels, 326KB`; at `running`,
+internal free 23,623 B (largest DMA block 15,360 B) and PSRAM free 4,947 KB. The planes are all
+PSRAM, so internal RAM is unchanged.
+
+**Measurement trap:** a second telemetry sender on another channel flips the face between valid
+and invalid on every datagram (the gauge keeps only the latest channel), and each flip repaints
+the whole fill. A capture script that sent a dummy channel measured 12–17 fps at 25% dirty.
+
+**Dashes no longer repaint every tick.** With no valid reading the readout re-set its `---` text
+on every 5 ms sample, which redrew its box at the full frame rate (66 fps, 5.1% dirty, on any face).
+It now compares first, as the number path always did: an invalid face settles to the trend strip's
+3 repaints a second.
+
 ### Not yet measured
+- An arc face in the car, against real sensor noise at a zone edge.
 - A pixel-shift step on its own, and the trend at its 30 s window (the measurement below used the
   60 s default).
 - Scenarios 1, 3 and 6.

@@ -133,6 +133,7 @@ A complete face, in canonical emit order:
   <title text="BOOST" y="150" font="montserrat_20" color="#9e9e9e"/>
   <readout y="320" font="montserrat_48" format="%.1f" suffix=" psi" color="#ffffff"/>
   <peak color="#ffab00" length="28" width="5"/>
+  <arc width="26" color="#00d2f0" start-color="#0065b0"/>  <!-- optional: a lit fill, usually with needle style="none" -->
   <alert above="25" flash-hz="2" color="#d50000" chime="true"/>
 </gauge>
 ```
@@ -168,7 +169,7 @@ shape children must use a separate end tag.
 | Attribute | Type | Default | Notes |
 |---|---|---|---|
 | `start-angle` | float | `225` | Angle of `min`. Taken modulo 360 |
-| `sweep` | float 1–360 | `270` | Clockwise span from `min` to `max` |
+| `sweep` | float 1–360, or −360–−1 | `270` | Span from `min` to `max`: clockwise, or anticlockwise when negative (a mirrored dial) |
 | `background` | colour | `#000000` | Full-panel fill |
 | `radius` | int | `225` (fits panel) | Outer radius of the scale. `0` means fit |
 
@@ -178,7 +179,8 @@ shape children must use a separate end tag.
 |---|---|---|---|
 | `from`, `to` | float | **required** | Values, clamped to the source range. Needs `to > from` after clamping |
 | `color` | colour | `#ffffff` | The schema lists it as required; always emit it |
-| `width` | int | `18` | Radial thickness, measured **inwards** from the scale radius |
+| `width` | int | `18` | Radial thickness, measured **inwards** from its radius |
+| `radius` | int | `0` | Outer edge; `0` = the scale radius. A band at another radius does not push the ticks in ([§5.2](#52-ticks)) |
 
 ### `<ticks>` — inside `<face>`, at most one
 
@@ -192,6 +194,7 @@ Omit the element and there are no ticks.
 | `major-width`, `minor-width` | int | `4`, `2` | Ignored when the matching shape is set |
 | `color` | colour | `#ffffff` | Inherited by tick shapes |
 | `band-color` | bool | `false` | A tick on a band takes that band's colour instead; on a shared edge, the later band wins. Colours ticks by zone, as a redline does |
+| `radius` | int | `0` | The tick circle; `0` = derived ([§5.2](#52-ticks)) |
 
 ### `<labels>` — inside `<face>`, at most one
 
@@ -211,12 +214,29 @@ If omitted, the defaults below still draw a needle.
 
 | Attribute | Type | Default | Notes |
 |---|---|---|---|
-| `style` | `taper` \| `line` \| `arrow` | `taper` | Ignored when `<shape>` is set |
+| `style` | `taper` \| `line` \| `arrow` \| `none` | `taper` | `none` = no needle, for an `<arc>` face. Ignored when `<shape>` is set |
 | `length` | int | `0.72 × radius` (162 at the default radius) | Pivot to tip. Ignored when `<shape>` is set |
 | `width` | int | `12` | Ignored when `<shape>` is set |
 | `tail` | int | `0` | Counterweight length behind the pivot. Ignored when `<shape>` is set |
 | `color` | colour | `#ff1744` | Inherited by needle and hub shapes |
 | `pivot-radius` | int | `16` | Built-in hub circle; `0` = no hub. Ignored when `<hub>` is set |
+
+### `<arc>` — at most one
+
+The value as a lit band along the scale. Omit it and there is none. See
+[§5.8](#58-the-arc-fill) for how it is drawn.
+
+| Attribute | Type | Default | Notes |
+|---|---|---|---|
+| `radius` | int | `0` | Outer edge; `0` = the scale radius |
+| `width` | int | `26` | Inwards from `radius`; `0` clamps to `1` with a warning |
+| `color` | colour | `#00d2f0` | The fill at full scale; also its glow and the head's halo |
+| `start-color` | colour | `#0065b0` | The fill at the start of the scale |
+| `glow` | int 0–32 | `10` | Glow reach past each edge, px; above 32 clamps with a warning |
+| `head-color` | colour | `#ffffff` | |
+| `head-width` | int | `4` | `0` = no head bar |
+| `lit-ticks` | bool | `true` | Light the ticks and labels the fill has passed |
+| `lit-color` | colour | `#ebf0f2` | Lit major ticks and labels; lit minor ticks take the fill colour |
 
 ### `<title>` — 0–4
 
@@ -423,8 +443,8 @@ point at distance d:  x = cx + d·sin(angle),  y = cy − d·cos(angle)
 ### 5.2 Ticks
 
 ```
-widest     = largest band width, or 0 with no bands
-tickRadius = R − widest − (6 if any band else 0)
+widest     = largest width among bands drawn at R (radius 0 or R), or 0 with none
+tickRadius = ticks@radius if set, else R − widest − (6 if widest else 0)
 count      = floor((max − min) / every)      // skipped entirely if count > 400
 values     = min + i·every,  i = 0 … count   // starts at min, not at a multiple of `every`
 ```
@@ -471,8 +491,9 @@ will not match LVGL's rendering to the pixel.
 ### 5.4 Bands
 
 An arc from `angle(from)` to `angle(to)`, both **rounded to whole degrees**. Its outer edge is at
-radius `R` and it extends `width` pixels inwards. The ends are square, not rounded. Bands are
-drawn in document order.
+`band@radius`, or `R`, and it extends `width` pixels inwards. The ends are square, not rounded.
+Bands are drawn in document order. With a negative sweep the arc is the same, drawn from its
+other end.
 
 ### 5.5 Needle, hub, peak marker
 
@@ -491,12 +512,15 @@ angle:
 inwards to `R − length`.
 
 **Stacking order, bottom to top:**
-1. Face: background, bands, minor ticks, major ticks, labels, titles
-2. Peak marker
-3. Needle
-4. Hub
-5. Readout
-6. Peak value text
+1. Face: background, bands, minor ticks, major ticks, labels, titles, and the `<arc>` fill
+   (drawn into the face itself)
+2. Trend strip, icon
+3. Peak marker
+4. Arc head bar
+5. Needle
+6. Hub
+7. Readout
+8. Peak value text
 
 ### 5.6 Motion and alerts
 
@@ -537,6 +561,26 @@ SVG's `rotate()` is clockwise in y-down coordinates, which is the same conventio
 Render `<polygon>` with `fill` set to the resolved colour and `fill-rule="nonzero"`. The device
 anti-aliases edges by exact pixel coverage, so a browser's anti-aliasing is a close match.
 
+### 5.8 The arc fill
+
+With `Ro = arc@radius or R`, `Ri = Ro − width` and `f = frac(displayed value)` (§5.1):
+
+- **Band.** Every pixel between `Ri` and `Ro` whose angle is on the scale at or before `f` is lit.
+  Its colour is `mix(start, fill, t)`, where `t` is *that pixel's* fraction along the scale, not
+  its fraction of the fill: the fade is fixed to the scale. `start` and `fill` are `start-color`
+  and `color`, or, while an alert is active, `mix(face@background, alert colour, 0.35)` and the
+  alert's colour. The band's inner and outer edges are anti-aliased; its leading edge is hard,
+  and covered by the head bar.
+- **Glow.** Outside the band, to `glow` px past each edge and over the same angles, the fill
+  colour at `0.21 × (1 − d / glow)` opacity, `d` being the distance from the band's edge.
+- **Head bar.** Drawn while `f > 0.001`: a round-capped line at the value's angle from `Ri − 3` to
+  `Ro + 3`, `head-width + 5` thick in the fill colour at 45% opacity, then `head-width` thick in
+  `head-color`.
+- **Lit ticks and labels** (`lit-ticks`). A tick or label lights as a whole once the value
+  reaches its own value: major ticks and labels in `lit-color`, minor ticks in the fill colour.
+- The fill does not flash with an alert; the head's halo, like the band, takes the alert colour.
+- An invalid reading (dashes) leaves nothing lit.
+
 ---
 
 ## 6. Validation
@@ -563,7 +607,8 @@ The existing face on the device is kept, and the upload fails with a reason.
 
 | Condition | Result |
 |---|---|
-| Number outside its range (damping 0–1, sweep 1–360, flash-hz 0–20, pixel sizes 0–4096, positions ±4096) | Clamped |
+| Number outside its range (damping 0–1, sweep 1–360 or −360–−1, flash-hz 0–20, pixel sizes 0–4096, positions ±4096, arc glow 0–32) | Clamped |
+| `arc@width` of 0 | Set to 1 |
 | Malformed colour | Default kept |
 | Band `from` / `to` outside the source range | Clamped |
 | Band missing `from` / `to`, or `to ≤ from` after clamping | Band dropped |
@@ -657,7 +702,7 @@ and import or export `.xml` files, then hand over to the gauge's copy for upload
 |---|---|
 | Normative schema | [gauge-config-schema.md](gauge-config-schema.md) |
 | Why shapes are polygons | [adr/0006-custom-shapes-as-polygons.md](adr/0006-custom-shapes-as-polygons.md) |
-| Example faces (both parse with 0 warnings) | [../firmware/assets/gauges/boost.xml](../firmware/assets/gauges/boost.xml), [../firmware/assets/gauges/boost_custom.xml](../firmware/assets/gauges/boost_custom.xml) |
+| Example faces (all parse with 0 warnings) | [../firmware/assets/gauges/boost.xml](../firmware/assets/gauges/boost.xml), [../firmware/assets/gauges/boost_custom.xml](../firmware/assets/gauges/boost_custom.xml), and the arc face [../firmware/assets/gauges/boost_modern.xml](../firmware/assets/gauges/boost_modern.xml) |
 | Parser behaviour, as executable tests | [../tools/host-tests/test_gauge_config.c](../tools/host-tests/test_gauge_config.c) |
 | Shape geometry and rasteriser tests | [../tools/host-tests/test_gauge_shape.c](../tools/host-tests/test_gauge_shape.c) |
 | Parser source | [../firmware/components/gauge_config/gauge_config.c](../firmware/components/gauge_config/gauge_config.c) |

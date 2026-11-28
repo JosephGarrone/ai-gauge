@@ -32,6 +32,7 @@ extern "C" {
 #define GAUGE_CONFIG_MAX_ALERTS       4
 #define GAUGE_CONFIG_TREND_MIN_PX     8    /**< <trend> width and height, at least. */
 #define GAUGE_CONFIG_TREND_MAX_W_PX   466  /**< <trend> width, at most: one column per pixel. */
+#define GAUGE_CONFIG_ARC_MAX_GLOW_PX  32   /**< <arc glow>, at most. */
 
 /** Result of a parse. Warnings still yield a usable config; errors do not. */
 typedef enum {
@@ -58,6 +59,7 @@ typedef enum {
     GAUGE_NEEDLE_TAPER,
     GAUGE_NEEDLE_LINE,
     GAUGE_NEEDLE_ARROW,
+    GAUGE_NEEDLE_NONE,     /**< No needle: an <arc> fill shows the value instead. */
 } gauge_needle_style_t;
 
 /*
@@ -109,6 +111,7 @@ typedef struct {
     float         to;
     gauge_color_t color;
     uint16_t      width_px;
+    uint16_t      radius_px;      /**< Outer edge. 0 = the face radius. */
 } gauge_band_t;
 
 /** Static text baked into the pre-rendered face, so it costs nothing per frame. */
@@ -156,7 +159,7 @@ typedef struct {
     /* --- <face> --- */
     struct {
         float         start_angle;  /**< Degrees clockwise from 12 o'clock. */
-        float         sweep;        /**< Total angular sweep, clockwise. */
+        float         sweep;        /**< Total angular sweep; negative runs anticlockwise. */
         gauge_color_t background;
         uint16_t      radius_px;    /**< 0 = fit the panel's safe area. */
 
@@ -173,6 +176,7 @@ typedef struct {
             uint16_t      minor_width_px;
             gauge_color_t color;
             bool          band_color;    /**< Each tick takes the colour of the band it sits on. */
+            uint16_t      radius_px;     /**< Circle the ticks hang inward from. 0 = inside the bands. */
             gauge_shape_t major_shape;   /**< When set, replaces major_len/width. */
             gauge_shape_t minor_shape;   /**< When set, replaces minor_len/width. */
         } ticks;
@@ -198,6 +202,25 @@ typedef struct {
         gauge_shape_t        shape;           /**< When set, replaces style/length/width/tail. */
         gauge_shape_t        hub_shape;       /**< When set, replaces the pivot-radius circle. */
     } needle;
+
+    /*
+     * --- <arc> --- The value as a lit band along the scale instead of (or as well as) a needle:
+     * a fade from start_color to color, a soft glow, a bright head bar, and the ticks and labels it
+     * has passed lit. Drawn into the face buffer itself, repainting only the slice the value moved
+     * through (docs/display-pipeline.md). An active alert's colour replaces color.
+     */
+    struct {
+        bool          present;
+        uint16_t      radius_px;     /**< Outer edge. 0 = the face radius. */
+        uint16_t      width_px;
+        gauge_color_t color;         /**< The fill at full scale, and its glow and head halo. */
+        gauge_color_t start_color;   /**< The fill at the start of the scale. */
+        uint16_t      glow_px;       /**< How far the glow reaches past each edge. 0 = none. */
+        gauge_color_t head_color;
+        uint16_t      head_width_px; /**< 0 = no head bar. */
+        bool          lit_ticks;     /**< Ticks and labels the fill has passed are lit. */
+        gauge_color_t lit_color;     /**< Lit major ticks and labels. Minor ticks take the fill's. */
+    } arc;
 
     /* --- <title> --- */
     gauge_title_t titles[GAUGE_CONFIG_MAX_TITLES];

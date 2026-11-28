@@ -102,7 +102,7 @@ static void put_coord(int16_t v)
 
 static void dump(const gauge_config_t *c)
 {
-    static const char *styles[] = {"taper", "line", "arrow"};
+    static const char *styles[] = {"taper", "line", "arrow", "none"};
 
     printf("{\"version\":%u,\"id\":", c->version);
     put_str(c->id);
@@ -144,7 +144,7 @@ static void dump(const gauge_config_t *c)
         put_float(b->to);
         printf(",\"color\":");
         put_color(b->color);
-        printf(",\"width\":%u}", b->width_px);
+        printf(",\"width\":%u,\"radius\":%u}", b->width_px, b->radius_px);
     }
 
     printf("],\"ticks\":");
@@ -157,7 +157,8 @@ static void dump(const gauge_config_t *c)
                c->face.ticks.major_len_px, c->face.ticks.minor_len_px,
                c->face.ticks.major_width_px, c->face.ticks.minor_width_px);
         put_color(c->face.ticks.color);
-        printf(",\"bandColor\":%s", c->face.ticks.band_color ? "true" : "false");
+        printf(",\"bandColor\":%s,\"radius\":%u", c->face.ticks.band_color ? "true" : "false",
+               c->face.ticks.radius_px);
         printf(",\"majorShape\":");
         put_shape(&c->face.ticks.major_shape);
         printf(",\"minorShape\":");
@@ -269,6 +270,22 @@ static void dump(const gauge_config_t *c)
             printf("null");
         }
         printf(",\"alertColors\":%s}", c->trend.alert_colors ? "true" : "false");
+    } else {
+        printf("null");
+    }
+
+    printf(",\"arc\":");
+    if (c->arc.present) {
+        printf("{\"radius\":%u,\"width\":%u,\"color\":", c->arc.radius_px, c->arc.width_px);
+        put_color(c->arc.color);
+        printf(",\"startColor\":");
+        put_color(c->arc.start_color);
+        printf(",\"glow\":%u,\"headColor\":", c->arc.glow_px);
+        put_color(c->arc.head_color);
+        printf(",\"headWidth\":%u,\"litTicks\":%s,\"litColor\":", c->arc.head_width_px,
+               c->arc.lit_ticks ? "true" : "false");
+        put_color(c->arc.lit_color);
+        putchar('}');
     } else {
         printf("null");
     }

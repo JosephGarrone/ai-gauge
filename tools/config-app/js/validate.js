@@ -192,7 +192,11 @@ function checkGauge(is, m) {
 
 function checkDial(is, m) {
     const f = m.face;
-    checkRange(is, 'dial', 'Sweep', f.sweep, 1, 360);
+    if (!Number.isFinite(f.sweep)) {
+        is.error('dial', 'Sweep must be a number.');
+    } else if (Math.abs(f.sweep) < 1 || Math.abs(f.sweep) > 360) {
+        is.error('dial', `Sweep ${f.sweep} is outside 1…360 (or -360…-1, anticlockwise); the device clamps it.`, { device: true });
+    }
     if (!Number.isFinite(f.startAngle)) is.error('dial', 'Start angle must be a number.');
     checkColor(is, 'dial', 'Background', f.background);
     checkRange(is, 'dial', 'Radius', f.radius, 0, LIMITS.px);
@@ -224,7 +228,9 @@ function checkBands(is, m) {
         }
         checkColor(is, 'bands', `${n} colour`, b.color, opts);
         checkRange(is, 'bands', `${n} width`, b.width, 0, LIMITS.px, opts);
-        if (b.width > R) is.warning('bands', `${n} is wider (${b.width} px) than the scale radius (${R} px).`, opts);
+        checkRange(is, 'bands', `${n} radius`, b.radius, 0, LIMITS.px, opts);
+        const br = b.radius > 0 ? b.radius : R;
+        if (b.width > br) is.warning('bands', `${n} is wider (${b.width} px) than its radius (${br} px).`, opts);
     });
 }
 
@@ -250,7 +256,7 @@ function checkTicks(is, m) {
             is.warning('ticks', `${kind} ticks every ${every} make ${count + 1} ticks; the device skips them all above ${LIMITS.tickCount + 1}.`);
             continue;
         }
-        const spacing = (radius * m.face.sweep * Math.PI / 180 * every) / span;
+        const spacing = (radius * Math.abs(m.face.sweep) * Math.PI / 180 * every) / span;
         const halfWidth = tickHalfWidth(shape, width);
         if (halfWidth * 2 > spacing) {
             is.warning('ticks', `${kind} ticks are ${(halfWidth * 2).toFixed(1)} px wide but only ${spacing.toFixed(1)} px apart, so neighbours run into each other.`);
@@ -303,6 +309,27 @@ function checkNeedle(is, m) {
     if (!n.hub) checkRange(is, 'needle', 'Pivot radius', n.pivotRadius, 0, LIMITS.px);
     checkShape(is, 'needle', 'Needle shape', n.shape, { needle: true });
     checkShape(is, 'needle', 'Hub shape', n.hub);
+    if (n.style === 'none' && !n.shape && !m.arc) {
+        is.warning('needle', 'The needle style is none and the face has no arc fill, so nothing on the scale shows the value.');
+    }
+}
+
+function checkArc(is, m) {
+    const a = m.arc;
+    if (!a) return;
+    for (const [label, v] of [['Arc colour', a.color], ['Arc start colour', a.startColor], ['Arc head colour', a.headColor], ['Arc lit colour', a.litColor]]) {
+        checkColor(is, 'arc', label, v);
+    }
+    checkRange(is, 'arc', 'Arc radius', a.radius, 0, LIMITS.px);
+    checkRange(is, 'arc', 'Arc width', a.width, 1, LIMITS.px);
+    checkRange(is, 'arc', 'Arc glow', a.glow, 0, LIMITS.arcMaxGlow);
+    checkRange(is, 'arc', 'Head width', a.headWidth, 0, LIMITS.px);
+    const R = a.radius > 0 ? a.radius : scaleRadius(m);
+    if (a.width >= R) is.warning('arc', `The arc (${a.width} px) is as wide as its radius (${R} px).`);
+    if (R + a.glow > PANEL.cx) is.warning('arc', `The arc and its glow reach ${R + a.glow} px from centre, off the ${PANEL.width} px panel.`);
+    if ((m.needle.style !== 'none' || m.needle.shape)) {
+        is.info('arc', 'The face has a needle as well as the arc fill. Set the needle style to none for an arc-only face.');
+    }
 }
 
 function checkTitles(is, m) {
@@ -411,6 +438,7 @@ export function validateModel(m) {
     checkTicks(is, m);
     checkLabels(is, m);
     checkNeedle(is, m);
+    checkArc(is, m);
     checkTitles(is, m);
     checkReadout(is, m);
     checkPeak(is, m);

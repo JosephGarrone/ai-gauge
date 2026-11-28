@@ -43,7 +43,7 @@ future sessions. Propagate them — do not let them decay.**
 | [docs/architecture.md](docs/architecture.md) | Components, task model, data flow |
 | [docs/display-pipeline.md](docs/display-pipeline.md) | Frame budget, LVGL/DMA/TE strategy, render rules |
 | [docs/gauge-config-schema.md](docs/gauge-config-schema.md) | The gauge XML schema (normative) |
-| [docs/gauge-faces.md](docs/gauge-faces.md) | The shipped faces: PX Ranger style, its sources, generator (`tools/faces/px_faces.py`) |
+| [docs/gauge-faces.md](docs/gauge-faces.md) | The shipped faces: PX Ranger and Modern (arc) styles, their sources, generators (`tools/faces/px_faces.py`, `modern_faces.py`) |
 | [docs/gauge-xml-interface.md](docs/gauge-xml-interface.md) | Authoring guide for the web app: format, rendering model, upload API. Update with the schema |
 | [docs/boot-splash.md](docs/boot-splash.md) | The boot splash (obd-display's, recut round): generator `tools/splash/make_splash.py`, timing, costs |
 | [docs/settings-ui.md](docs/settings-ui.md) | The on-device settings UI: round layout, pages, rules for changing it, screenshots |
@@ -94,6 +94,7 @@ the architecture:
 | [0013](docs/adr/0013-selectable-map-sensor-types.md) | MAP sensor described by output (0.5–4.5 / 0–5V), reference (absolute / gauge) and a range stepped in a chosen unit (bar / psi / kPa); zero and open-circuit check follow the sensor; default 0–5V, 0–8 bar abs | The fitted sensor measured 0–5V, not the assumed 0.5–4.5V; others use gauge or compound sensors |
 | [0014](docs/adr/0014-glanceable-burn-in-aware-dial.md) | Glance-sized, burn-in-aware dial: user number format over the face (per-unit decimals, EGT to 10°), 80 px digits-only readout font, `<trend>` sparkline element (window is a setting), peak figure and fps badge off, dimmed static artwork, pixel shift, engine-off screen from ignition volts | Read from the A-pillar at a glance; the AMOLED wears where artwork never moves |
 | [0015](docs/adr/0015-obd-display-link.md) | OBD Display link: the display's 1 Hz UDP beacon (brightness) on 5005; the gauge answers its source on 5006 every 100 ms with its face's channel and sensor readings; the display feeds a catalog-id channel as ordinary telemetry. JSON, no configuration. Telemetry task stack in PSRAM | Discovery without mDNS or addresses; one socket and task, no new internal RAM; old and new ends coexist |
+| [0016](docs/adr/0016-arc-fill-faces.md) | Modern faces: an `<arc>` element (lit fill, glow, head bar, lit ticks), `needle style="none"`, negative sweep, `radius` on bands and ticks. The fill is drawn into the face buffer from per-pixel PSRAM planes, repainting only the slice the value moved through; the fade is fixed to the scale; a zone recolours the whole fill at most 4×/s | A filled arc's box is the whole dial; LVGL arcs per frame or a head-relative fade would redraw most of the screen every frame |
 
 ---
 
@@ -153,7 +154,7 @@ when the code compiles.
 documented and accepted trade. Numbers and the two designs that failed first are in
 [docs/performance.md](docs/performance.md).
 
-**Shipped faces are PX Ranger styled and generated** by `tools/faces/px_faces.py`; edit that, not the XML ([docs/gauge-faces.md](docs/gauge-faces.md)). The PX boost face runs at 61.5 fps. **`boost_custom` measures ~56 fps, below the 60fps gate**, because its shaped needle is bigger than the built-in footprint (20 × 180 px) the budget was measured at; keep shaped needles within it.
+**Shipped faces are generated**: PX Ranger by `tools/faces/px_faces.py`, Modern (`boost_modern`, `egt_modern`, lit arcs after the obd-display Modern dashboard) by `tools/faces/modern_faces.py`; edit those, not the XML ([docs/gauge-faces.md](docs/gauge-faces.md)). The Modern faces run at 66.6 fps (2.4% dirty) and hold 326 KB of PSRAM for the fill ([ADR 0016](docs/adr/0016-arc-fill-faces.md)). The PX boost face runs at 61.5 fps. **`boost_custom` measures ~56 fps, below the 60fps gate**, because its shaped needle is bigger than the built-in footprint (20 × 180 px) the budget was measured at; keep shaped needles within it.
 
 **The face editor (`tools/config-app`) is built into the firmware and served by the gauge at `/editor/`**, which is where it uploads from; GitHub Pages cannot reach a gauge, and its deploy has not run yet. Its parser is a port of `gauge_config.c`: change both in the same commit, or CI's differential test fails. Every editor file ships in the app image (`net_svc/editor_bundle.cmake`), so editor changes need a firmware build. See [docs/config-app.md](docs/config-app.md).
 

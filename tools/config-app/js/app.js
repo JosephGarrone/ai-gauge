@@ -7,14 +7,14 @@
 import { BLANK_XML, EXAMPLES } from './examples.js';
 import { parseGauge } from './parse.js';
 import {
-    renderFace, renderGuides, renderHub, renderIcon, renderNeedle, renderPeakMarker, renderPeakText, renderReadout,
-    renderStaticSvg,
+    renderArc, renderArcHead, renderFace, renderGuides, renderHub, renderIcon, renderNeedle, renderPeakMarker,
+    renderPeakText, renderReadout, renderStaticSvg,
 } from './render.js';
 import {
-    LIMITS, PANEL, defaultAlert, defaultBand, defaultLabels, defaultPeak, defaultReadout, defaultTicks, defaultTrend,
-    defaultTitle, lineHeight,
+    LIMITS, PANEL, defaultAlert, defaultArc, defaultBand, defaultLabels, defaultPeak, defaultReadout, defaultTicks,
+    defaultTrend, defaultTitle, lineHeight,
 } from './schema.js';
-import { labelRadius, needleLength, scaleRadius, valueToDeg } from './geometry.js';
+import { labelRadius, needleLength, scaleRadius, tickRadius, valueToDeg } from './geometry.js';
 import { shapeEditor } from './shape-editor.js';
 import { createSim, needleAlertColor, readoutColor, resetPeak, stepSim } from './sim.js';
 import { emptyLibrary, listFaces, loadLibrary, newKey, saveLibrary, uniqueId } from './store.js';
@@ -32,6 +32,7 @@ const SECTIONS = [
     ['ticks', 'Ticks', 'face'],
     ['labels', 'Labels', 'face'],
     ['needle', 'Needle & hub', 'face'],
+    ['arc', 'Arc fill', 'face'],
     ['titles', 'Titles', 'face'],
     ['readout', 'Readout', 'face'],
     ['peak', 'Peak hold', 'face'],
@@ -413,7 +414,7 @@ const INSPECTORS = {
                 mm.face.sweep = sweep;
             }), { class: 'chip' }))),
             form.slider('Start angle', () => m.face.startAngle, (v) => { m.face.startAngle = v; }, { min: 0, max: 359, step: 1, unit: '°', help: 'Where min sits. 225 is 7:30.' }),
-            form.slider('Sweep', () => m.face.sweep, (v) => { m.face.sweep = v; }, { min: 1, max: 360, step: 1, unit: '°', help: 'Clockwise span from min to max.' }),
+            form.slider('Sweep', () => m.face.sweep, (v) => { m.face.sweep = v === 0 ? 1 : v; }, { min: -360, max: 360, step: 1, unit: '°', help: 'Span from min to max: clockwise, or anticlockwise when negative (a mirrored dial).' }),
             form.number('Scale radius', () => m.face.radius, (v) => { m.face.radius = v; }, {
                 integer: true, min: 0, max: 233, unit: 'px', empty: 0, placeholder: `fit (${PANEL.defaultRadius})`,
                 help: 'Outer edge of the bands and the peak marker. Leave blank to fit the panel with an 8 px margin.',
@@ -437,7 +438,11 @@ const INSPECTORS = {
                 form.number('To', () => m.bands[i].to, (v) => { m.bands[i].to = v; }, { unit: m.source.unit })),
             row(
                 form.color('Colour', () => m.bands[i].color, (v) => { m.bands[i].color = v; }),
-                form.number('Width', () => m.bands[i].width, (v) => { m.bands[i].width = v; }, { integer: true, min: 0, unit: 'px', help: 'Measured inwards from the scale radius.' })))),
+                form.number('Width', () => m.bands[i].width, (v) => { m.bands[i].width = v; }, { integer: true, min: 0, unit: 'px', help: 'Measured inwards from its radius.' }),
+                form.number('Radius', () => m.bands[i].radius, (v) => { m.bands[i].radius = v; }, {
+                    integer: true, min: 0, unit: 'px', empty: 0, placeholder: () => `scale (${scaleRadius(m)})`,
+                    help: 'Outer edge. Blank for the scale radius; a band elsewhere does not push the ticks in.',
+                })))),
             button('+ Add band', () => app.commit((mm) => {
                 const last = mm.bands.at(-1);
                 const b = defaultBand();
@@ -471,6 +476,10 @@ const INSPECTORS = {
             form.color('Colour', () => t().color, (v) => { t().color = v; }, { help: 'Also inherited by tick shapes.' }),
             form.checkbox('Take band colour', () => t().bandColor, (v) => { t().bandColor = v; },
                 { help: 'A tick on a band is drawn in that band\'s colour instead. On a shared edge, the later band wins.' }),
+            form.number('Radius', () => t().radius, (v) => { t().radius = v; }, {
+                integer: true, min: 0, unit: 'px', empty: 0, placeholder: () => `inside the bands (${tickRadius({ ...m, ticks: { ...m.ticks, radius: 0 } })})`,
+                help: 'The tick circle. Built-in ticks hang inward from it; a shape with negative y reaches outward, as on an arc face.',
+            }),
             h('h3', { class: 'sub' }, 'Major'),
             row(
                 form.number('Every', () => t().majorEvery, (v) => { t().majorEvery = v; }, { min: 0, unit: m.source.unit, help: '0 for none.' }),
@@ -527,7 +536,7 @@ const INSPECTORS = {
             form.color('Colour', () => n().color, (v) => { n().color = v; }, { help: 'Flashes to the alert colour while an alert is active. Also inherited by needle and hub shapes.' }),
             shaped ? h('p', { class: 'note' }, 'A custom needle shape is set, so the built-in style settings are not used.') : null,
             row(
-                form.select('Style', () => n().style, (v) => { n().style = v; }, [['taper', 'Taper'], ['line', 'Line'], ['arrow', 'Arrow']], { disabled: shaped }),
+                form.select('Style', () => n().style, (v) => { n().style = v; }, [['taper', 'Taper'], ['line', 'Line'], ['arrow', 'Arrow'], ['none', 'None (arc fill)']], { disabled: shaped }),
                 form.number('Length', () => n().length, (v) => { n().length = v; }, {
                     integer: true, min: 0, unit: 'px', empty: 0, placeholder: () => `auto (${needleLength(m)})`, disabled: shaped,
                 })),
@@ -639,6 +648,31 @@ const INSPECTORS = {
                 form.number('Centre x', () => k().x, (v) => { k().x = v; }, { integer: true, unit: 'px', empty: null, placeholder: 'centred' }),
                 form.number('Centre y', () => k().y, (v) => { k().y = v; }, { integer: true, unit: 'px' })),
             form.color('Colour', () => k().shape.color, (v) => { k().shape.color = v; }, { optional: true, inherited: () => '#ffffff', help: 'Parts without their own colour take this.' }),
+        ];
+    },
+
+    arc(form, m) {
+        const on = !!m.arc;
+        const head = sectionHead('Arc fill', 'The value as a lit band along the scale, in place of a needle: a fade from the start colour to the fill colour, a glow, a bright head, and the ticks and labels it has passed lit. An active alert\'s colour replaces the fill. Set the needle style to none for an arc-only face.',
+            presenceToggle('Arc fill on', on, (v) => app.commit((mm) => { mm.arc = v ? defaultArc() : null; }, { rebuild: true })));
+        if (!on) return [head];
+        const a = () => m.arc;
+        return [
+            head,
+            row(
+                form.number('Radius', () => a().radius, (v) => { a().radius = v; }, {
+                    integer: true, min: 0, unit: 'px', empty: 0, placeholder: () => `scale (${scaleRadius(m)})`, help: 'Outer edge of the band.',
+                }),
+                form.number('Width', () => a().width, (v) => { a().width = v; }, { integer: true, min: 1, unit: 'px', help: 'Measured inwards from the radius.' }),
+                form.number('Glow', () => a().glow, (v) => { a().glow = v; }, { integer: true, min: 0, max: LIMITS.arcMaxGlow, unit: 'px', help: 'How far the glow reaches past each edge.' })),
+            row(
+                form.color('Start colour', () => a().startColor, (v) => { a().startColor = v; }, { help: 'The fill at the start of the scale.' }),
+                form.color('Fill colour', () => a().color, (v) => { a().color = v; }, { help: 'The fill at full scale, and its glow.' })),
+            row(
+                form.color('Head colour', () => a().headColor, (v) => { a().headColor = v; }),
+                form.number('Head width', () => a().headWidth, (v) => { a().headWidth = v; }, { integer: true, min: 0, unit: 'px', help: '0 for no head bar.' })),
+            form.checkbox('Light the ticks and labels it passes', () => a().litTicks, (v) => { a().litTicks = v; }),
+            form.color('Lit colour', () => a().litColor, (v) => { a().litColor = v; }, { help: 'Lit major ticks and labels. Minor ticks take the fill colour.' }),
         ];
     },
 
@@ -933,7 +967,7 @@ const INSPECTORS = {
 const layers = {};
 
 function setupPreview() {
-    for (const id of ['face', 'peak', 'needle', 'hub', 'readout', 'peaktext', 'guides']) layers[id] = $(`layer-${id}`);
+    for (const id of ['face', 'arc', 'peak', 'needle', 'hub', 'readout', 'peaktext', 'guides']) layers[id] = $(`layer-${id}`);
 
     const slider = $('value-slider');
     const number = $('value-number');
@@ -1059,7 +1093,11 @@ function frame(now) {
         const dynamic = `${deg.toFixed(3)}|${st.peak}|${needleAlertColor(m, st)}|${readoutColor(m, st)}|${st.displayed}`;
         if (dynamic !== lastDynamic) {
             try {
-                layers.needle.innerHTML = renderIcon(m, needleAlertColor(m, st)) + renderNeedle(m, deg, needleAlertColor(m, st));
+                // The fill takes an active alert's colour steadily; only the readout, icon and needle flash.
+                const zone = st.alertActive && st.activeIdx >= 0 ? m.alerts[st.activeIdx].color : null;
+                layers.arc.innerHTML = renderArc(m, st.displayed, zone);
+                layers.needle.innerHTML = renderArcHead(m, st.displayed, zone) + renderIcon(m, needleAlertColor(m, st)) +
+                    renderNeedle(m, deg, needleAlertColor(m, st));
                 layers.peak.innerHTML = renderPeakMarker(m, st.peak);
                 layers.readout.innerHTML = renderReadout(m, st.displayed, readoutColor(m, st));
                 layers.peaktext.innerHTML = renderPeakText(m, st.peak);

@@ -33,12 +33,15 @@ export function polar(r, deg) {
     return [r * Math.sin(deg * DEG), -r * Math.cos(deg * DEG)];
 }
 
+/** The widest band drawn at the scale radius; a band with its own radius does not push the ticks in. */
 export function widestBand(m) {
-    return m.bands.reduce((w, b) => Math.max(w, b.width), 0);
+    const R = scaleRadius(m);
+    return m.bands.reduce((w, b) => ((b.radius ?? 0) === 0 || b.radius === R ? Math.max(w, b.width) : w), 0);
 }
 
 /** tick_outer: the circle ticks hang from, inside the band ring. */
 export function tickRadius(m) {
+    if (m.ticks?.radius > 0) return m.ticks.radius;
     const widest = widestBand(m);
     return scaleRadius(m) - widest - (widest ? 6 : 0);
 }
@@ -472,4 +475,17 @@ export function builtinNeedleParts(m) {
         if (t > 0) capsule(0, t, n.width);
     }
     return parts.filter((p) => p.kind === 'circle' || Math.abs(polygonArea(p.points)) >= 0.25);
+}
+
+/* ----------------------------------------------------------------------- arc -------- */
+
+/** Outer edge of the <arc> fill: its own radius, or the scale's. */
+export function arcRadius(m) {
+    return m.arc.radius > 0 ? m.arc.radius : scaleRadius(m);
+}
+
+/** Fraction of the scale a value sits at, clamped to 0..1. */
+export function valueFrac(m, value) {
+    const span = m.source.max - m.source.min;
+    return span > 0 ? Math.min(1, Math.max(0, (value - m.source.min) / span)) : 0;
 }

@@ -44,7 +44,7 @@ export const FONT_NAMES = Object.freeze(Object.keys(FONTS));
 /** LVGL's fallback when a font name is unknown. Not selectable, but a preview may need it. */
 export const FALLBACK_FONT = { size: 14, lineHeight: 16 };
 
-export const NEEDLE_STYLES = Object.freeze(['taper', 'line', 'arrow']);
+export const NEEDLE_STYLES = Object.freeze(['taper', 'line', 'arrow', 'none']);
 export const PANEL_SHAPES = Object.freeze(['round', 'square']);
 
 /**
@@ -67,6 +67,7 @@ export const LIMITS = Object.freeze({
     alerts: 4,
     trendMinPx: 8,    // GAUGE_CONFIG_TREND_MIN_PX
     trendMaxWidth: 466, // GAUGE_CONFIG_TREND_MAX_W_PX
+    arcMaxGlow: 32,     // GAUGE_CONFIG_ARC_MAX_GLOW_PX
     deviceFaces: 12,
     shapeParts: 6,
     shapePoints: 64,
@@ -115,7 +116,7 @@ export function defaultTicks() {
         majorEvery: 10, minorEvery: 0,
         majorLen: 20, minorLen: 10,
         majorWidth: 4, minorWidth: 2,
-        color: '#ffffff', bandColor: false,
+        color: '#ffffff', bandColor: false, radius: 0,
         majorShape: null, minorShape: null,
     };
 }
@@ -133,7 +134,7 @@ export function defaultNeedle() {
 }
 
 export function defaultBand() {
-    return { from: 0, to: 0, color: '#ffffff', width: 18 };
+    return { from: 0, to: 0, color: '#ffffff', width: 18, radius: 0 };
 }
 
 export function defaultTitle() {
@@ -154,6 +155,14 @@ export function defaultPeak() {
 /** <trend>: the sparkline strip. x and y null mean centred, and in the gap under the dial; fill null, none. */
 export function defaultTrend() {
     return { x: null, y: null, width: 200, height: 50, lineWidth: 3, color: '#17caff', fill: null, alertColors: true };
+}
+
+/** <arc>: the value as a lit band along the scale. radius 0 means the face radius. */
+export function defaultArc() {
+    return {
+        radius: 0, width: 26, color: '#00d2f0', startColor: '#0065b0', glow: 10,
+        headColor: '#ffffff', headWidth: 4, litTicks: true, litColor: '#ebf0f2',
+    };
 }
 
 export function defaultAlert() {
@@ -177,6 +186,7 @@ export function defaultModel() {
         peak: null,
         icon: null,
         trend: null,
+        arc: null,
         alerts: [],
     };
 }

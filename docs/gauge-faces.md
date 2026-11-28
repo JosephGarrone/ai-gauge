@@ -6,12 +6,20 @@ do.
 | File | Look | Generated |
 |---|---|---|
 | `boost.xml` | PX Ranger style, 0–30 psi, redline 26 | `tools/faces/px_faces.py` |
-| `egt.xml` | PX Ranger style, 0–900 °C, redline 750 | `tools/faces/px_faces.py` |
+| `egt.xml` | PX Ranger style, 0–900 °C, yellow 380 / orange 440 / red 500 | `tools/faces/px_faces.py` |
+| `boost_modern.xml` | Modern style (lit arc, mirrored), 0–30 psi, redline 26 | `tools/faces/modern_faces.py` |
+| `egt_modern.xml` | Modern style (lit arc), 0–900 °C, yellow 380 / orange 440 / red 500 | `tools/faces/modern_faces.py` |
 | `boost_custom.xml` | Hand-written test face for every custom-shape feature | no |
 | built-in fallback (`gauge_config_default.c`) | PX boost face with the built-in needle | `px_faces.py --default` |
 
-**Edit `px_faces.py` and regenerate; do not edit the generated XML or C string.** The script holds
-the proportions below, and the three outputs have to stay one design.
+**Edit the generator and regenerate; do not edit the generated XML or C string.** Each script holds
+its style's proportions, and its outputs have to stay one design. `modern_faces.py` takes its icons
+and alert colours from `px_faces.py`, so the two styles share them.
+
+Every face is picked the same way: Settings → Faces lists every file on the gauge, and the editor
+can upload any of them. A gauge updated over the air does not get new shipped faces on its storage
+(OTA writes the app, not LittleFS): open them from the editor's examples, which ship in the app
+image, and upload them.
 
 ## The PX Ranger style
 
@@ -89,6 +97,65 @@ flash red at 2 Hz.
 These screenshots predate the 2026-11-27 layout (bigger readout, sparkline, dimmed ring); retake
 them on hardware. Screenshots taken with `tools/remote/gauge_remote.py` while values were pushed over UDP telemetry;
 the green fps counter is the display overlay, stalled by the screenshot itself.
+
+## The Modern style
+
+Two faces after the obd-display **Modern dashboard's arcs** (`ArcGauge.cs`, laid out in
+`ModernDashboardView.axaml`; *The Modern dashboard* and *The arcs and the foot rail* in its
+`docs/desktop-app-architecture.md`; palette from `Styles/Colors.axaml`). Rendered by the `<arc>`
+element ([ADR 0016](adr/0016-arc-fill-faces.md)), not by porting the Avalonia control.
+
+![boost_modern](images/faces/boost_modern.png) ![boost_modern at the redline](images/faces/boost_modern_redline.png)
+
+![egt_modern](images/faces/egt_modern.png) ![egt_modern in the orange zone](images/faces/egt_modern_orange.png)
+
+On the gauge, 2026-11-28, values fed over UDP telemetry.
+
+| Dashboard | Here |
+|---|---|
+| A thick band in place of a needle, fading from `IpcBlue` #0065b0 to `IpcCyanBright` #00d2f0 | 26 px band, outer edge at 158 px, same colours. The fade runs along the **scale**, not along the fill (see below) |
+| A glow of five faint passes reaching 2–10 px past the band | An analytic glow, 21% at the band's edge falling to 0 at 10 px, computed per pixel once |
+| A white head bar, 3.5 px over a 9 px halo of the fill at 45% | `#ffffff` 4 px over a 9 px halo at 45% |
+| The whole fill amber or red past the thresholds, fading up from 35% of that colour | The same, from the face's alerts: boost red above 26; EGT yellow from 380, orange from 440, red above 500. Steady; the readout and icon flash in red as on the PX faces |
+| Warning and danger as a slim stripe on the band's outer edge (`#b0ffb000`, `#d0e62323` over the track) | 7 px stripes, the tints pre-mixed over the track `#0b2031`: yellow, orange and red for EGT |
+| A hairline guide inside the band (`#3300bee1`) | A 2 px band at radius 128 (a 1 px arc breaks up on the panel), `#042d36` |
+| Ticks outside the band, majors 0.55 × band long, minors half; lit (white, minors in the fill colour) once passed | 14 and 7 px shaped ticks hanging outward from radius 162; lit as a whole as the fill reaches each |
+| Numerals outside the ticks in `IpcGrey`, white once passed | `montserrat_32` (boost) and `montserrat_26` (EGT, three digits) in `#969ea2`, swapped to `#ebf0f2` |
+| The boost arc mirrored, running anticlockwise | `start-angle="125" sweep="-250"` |
+| The RPM arc clockwise | EGT, clockwise, so a pair of gauges reads as the dashboard's two arcs |
+| Near-black ground `#05090b`, nothing boxed | The same. On the AMOLED it is close to off, and nothing on the face has a box |
+
+Kept from the PX faces, at the same sizes ([ADR 0014](adr/0014-glanceable-burn-in-aware-dial.md)): the icon
+above the readout (green, alert colour and flashing past the redline), the 80 px readout, the unit
+under it (22 px; `psi` lower case, as on the dashboard), the optional peak figure under that, the
+sparkline coloured by zone in the gap between the arc's ends (180 px wide there), the peak marker
+across the band, and the brightness from the OBD Display link (it is global, not a face setting).
+
+### Deliberate departures
+
+- **The fade is fixed to the scale.** On the dashboard the fade is a conic gradient stretched over
+  the fill, so its head is always the full colour. On the gauge that would recolour every lit pixel
+  on every frame; fixed to the scale, a moving value redraws only the slice it moved through. At
+  low readings the head is therefore a darker blue than on the dashboard; the white head bar is
+  still the brightest thing on the scale.
+- **No boost-target marker.** The dashboard's wedge and bar show the PCM's target boost. The gauge
+  asks the display for one channel, its face's own ([ADR 0015](adr/0015-obd-display-link.md)), so
+  it has no target. Adding it needs a second channel in the link, on both ends.
+- **No eased sweep between samples.** The dashboard interpolates linearly between polled boost
+  samples. The gauge's own MAP sensor samples at 100 Hz, and the faces' damping (0.88 per 5 ms
+  sample, a ~40 ms time constant) smooths the 10 Hz telemetry steps instead.
+- **Symmetric arcs.** The dashboard's arcs run 250° from ±135°, leaning toward the page's centre in
+  their frames. On a round dial alone they are centred: ±125°.
+- **Montserrat, not Ford Antenna**, as on the PX faces.
+
+### Burn-in
+
+The fill lights wherever the reading sits. An EGT cruising at 300 °C keeps the first third of its
+arc lit for as long as the drive lasts, where a needle lights a 20 px strip; boost at cruise lights
+the first few psi. The fade puts the dimmest colours at the start of the scale, the static artwork
+is dim (`#596267` ticks, `#969ea2` numerals, `#0b2031` track), and pixel shift applies as on every
+face ([ADR 0014](adr/0014-glanceable-burn-in-aware-dial.md)). The PX faces stay for a driver who
+prefers less wear.
 
 ## Measured
 

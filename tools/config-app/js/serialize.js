@@ -94,7 +94,7 @@ export function serializeGauge(m) {
     ])}>`);
 
     for (const b of m.bands) {
-        w.line(2, `<band${attrs([['from', b.from], ['to', b.to], ['color', b.color], ['width', b.width, b.width !== 18]])}/>`);
+        w.line(2, `<band${attrs([['from', b.from], ['to', b.to], ['color', b.color], ['width', b.width, b.width !== 18], ['radius', b.radius, b.radius !== 0]])}/>`);
     }
 
     if (m.ticks) {
@@ -108,6 +108,7 @@ export function serializeGauge(m) {
             ['minor-width', t.minorWidth, !t.minorShape && t.minorWidth !== 2],
             ['color', t.color],
             ['band-color', 'true', t.bandColor],
+            ['radius', t.radius, t.radius !== 0],
         ]);
         if (t.majorShape || t.minorShape) {
             w.line(2, `<ticks${a}>`);
@@ -197,6 +198,21 @@ export function serializeGauge(m) {
             ['color', t.color],
             ['fill', t.fill],
             ['alert-colors', 'false', !t.alertColors],
+        ])}/>`);
+    }
+
+    if (m.arc) {
+        const a = m.arc;
+        w.line(1, `<arc${attrs([
+            ['radius', a.radius, a.radius !== 0],
+            ['width', a.width],
+            ['color', a.color],
+            ['start-color', a.startColor],
+            ['glow', a.glow],
+            ['head-color', a.headColor],
+            ['head-width', a.headWidth],
+            ['lit-ticks', 'false', !a.litTicks],
+            ['lit-color', a.litColor],
         ])}/>`);
     }
 

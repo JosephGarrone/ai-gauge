@@ -104,6 +104,12 @@ export const CASES = {
     barePeak: doc('<peak/>'),
     trend: doc('<trend x="120" y="380" width="220" height="40" line-width="2" color="#00ff00" fill="#003300" alert-colors="false"/>'),
     bareTrend: doc('<trend/>'),
+    arc: doc('<face start-angle="125" sweep="-250" radius="158"><band from="0" to="100" color="#042d36" width="2" radius="128"/>' +
+        '<ticks major-every="10" radius="162"/></face><arc radius="150" width="20" color="#00ff00" start-color="#003300" glow="8" ' +
+        'head-color="#ffffff" head-width="3" lit-ticks="false" lit-color="#eeeeee"/><needle style="none" pivot-radius="0"/>'),
+    bareArc: doc('<arc/>'),
+    arcClamps: doc('<arc glow="99" width="0"/><arc head-width="-3" color="nope" radius="5000"/>'),
+    sweepSigns: doc('<face sweep="-0.5"/><face sweep="-400"/><face sweep="-1"/><face sweep="-360"/>'),
     icon: doc('<icon x="200" y="170" color="#8f9aa0"><circle r="15"/><circle r="11" color="#000000"/><polygon points="0,-15 22,-15 22,-8 0,-8"/></icon>'),
     iconRepeated: doc('<icon y="10"><circle r="3"/></icon><icon y="20"/><icon><polygon points="0,0 1,0"/></icon>'),
     trendClamps: doc('<trend width="2" height="-5" fill="nope"/><trend width="9999"/>'),
@@ -228,16 +234,16 @@ export function randomDocuments(count, seed = 1) {
         () => `<panel ${attrs([['shape', () => pick(['round', 'square', 'oval'])], ['width', num], ['height', num]])}/>`,
         () => `<face ${attrs([['start-angle', num], ['sweep', num], ['background', colour], ['radius', num]])}>`,
         () => '</face>',
-        () => `<band ${attrs([['from', num], ['to', num], ['color', colour], ['width', num]])}/>`,
+        () => `<band ${attrs([['from', num], ['to', num], ['color', colour], ['width', num], ['radius', num]])}/>`,
         () => {
             const a = attrs([['major-every', num], ['minor-every', num], ['major-len', num], ['minor-len', num],
-                ['major-width', num], ['minor-width', num], ['color', colour]]);
+                ['major-width', num], ['minor-width', num], ['color', colour], ['radius', num]]);
             if (r() < 0.3) return `<ticks ${a}/>`;
             return `<ticks ${a}>${[slot('major-shape'), slot('minor-shape'), r() < 0.2 ? part() : ''].join('')}</ticks>`;
         },
         () => `<labels ${attrs([['every', num], ['font', font], ['color', colour], ['radius', num], ['format', fmt]])}/>`,
         () => {
-            const a = attrs([['style', () => pick(['taper', 'line', 'arrow', 'sword'])], ['length', num], ['width', num],
+            const a = attrs([['style', () => pick(['taper', 'line', 'arrow', 'none', 'sword'])], ['length', num], ['width', num],
                 ['tail', num], ['color', colour], ['pivot-radius', num]]);
             if (r() < 0.3) return `<needle ${a}/>`;
             return `<needle ${a}>${[slot('shape'), slot('hub'), r() < 0.2 ? slot('major-shape') : ''].join('')}</needle>`;
@@ -247,6 +253,8 @@ export function randomDocuments(count, seed = 1) {
         () => `<peak ${attrs([['color', colour], ['length', num], ['width', num], ['show-value', bool], ['value-y', num], ['font', font], ['format', fmt], ['prefix', text]])}/>`,
         () => (r() < 0.3 ? `<icon ${attrs([['x', num], ['y', num], ['color', colour]])}/>` : `<icon ${attrs([['x', num], ['y', num], ['color', colour]])}>${part()}${part()}</icon>`),
         () => `<trend ${attrs([['x', num], ['y', num], ['width', num], ['height', num], ['line-width', num], ['color', colour], ['fill', colour], ['alert-colors', bool]])}/>`,
+        () => `<arc ${attrs([['radius', num], ['width', num], ['color', colour], ['start-color', colour], ['glow', num],
+            ['head-color', colour], ['head-width', num], ['lit-ticks', bool], ['lit-color', colour]])}/>`,
         () => `<alert ${attrs([['above', num], ['below', num], ['color', colour], ['flash-hz', num], ['chime', bool]])}/>`,
         () => pick(['<!-- note -->', '<unknown a="1"/>', slot('hub'), part(), '</needle>', '</ticks>']),
     ];

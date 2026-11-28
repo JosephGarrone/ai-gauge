@@ -4,8 +4,8 @@
  * Split into layers that match the firmware's stacking order, so the app can rebuild the static face
  * only when the model changes and redraw just the moving layers each frame:
  *
- *   face (background, bands, minor ticks, major ticks, labels, titles) < peak marker < needle < hub
- *   < readout < peak value
+ *   face (background, bands, minor ticks, major ticks, labels, titles) < arc fill < peak marker
+ *   < arc head < needle < hub < readout < peak value
  *
  * Built-in geometry is rounded to whole pixels where the firmware rounds it. Text uses Montserrat,
  * the same family the device's fonts are cut from; its metrics will not match LVGL to the pixel.
@@ -13,8 +13,8 @@
 
 import { FONT_BASELINE, LIMITS, PANEL, fontSize, lineHeight } from './schema.js';
 import {
-    labelRadius, labelStep, lround, needleLength, polar, scaleRadius, shapeExtent, stepValues,
-    tickRadius, valueToDeg,
+    arcRadius, labelRadius, labelStep, lround, needleLength, polar, scaleRadius, shapeExtent, stepValues,
+    tickRadius, valueFrac, valueToDeg,
 } from './geometry.js';
 import { formatNumber, truncateBytes } from './printf.js';
 
@@ -73,12 +73,14 @@ export function shapeParts(shape, inherited, alert = null) {
 
 function bandPath(m, b) {
     // lv_draw_arc() takes whole degrees; round in LVGL's frame (0 at 3 o'clock) as arc_deg() does.
-    const a0 = lround(valueToDeg(m, b.from) - 90) + 90;
-    const a1 = lround(valueToDeg(m, b.to) - 90) + 90;
+    // An anticlockwise scale (negative sweep) draws the same arc from its other end.
+    let a0 = lround(valueToDeg(m, b.from) - 90) + 90;
+    let a1 = lround(valueToDeg(m, b.to) - 90) + 90;
+    if (a1 < a0) [a0, a1] = [a1, a0];
     const extent = a1 - a0;
     if (extent <= 0 || b.width <= 0) return '';
 
-    const R = scaleRadius(m);
+    const R = b.radius > 0 ? b.radius : scaleRadius(m);
     const r = Math.max(0, R - b.width);
     const pt = (rad, deg) => polar(rad, deg).map((v, i) => n(v + (i ? CY : CX))).join(' ');
 
@@ -258,6 +260,7 @@ export function renderTrend(m) {
 /** The needle at schema angle `deg`. `alert` recolours parts that inherit the needle colour. */
 export function renderNeedle(m, deg, alert = null) {
     const nd = m.needle;
+    if (!nd.shape && nd.style === 'none') return '';
     if (nd.shape) {
         return `<g transform="translate(${CX} ${CY}) rotate(${n(deg)})">${shapeParts(nd.shape, nd.color, alert)}</g>`;
     }
@@ -331,6 +334,100 @@ export function renderPeakText(m, peak) {
     return text(str, CX, peakValueTop(m), k.font, k.color, ' data-section="peak" data-drag="peak"');
 }
 
+/* ----------------------------------------------------------------------- arc -------- */
+
+function hexMix(a, b, t) {
+    const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+    const ch = (s) => Math.round(((pa >> s) & 0xff) + ((((pb >> s) & 0xff) - ((pa >> s) & 0xff)) * t))
+        .toString(16).padStart(2, '0');
+    return `#${ch(16)}${ch(8)}${ch(0)}`;
+}
+
+/** An annular sector between fractions f0 and f1 of the scale, from radius r0 out to r1. */
+function sectorPath(m, f0, f1, r0, r1) {
+    const d0 = m.face.startAngle + f0 * m.face.sweep;
+    const d1 = m.face.startAngle + f1 * m.face.sweep;
+    const [a0, a1] = d1 < d0 ? [d1, d0] : [d0, d1];
+    const large = a1 - a0 > 180 ? 1 : 0;
+    const pt = (rad, deg) => polar(rad, deg).map((v, i) => n(v + (i ? CY : CX))).join(' ');
+    return `M ${pt(r1, a0)} A ${r1} ${r1} 0 ${large} 1 ${pt(r1, a1)} L ${pt(r0, a1)} A ${r0} ${r0} 0 ${large} 0 ${pt(r0, a0)} Z`;
+}
+
+/**
+ * The <arc> fill at `value` (gauge_render.c, "arc"): a fade along the scale from start-color to
+ * color (or from a dark shade of an active alert's colour to that colour), a glow past both edges,
+ * and the ticks and labels it has passed lit. Drawn in 2-degree steps; the device fades per pixel.
+ */
+export function renderArc(m, value, alert = null) {
+    const a = m.arc;
+    if (!a || value === null) return '';
+    const frac = valueFrac(m, value);
+    const R = arcRadius(m);
+    const r = Math.max(0, R - a.width);
+    const fill = alert ?? a.color;
+    const start = alert ? hexMix(m.face.background, alert, 0.35) : a.startColor;
+    let out = '<g data-section="arc">';
+    if (frac > 0.001) {
+        for (let k = 1; k <= 5 && a.glow > 0; k++) {
+            const g = (a.glow * k) / 5;
+            out += `<path d="${sectorPath(m, 0, frac, Math.max(0, r - g), R + g)}" fill="${fill}" opacity="0.045"/>`;
+        }
+        const steps = Math.max(1, Math.ceil((Math.abs(m.face.sweep) * frac) / 2));
+        for (let i = 0; i < steps; i++) {
+            const f0 = (frac * i) / steps, f1 = (frac * (i + 1)) / steps;
+            out += `<path d="${sectorPath(m, f0, Math.min(frac, f1 + 0.002), r, R)}" fill="${hexMix(start, fill, (f0 + f1) / 2)}"/>`;
+        }
+    }
+    // Ticks and labels the fill has passed, in the lit colour (minor ticks in the fill's).
+    if (a.litTicks) {
+        const t = m.ticks;
+        if (t) {
+            const outer = tickRadius(m);
+            for (const [every, len, width, shape, color] of [
+                [t.minorEvery, t.minorLen, t.minorWidth, t.minorShape, fill],
+                [t.majorEvery, t.majorLen, t.majorWidth, t.majorShape, a.litColor],
+            ]) {
+                for (const v of stepValues(m, every, LIMITS.tickCount)) {
+                    if (valueFrac(m, v) > frac) continue;
+                    const deg = valueToDeg(m, v);
+                    if (shape) {
+                        const [dx, dy] = polar(outer, deg);
+                        out += `<g transform="translate(${n(CX + dx)} ${n(CY + dy)}) rotate(${n(deg)})">${shapeParts(shape, color, color)}</g>`;
+                    } else if (width > 0) {
+                        const [x1, y1] = polarPx(outer, deg);
+                        const [x2, y2] = polarPx(outer - len, deg);
+                        out += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${width}"/>`;
+                    }
+                }
+            }
+        }
+        const l = m.labels;
+        if (l) {
+            const lr = labelRadius(m);
+            for (const v of stepValues(m, labelStep(m), LIMITS.labelCount)) {
+                if (valueFrac(m, v) > frac) continue;
+                const str = truncateBytes(formatNumber(l.format, v), LIMITS.labelText);
+                const [x, y] = polarPx(lr, valueToDeg(m, v));
+                out += `<rect x="${x - 40}" y="${y - lineHeight(l.font) / 2}" width="80" height="${lineHeight(l.font)}" fill="none"/>`;
+                out += centredText(str, x, y, l.font, a.litColor);
+            }
+        }
+    }
+    return out + '</g>';
+}
+
+/** The arc's head bar: a halo in the fill's colour under a bright bar across the band. */
+export function renderArcHead(m, value, alert = null) {
+    const a = m.arc;
+    if (!a || value === null || a.headWidth <= 0 || valueFrac(m, value) <= 0.001) return '';
+    const deg = valueToDeg(m, value);
+    const R = arcRadius(m);
+    const [x1, y1] = polarPx(R + 3, deg);
+    const [x2, y2] = polarPx(R - a.width - 3, deg);
+    const ln = (c, w, op) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${c}" stroke-width="${w}" stroke-linecap="round" opacity="${op}"/>`;
+    return ln(alert ?? a.color, a.headWidth + 5, 0.45) + ln(a.headColor, a.headWidth, 1);
+}
+
 /* --------------------------------------------------------------------- guides ------- */
 
 /** Construction lines for the designer: panel inset, scale, tick and label circles, needle reach. */
@@ -359,6 +456,7 @@ export function renderStaticSvg(m, value, { prefix = 'thumb', size = PANEL.width
     const deg = valueToDeg(m, value);
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PANEL.width} ${PANEL.height}" width="${size}" height="${size}">` +
         `<clipPath id="${prefix}-clip"><circle cx="${CX}" cy="${CY}" r="${PANEL.cx}"/></clipPath>` +
-        `<g clip-path="url(#${prefix}-clip)">${renderFace(m, prefix)}${renderIcon(m)}${renderNeedle(m, deg)}${renderHub(m)}` +
+        `<g clip-path="url(#${prefix}-clip)">${renderFace(m, prefix)}${renderArc(m, value)}${renderArcHead(m, value)}` +
+        `${renderIcon(m)}${renderNeedle(m, deg)}${renderHub(m)}` +
         `${m.readout ? renderReadout(m, value) : ''}</g></svg>`;
 }

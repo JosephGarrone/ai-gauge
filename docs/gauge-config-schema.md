@@ -45,7 +45,9 @@ Files live on the LittleFS `storage` partition at `/storage/gauges/<id>.xml`.
 
 A face using custom tick, needle and hub shapes is in
 [../firmware/assets/gauges/boost_custom.xml](../firmware/assets/gauges/boost_custom.xml); see
-[Shapes](#shapes).
+[Shapes](#shapes). A face that shows the value as a lit arc instead of a needle, mirrored to run
+anticlockwise, is [../firmware/assets/gauges/boost_modern.xml](../firmware/assets/gauges/boost_modern.xml);
+see [`<arc>`](#arc-01).
 
 ## Elements
 
@@ -84,12 +86,13 @@ because band ranges are clamped against it as they are read.
 The static dial artwork. Angles are **degrees clockwise from 12 o'clock**, so 90 is the 3
 o'clock position and 225 is 7:30. The defaults (`start-angle="225"`, `sweep="270"`) give
 the conventional gauge: starting at lower-left and sweeping clockwise over the top to
-lower-right.
+lower-right. A negative sweep mirrors the dial: `start-angle="125" sweep="-250"` starts at the
+lower right and runs anticlockwise over the top.
 
 | Attribute | Type | Default | Meaning |
 |---|---|---|---|
 | `start-angle` | float | `225` | Angle of the `min` end of the scale |
-| `sweep` | float | `270` | Total angular sweep, clockwise |
+| `sweep` | float, 1–360 or −360–−1 | `270` | Total angular sweep: clockwise, or anticlockwise when negative. Clamped by its sign; `0` clamps to `1` |
 | `background` | colour | `#000000` | Face fill |
 | `radius` | int | fits panel | Outer radius of the scale arc |
 
@@ -101,7 +104,8 @@ A coloured arc segment marking a value range.
 |---|---|---|---|
 | `from`, `to` | float | *required* | Value range, clamped to the `<source>` range |
 | `color` | colour | *required* | Band colour |
-| `width` | int | `18` | Radial thickness in pixels, measured inwards from the scale radius |
+| `width` | int | `18` | Radial thickness in pixels, measured inwards from its radius |
+| `radius` | int | `0` (the scale radius) | Outer edge. A band at its own radius (a hairline guide inside an arc, say) does not count towards the ticks' derived radius |
 
 #### `<ticks>` (0..1, inside `<face>`)
 
@@ -113,6 +117,7 @@ A coloured arc segment marking a value range.
 | `major-width`, `minor-width` | int | `4`, `2` | Tick thickness in pixels |
 | `color` | colour | `#ffffff` | Tick colour |
 | `band-color` | bool | `false` | Each tick takes the colour of the band it sits on. Where bands overlap or share an edge, the one later in the file wins, so in an ascending run a tick on a boundary takes the band above. A tick on no band keeps `color`. Shape parts with their own colour keep it |
+| `radius` | int | `0` (derived) | The tick circle. `0` puts it 6 px inside the widest band drawn at the scale radius (or at the scale radius with none). Built-in ticks hang inward from it; a shaped tick with negative y reaches outward, which is how ticks sit outside an `<arc>` |
 
 Optional children: `<major-shape>` and `<minor-shape>` replace the built-in rectangular ticks
 with a custom outline, and make the matching `-len` and `-width` attributes irrelevant. See
@@ -132,7 +137,7 @@ with a custom outline, and make the matching `-len` and `-width` attributes irre
 
 | Attribute | Type | Default | Meaning |
 |---|---|---|---|
-| `style` | `taper` \| `line` \| `arrow` | `taper` | Needle shape |
+| `style` | `taper` \| `line` \| `arrow` \| `none` | `taper` | Needle shape. `none` draws no needle, for a face whose `<arc>` shows the value. Firmware older than 2026-11-28 does not know `none` and draws a taper (one warning) |
 | `length` | int | 0.72 × radius | Pivot to tip, in pixels |
 | `width` | int | `12` | Width at the pivot end |
 | `color` | colour | `#ff1744` | |
@@ -141,6 +146,37 @@ with a custom outline, and make the matching `-len` and `-width` attributes irre
 
 Optional children: `<shape>` replaces the needle drawn by `style`, `length`, `width` and
 `tail`. `<hub>` replaces the `pivot-radius` circle. See [Shapes](#shapes).
+
+### `<arc>` (0..1)
+
+The value as a lit band along the scale, as on the obd-display Modern dashboard: it fills from the
+start of the scale to the value, fading from `start-color` to `color` along the scale, over a soft
+glow of its own colour, with a bright head bar at the value. Ticks and labels the fill has passed
+are lit. Omit the element and there is no fill. Usually paired with `<needle style="none">` and a
+`<band>` in a dark track colour under it.
+
+| Attribute | Type | Default | Meaning |
+|---|---|---|---|
+| `radius` | int | `0` (the scale radius) | Outer edge of the fill |
+| `width` | int | `26` | Thickness, inwards from `radius`. `0` clamps to `1` |
+| `color` | colour | `#00d2f0` | The fill at full scale, and its glow and head halo |
+| `start-color` | colour | `#0065b0` | The fill at the start of the scale |
+| `glow` | int 0–32 | `10` | How far the glow reaches past each edge, in px. `0` = none |
+| `head-color` | colour | `#ffffff` | The bar across the fill at the value |
+| `head-width` | int | `4` | Its thickness. `0` = no head bar |
+| `lit-ticks` | bool | `true` | Ticks and labels at or below the value are lit, each as a whole as the fill reaches it |
+| `lit-color` | colour | `#ebf0f2` | Lit major ticks and labels. Lit minor ticks take the fill's colour |
+
+- **Alerts recolour it.** While an alert is active the whole fill takes its colour, fading up from
+  a dark shade of it (35% of the way from `face@background`), steadily: the fill does not flash.
+  The readout, icon and head still flash at the alert's `flash-hz`. A value that sits on an
+  alert's edge recolours the fill at most four times a second.
+- **The fade is along the scale, not along the fill.** The colour at a point depends only on where
+  it is on the scale, so a moving value redraws only the slice it moved through (see
+  [display-pipeline.md](display-pipeline.md#3c-the-arc-fill-repaints-only-the-slice-it-moved-through)).
+- **Memory.** About 6 bytes of PSRAM per pixel of the annulus it can light (the fill, its glow, and
+  with `lit-ticks` the ticks), plus two small tiles per label: ~330 KB for the shipped Modern faces.
+  If PSRAM runs short the face is shown without its fill.
 
 ### `<title>` (0..4)
 
@@ -391,7 +427,7 @@ The hub never flashes, just as the built-in hub never has.
 | Unknown major `version` | File rejected; fall back to default face |
 | Missing required attribute | File rejected; fall back to default face |
 | `max <= min` | File rejected; fall back to default face |
-| Number out of documented range | Clamped, warning logged |
+| Number out of documented range | Clamped, warning logged (a negative `sweep` is clamped to −360…−1) |
 | Band range outside source range | Clamped to the source range |
 | Malformed colour | Documented default substituted, warning counted |
 | `format` other than literal text, `%%` and exactly one `%f`/`%e`/`%g` (flags, width and precision allowed) | Previous value kept (normally the default), warning counted |

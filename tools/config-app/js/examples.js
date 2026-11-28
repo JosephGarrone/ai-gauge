@@ -7,6 +7,8 @@
 export const EXAMPLES = [
     { file: 'boost.xml', title: 'Boost, 0–30 psi' },
     { file: 'egt.xml', title: 'EGT, 0–900 °C' },
+    { file: 'boost_modern.xml', title: 'Boost, Modern arc, 0–30 psi' },
+    { file: 'egt_modern.xml', title: 'EGT, Modern arc, 0–900 °C' },
     { file: 'boost_custom.xml', title: 'Boost with custom ticks, needle and hub' },
 ];
 

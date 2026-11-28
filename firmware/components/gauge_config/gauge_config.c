@@ -496,6 +496,16 @@ void gauge_config_set_defaults(gauge_config_t *cfg)
     cfg->trend.line_width_px = 3;
     cfg->trend.color         = (gauge_color_t){0x17, 0xca, 0xff};
     cfg->trend.alert_colors   = true;
+
+    cfg->arc.radius_px     = 0; /* the face radius */
+    cfg->arc.width_px      = 26;
+    cfg->arc.color         = (gauge_color_t){0x00, 0xd2, 0xf0};
+    cfg->arc.start_color   = (gauge_color_t){0x00, 0x65, 0xb0};
+    cfg->arc.glow_px       = 10;
+    cfg->arc.head_color    = (gauge_color_t){0xff, 0xff, 0xff};
+    cfg->arc.head_width_px = 4;
+    cfg->arc.lit_ticks     = true;
+    cfg->arc.lit_color     = (gauge_color_t){0xeb, 0xf0, 0xf2};
 }
 
 /* --------------------------------------------------------------- element parsers ---- */
@@ -553,7 +563,9 @@ static void parse_face(const xml_tag_t *tag, gauge_config_t *cfg)
         cfg->face.start_angle = fmodf(v, 360.0f);
     }
     if (attr_float(tag, "sweep", &v)) {
-        cfg->face.sweep = clampf(v, 1.0f, 360.0f, &cfg->warning_count);
+        /* Negative runs anticlockwise (a mirrored dial); either way at least a degree. */
+        cfg->face.sweep = (v < 0.0f) ? clampf(v, -360.0f, -1.0f, &cfg->warning_count)
+                                     : clampf(v, 1.0f, 360.0f, &cfg->warning_count);
     }
 
     attr_color(tag, "background", &cfg->face.background, &cfg->warning_count);
@@ -587,6 +599,7 @@ static void parse_band(const xml_tag_t *tag, gauge_config_t *cfg)
 
     attr_color(tag, "color", &band.color, &cfg->warning_count);
     attr_px(tag, "width", &band.width_px, &cfg->warning_count);
+    attr_px(tag, "radius", &band.radius_px, &cfg->warning_count);
 
     cfg->face.bands[cfg->face.band_count++] = band;
 }
@@ -610,6 +623,7 @@ static void parse_ticks(const xml_tag_t *tag, gauge_config_t *cfg)
     attr_px(tag, "minor-width", &cfg->face.ticks.minor_width_px, &cfg->warning_count);
     attr_color(tag, "color", &cfg->face.ticks.color, &cfg->warning_count);
     attr_bool(tag, "band-color", &cfg->face.ticks.band_color);
+    attr_px(tag, "radius", &cfg->face.ticks.radius_px, &cfg->warning_count);
 }
 
 static void parse_labels(const xml_tag_t *tag, gauge_config_t *cfg)
@@ -639,6 +653,8 @@ static void parse_needle(const xml_tag_t *tag, gauge_config_t *cfg)
             cfg->needle.style = GAUGE_NEEDLE_ARROW;
         } else if (strcmp(style, "taper") == 0) {
             cfg->needle.style = GAUGE_NEEDLE_TAPER;
+        } else if (strcmp(style, "none") == 0) {
+            cfg->needle.style = GAUGE_NEEDLE_NONE;
         } else {
             cfg->warning_count++;
         }
@@ -959,6 +975,30 @@ static void parse_trend(const xml_tag_t *tag, gauge_config_t *cfg)
     }
 }
 
+static void parse_arc(const xml_tag_t *tag, gauge_config_t *cfg)
+{
+    cfg->arc.present = true;
+    attr_px(tag, "radius", &cfg->arc.radius_px, &cfg->warning_count);
+    attr_px(tag, "width", &cfg->arc.width_px, &cfg->warning_count);
+    attr_color(tag, "color", &cfg->arc.color, &cfg->warning_count);
+    attr_color(tag, "start-color", &cfg->arc.start_color, &cfg->warning_count);
+    attr_px(tag, "glow", &cfg->arc.glow_px, &cfg->warning_count);
+    attr_color(tag, "head-color", &cfg->arc.head_color, &cfg->warning_count);
+    attr_px(tag, "head-width", &cfg->arc.head_width_px, &cfg->warning_count);
+    attr_bool(tag, "lit-ticks", &cfg->arc.lit_ticks);
+    attr_color(tag, "lit-color", &cfg->arc.lit_color, &cfg->warning_count);
+    /* The glow is pre-computed per pixel over an annulus; keep that annulus bounded. */
+    if (cfg->arc.glow_px > GAUGE_CONFIG_ARC_MAX_GLOW_PX) {
+        cfg->arc.glow_px = GAUGE_CONFIG_ARC_MAX_GLOW_PX;
+        cfg->warning_count++;
+    }
+    /* A fill needs some thickness. */
+    if (cfg->arc.width_px == 0) {
+        cfg->arc.width_px = 1;
+        cfg->warning_count++;
+    }
+}
+
 static void parse_alert(const xml_tag_t *tag, gauge_config_t *cfg)
 {
     if (cfg->alert_count >= GAUGE_CONFIG_MAX_ALERTS) {
@@ -1116,6 +1156,8 @@ gauge_config_err_t gauge_config_parse(const char *xml, size_t len, gauge_config_
             shape = open_shape(&tag, &cfg->icon.shape, &cfg->warning_count);
         } else if (tag_is(&tag, "trend")) {
             parse_trend(&tag, cfg);
+        } else if (tag_is(&tag, "arc")) {
+            parse_arc(&tag, cfg);
         } else if (tag_is(&tag, "alert")) {
             parse_alert(&tag, cfg);
         }
