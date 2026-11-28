@@ -38,7 +38,7 @@ The owner also asked for a running chart of the last 30/60/120 s.
    **pixel shift** moves the whole dial (a box inside the dial tile, not the tile itself, since 2026-11-28) around a 3 px orbit every 1/3/10 minutes (setting,
    default 3) with LVGL's translate style; and when the ignition feed stays below 12.9 V for 15 s,
    an opaque **engine-off screen** on `lv_layer_top()` hides the dial and leaves the panel black
-   apart from a small bordered box, "DISPLAY OFF / saving the screen / tap to wake" in 20 px, that
+   apart from a small bordered box, "DISPLAY OFF / start engine or / tap screen to wake" (wording from 2026-11-28) in 20 px, that
    drifts at 30 px/s and bounces off the round edge like an old DVD logo, changing border colour at
    each bounce. It runs at the user's brightness capped at 40%, so it stays readable. A tap shows the
    dial for a minute. No reading (no

@@ -368,7 +368,7 @@ static void off_screen_show(void)
 
         lv_obj_t *l = lv_label_create(s.off_notice);
         if (l != NULL) {
-            lv_label_set_text(l, "DISPLAY OFF\nsaving the screen\ntap to wake");
+            lv_label_set_text(l, "DISPLAY OFF\nstart engine or\ntap screen to wake");
             lv_obj_set_style_text_font(l, &lv_font_montserrat_20, LV_PART_MAIN);
             lv_obj_set_style_text_color(l, lv_color_hex(0xb0b4b6), LV_PART_MAIN);
             lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
