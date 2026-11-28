@@ -33,6 +33,8 @@ static const char *KEY_TREND      = "trend";
 static const char *KEY_SHIFT      = "shift";
 static const char *KEY_ENGINE_OFF = "engoff";
 static const char *KEY_FOLLOW     = "follow";
+static const char *KEY_FACE_BOOST = "face_boost";
+static const char *KEY_FACE_EGT   = "face_egt";
 
 static app_settings_t s_settings = {
     /* Modest: AMOLED wear rises steeply with brightness. */
@@ -114,6 +116,15 @@ esp_err_t app_settings_init(void)
     if (nvs_get_str(h, KEY_GAUGE, s_settings.active_gauge, &len) != ESP_OK) {
         /* nvs_get_str may leave the buffer partly written on failure. */
         snprintf(s_settings.active_gauge, sizeof(s_settings.active_gauge), "boost");
+    }
+
+    len = sizeof(s_settings.face_boost);
+    if (nvs_get_str(h, KEY_FACE_BOOST, s_settings.face_boost, &len) != ESP_OK) {
+        s_settings.face_boost[0] = '\0';
+    }
+    len = sizeof(s_settings.face_egt);
+    if (nvs_get_str(h, KEY_FACE_EGT, s_settings.face_egt, &len) != ESP_OK) {
+        s_settings.face_egt[0] = '\0';
     }
 
     nvs_close(h);
@@ -247,6 +258,36 @@ void app_settings_set_active_gauge(const char *id)
     }
 }
 
+static char *last_face_slot(const char *channel)
+{
+    if (channel == NULL) {
+        return NULL;
+    }
+    if (strcmp(channel, "boost") == 0) {
+        return s_settings.face_boost;
+    }
+    if (strcmp(channel, "egt") == 0) {
+        return s_settings.face_egt;
+    }
+    return NULL;
+}
+
+void app_settings_set_last_face(const char *channel, const char *id)
+{
+    char *slot = last_face_slot(channel);
+    if (slot == NULL || id == NULL || id[0] == '\0' || strcmp(slot, id) == 0) {
+        return;
+    }
+    snprintf(slot, APP_SETTINGS_MAX_GAUGE_ID, "%s", id);
+    s_dirty = true;
+}
+
+const char *app_settings_last_face(const char *channel)
+{
+    const char *slot = last_face_slot(channel);
+    return slot != NULL ? slot : "";
+}
+
 esp_err_t app_settings_commit(void)
 {
     if (!s_dirty) {
@@ -293,6 +334,12 @@ esp_err_t app_settings_commit(void)
     }
     if (err == ESP_OK) {
         err = nvs_set_u8(h, KEY_FOLLOW, s_settings.follow_display ? 1 : 0);
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_str(h, KEY_FACE_BOOST, s_settings.face_boost);
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_str(h, KEY_FACE_EGT, s_settings.face_egt);
     }
     if (err == ESP_OK) {
         err = nvs_commit(h);

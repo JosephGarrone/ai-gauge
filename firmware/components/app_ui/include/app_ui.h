@@ -96,6 +96,18 @@ void app_ui_set_gauge_selected_cb(app_ui_gauge_selected_cb_t cb);
  */
 typedef void (*app_ui_gauge_step_cb_t)(int step);
 
+/**
+ * @brief Called when the user picks what the gauge shows ("boost" or "egt") on the Faces page.
+ *
+ * Runs on the LVGL task. The handler is expected to show the face last used for that reading.
+ */
+typedef void (*app_ui_reading_selected_cb_t)(const char *channel);
+
+void app_ui_set_reading_selected_cb(app_ui_reading_selected_cb_t cb);
+
+/** @brief The readings (channels) the stored faces show, for the Faces page's choice. */
+void app_ui_set_readings(const char (*channels)[GAUGE_CONFIG_MAX_ID_LEN], int count);
+
 void app_ui_set_gauge_step_cb(app_ui_gauge_step_cb_t cb);
 
 /**

@@ -199,6 +199,13 @@ EXT_RAM_BSS_ATTR static struct {
     int   gauge_active;
     char  gauge_info_text[96];
 
+    /* The readings the stored faces show, in PSRAM: the Faces page picks one, not a face. */
+    char (*readings)[GAUGE_CONFIG_MAX_ID_LEN];
+    const char **reading_map;
+    int          reading_count;
+    char         channel[GAUGE_CONFIG_MAX_ID_LEN]; /* the reading on screen */
+    app_ui_reading_selected_cb_t on_reading_selected;
+
     /* Text for labels that may not exist yet, handed to LVGL as static text. */
     char sensor_text[SENSOR_TEXT_LEN];
     char network_text[NETWORK_TEXT_LEN];
@@ -609,29 +616,45 @@ static void build_readout_prefs(lv_obj_t *p)
     segmented(p, k_trend_map, (uint32_t)set->trend_window, trend_changed_cb);
 }
 
-static void gauge_list_cb(lv_event_t *e)
+static void reading_cb(lv_event_t *e)
 {
     uint32_t idx = lv_buttonmatrix_get_selected_button(lv_event_get_target(e));
-    if ((int)idx >= g.gauge_count || g.on_gauge_selected == NULL) {
+    if ((int)idx >= g.reading_count || g.on_reading_selected == NULL) {
         return;
     }
-    g.gauge_active = (int)idx;
-    /* The owner loads it; app_ui knows widgets, not the filesystem. */
-    g.on_gauge_selected(g.gauge_ids[idx]);
+    /* The owner shows the face last used for that reading; swipes on the dial pick others. */
+    g.on_reading_selected(g.readings[idx]);
 }
 
+/*
+ * What the gauge shows: a reading (Boost, EGT, or any other channel a stored face reads), not a
+ * face. Each reading comes back with the face last shown for it; a sideways swipe on the dial
+ * steps between that reading's faces (owner's call, 2026-11-28).
+ */
 static void build_gauge(lv_obj_t *p)
 {
     g.gauge_info = wrap_label(p, &st.caption, g.gauge_info_text);
     lv_obj_set_style_text_align(g.gauge_info, LV_TEXT_ALIGN_CENTER, 0);
 
-    if (g.gauge_count == 0) {
+    if (g.gauge_count == 0 || g.reading_count == 0) {
         wrap_label(p, &st.body, "Only the built-in face is available. Add faces with the editor at "
                                 "http://<gauge>/editor/");
     } else {
-        /* One buttonmatrix, a face per row: twelve faces cost one widget, not twenty-four. */
-        lv_obj_t *bm = segmented(p, g.gauge_map, (uint32_t)g.gauge_active, gauge_list_cb);
-        lv_obj_set_height(bm, g.gauge_count * CONTROL_H + (g.gauge_count - 1) * 8);
+        caption(p, "Gauge shows");
+        int checked = -1;
+        for (int i = 0; i < g.reading_count; i++) {
+            if (strcmp(g.readings[i], g.channel) == 0) {
+                checked = i;
+            }
+        }
+        /* One buttonmatrix, two readings a row. */
+        lv_obj_t *bm   = segmented(p, g.reading_map, (uint32_t)(checked < 0 ? 0 : checked), reading_cb);
+        int       rows = (g.reading_count + 1) / 2;
+        lv_obj_set_height(bm, rows * CONTROL_H + (rows - 1) * 8);
+        if (checked < 0) {
+            lv_buttonmatrix_clear_button_ctrl_all(bm, LV_BUTTONMATRIX_CTRL_CHECKED);
+        }
+        wrap_label(p, &st.caption, "Swipe the dial left or right for its other faces.");
     }
 
     build_readout_prefs(p);
@@ -1272,6 +1295,7 @@ void settings_tile_changed(bool settings_visible)
 
 void settings_set_gauge_info(const gauge_config_t *cfg)
 {
+    snprintf(g.channel, sizeof(g.channel), "%s", cfg->source.channel);
     snprintf(g.gauge_info_text, sizeof(g.gauge_info_text), "Showing %s, %.0f to %.0f %s", cfg->id,
              (double)cfg->source.min, (double)cfg->source.max, cfg->source.unit);
     if (g.gauge_info != NULL) {
@@ -1304,6 +1328,50 @@ void settings_set_gauge_list(const char (*ids)[GAUGE_CONFIG_MAX_ID_LEN], int cou
 }
 
 void settings_set_gauge_selected_cb(app_ui_gauge_selected_cb_t cb) { g.on_gauge_selected = cb; }
+void settings_set_reading_selected_cb(app_ui_reading_selected_cb_t cb) { g.on_reading_selected = cb; }
+
+/* What a reading's button says: the gauge's own two by name, anything else by its channel id. */
+static const char *reading_name(const char *channel)
+{
+    if (strcmp(channel, "boost") == 0) {
+        return "Boost";
+    }
+    if (strcmp(channel, "egt") == 0) {
+        return "EGT";
+    }
+    return channel;
+}
+
+void settings_set_readings(const char (*channels)[GAUGE_CONFIG_MAX_ID_LEN], int count)
+{
+    if (g.readings == NULL) {
+        /* PSRAM: built once, rewritten in place when the stored faces change. */
+        g.readings    = heap_caps_calloc(GAUGE_STORE_MAX_GAUGES, GAUGE_CONFIG_MAX_ID_LEN, MALLOC_CAP_SPIRAM);
+        g.reading_map = heap_caps_calloc(2 * GAUGE_STORE_MAX_GAUGES + 1, sizeof(char *), MALLOC_CAP_SPIRAM);
+        if (g.readings == NULL || g.reading_map == NULL) {
+            free(g.readings);
+            free(g.reading_map);
+            g.readings    = NULL;
+            g.reading_map = NULL;
+            g.reading_count = 0;
+            return;
+        }
+    }
+    if (channels == NULL || count < 0) {
+        count = 0;
+    }
+    count = LV_MIN(count, GAUGE_STORE_MAX_GAUGES);
+    int m = 0;
+    for (int i = 0; i < count; i++) {
+        snprintf(g.readings[i], GAUGE_CONFIG_MAX_ID_LEN, "%s", channels[i]);
+        if (i > 0 && i % 2 == 0) {
+            g.reading_map[m++] = "\n";
+        }
+        g.reading_map[m++] = reading_name(g.readings[i]);
+    }
+    g.reading_map[m] = "";
+    g.reading_count  = count;
+}
 void settings_set_network_reset_cb(app_ui_network_reset_cb_t cb)   { g.on_network_reset = cb; }
 void settings_set_firmware_tap_cb(app_ui_firmware_tap_cb_t cb)     { g.on_firmware_tap = cb; }
 

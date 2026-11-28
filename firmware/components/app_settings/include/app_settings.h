@@ -92,6 +92,8 @@ typedef struct {
     bool                     engine_off_screen;  /**< Go dark with a drifting notice when the engine stops. */
     bool                     follow_display;     /**< Scale brightness by the OBD Display's (docs/networking.md). */
     char    active_gauge[APP_SETTINGS_MAX_GAUGE_ID];
+    char    face_boost[APP_SETTINGS_MAX_GAUGE_ID]; /**< The face last shown for boost; "" = none yet. */
+    char    face_egt[APP_SETTINGS_MAX_GAUGE_ID];   /**< The face last shown for EGT; "" = none yet. */
 } app_settings_t;
 
 /** @brief Seconds of history for a trend window setting. */
@@ -146,6 +148,15 @@ void app_settings_set_follow_display(bool on);
 
 /** @brief Update the active gauge id in memory. */
 void app_settings_set_active_gauge(const char *id);
+
+/**
+ * @brief Remember @p id as the face last shown for @p channel ("boost" or "egt"; others are
+ * ignored), in memory. Picking that reading again brings this face back.
+ */
+void app_settings_set_last_face(const char *channel, const char *id);
+
+/** @brief The face last shown for @p channel, or "" if none is remembered. */
+const char *app_settings_last_face(const char *channel);
 
 /**
  * @brief Write any in-memory changes to NVS.

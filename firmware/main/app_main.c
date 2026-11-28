@@ -80,6 +80,10 @@ static void set_active_id(const char *id)
 {
     strlcpy(s_active_id, id, sizeof(s_active_id));
     net_svc_set_active_gauge(s_active_id);
+    /* Picking the reading again brings this face back (the Faces page's "Gauge shows"). */
+    if (s_active_cfg != NULL && id[0] != '\0') {
+        app_settings_set_last_face(s_active_cfg->source.channel, id);
+    }
 }
 
 /* ------------------------------------------------------------- value source ------- */
@@ -362,6 +366,101 @@ static void on_gauge_step(int step)
     free(list);
 }
 
+/*
+ * Runs on the LVGL task, from the Faces page's "Gauge shows" choice: show the face last used for
+ * that reading, or, if it is gone or no longer reads that channel, the first stored face that does.
+ */
+static void on_reading_selected(const char *channel)
+{
+    if (strcmp(channel, s_active_cfg->source.channel) == 0) {
+        return;
+    }
+    gauge_store_list_t *list = heap_caps_malloc(sizeof(*list), MALLOC_CAP_SPIRAM);
+    gauge_config_t     *cfg  = heap_caps_malloc(sizeof(*cfg), MALLOC_CAP_SPIRAM);
+    if (list == NULL || cfg == NULL) {
+        free(list);
+        free(cfg);
+        return;
+    }
+    gauge_store_list(list);
+
+    char        pick[GAUGE_CONFIG_MAX_ID_LEN] = "";
+    const char *last = app_settings_last_face(channel);
+    char        err[GAUGE_STORE_ERR_LEN];
+    if (last[0] != '\0' && gauge_store_load(last, cfg, err, sizeof(err)) == ESP_OK &&
+        strcmp(cfg->source.channel, channel) == 0) {
+        strlcpy(pick, last, sizeof(pick));
+    }
+    for (int i = 0; i < list->count && pick[0] == '\0'; i++) {
+        if (gauge_store_load(list->ids[i], cfg, err, sizeof(err)) == ESP_OK &&
+            strcmp(cfg->source.channel, channel) == 0) {
+            strlcpy(pick, list->ids[i], sizeof(pick));
+        }
+    }
+    free(cfg);
+
+    if (pick[0] != '\0') {
+        ESP_LOGI(TAG, "reading '%s': face '%s'", channel, pick);
+        on_gauge_selected(pick);
+        app_ui_set_gauge_list(list->ids, list->count, s_active_id);
+    }
+    free(list);
+}
+
+/*
+ * Tell the UI which faces are stored and which readings they show. Loads each face once for its
+ * channel: a dozen small files at most, at startup and when a face is uploaded or deleted.
+ */
+static void publish_face_lists(void)
+{
+    gauge_store_list_t *list = heap_caps_malloc(sizeof(*list), MALLOC_CAP_SPIRAM);
+    gauge_store_list_t *chan = heap_caps_malloc(sizeof(*chan), MALLOC_CAP_SPIRAM);
+    gauge_config_t     *cfg  = heap_caps_malloc(sizeof(*cfg), MALLOC_CAP_SPIRAM);
+    if (list == NULL || chan == NULL || cfg == NULL) {
+        free(list);
+        free(chan);
+        free(cfg);
+        return;
+    }
+    gauge_store_list(list);
+    app_ui_set_gauge_list(list->count > 0 ? list->ids : NULL, list->count, s_active_id);
+
+    /* Distinct channels, the gauge's own two first, then the rest in list order. */
+    chan->count = 0;
+    static const char *const k_own[] = {"boost", "egt"};
+    for (int pass = 0; pass < 2; pass++) {
+        for (int i = 0; i < list->count; i++) {
+            char err[GAUGE_STORE_ERR_LEN];
+            if (gauge_store_load(list->ids[i], cfg, err, sizeof(err)) != ESP_OK) {
+                continue;
+            }
+            const char *ch  = cfg->source.channel;
+            bool        own = strcmp(ch, k_own[0]) == 0 || strcmp(ch, k_own[1]) == 0;
+            if (own != (pass == 0)) {
+                continue;
+            }
+            bool seen = false;
+            for (int k = 0; k < chan->count; k++) {
+                seen = seen || strcmp(chan->ids[k], ch) == 0;
+            }
+            if (!seen && chan->count < GAUGE_STORE_MAX_GAUGES) {
+                strlcpy(chan->ids[chan->count++], ch, GAUGE_CONFIG_MAX_ID_LEN);
+            }
+        }
+        /* boost before egt, whatever order the files are in */
+        if (pass == 0 && chan->count == 2 && strcmp(chan->ids[0], "egt") == 0) {
+            char t[GAUGE_CONFIG_MAX_ID_LEN];
+            strlcpy(t, chan->ids[0], sizeof(t));
+            strlcpy(chan->ids[0], chan->ids[1], sizeof(t));
+            strlcpy(chan->ids[1], t, sizeof(t));
+        }
+    }
+    app_ui_set_readings(chan->ids, chan->count);
+    free(cfg);
+    free(chan);
+    free(list);
+}
+
 /* --------------------------------------------------------------- draw buffers ------- */
 
 /*
@@ -489,9 +588,7 @@ static void on_config_changed(const char *id, bool deleted)
     }
 
     /* After any switch, so the picker selects what is now on screen. */
-    gauge_store_list_t list;
-    gauge_store_list(&list);
-    app_ui_set_gauge_list(list.count > 0 ? list.ids : NULL, list.count, s_active_id);
+    publish_face_lists();
 
     /* Reload live only when the gauge on screen is the one that changed. */
     if (!deleted && on_screen) {
@@ -1050,10 +1147,9 @@ void app_main(void)
     ESP_LOGI(TAG, "UI built in %" PRId64 " ms", (esp_timer_get_time() - t0) / 1000);
 
 
-    gauge_store_list_t list;
-    gauge_store_list(&list);
-    app_ui_set_gauge_list(list.count > 0 ? list.ids : NULL, list.count, loaded_id);
+    publish_face_lists();
     app_ui_set_gauge_selected_cb(on_gauge_selected);
+    app_ui_set_reading_selected_cb(on_reading_selected);
     app_ui_set_gauge_step_cb(on_gauge_step);
     app_ui_set_network_reset_cb(on_network_reset);
     app_ui_set_firmware_tap_cb(on_firmware_tap);

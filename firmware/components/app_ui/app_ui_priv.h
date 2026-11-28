@@ -44,6 +44,8 @@ void settings_tile_changed(bool settings_visible);
 void settings_set_gauge_info(const gauge_config_t *cfg);
 void settings_set_gauge_list(const char (*ids)[GAUGE_CONFIG_MAX_ID_LEN], int count, const char *active);
 void settings_set_gauge_selected_cb(app_ui_gauge_selected_cb_t cb);
+void settings_set_readings(const char (*channels)[GAUGE_CONFIG_MAX_ID_LEN], int count);
+void settings_set_reading_selected_cb(app_ui_reading_selected_cb_t cb);
 void settings_set_network_reset_cb(app_ui_network_reset_cb_t cb);
 void settings_set_firmware_tap_cb(app_ui_firmware_tap_cb_t cb);
 void settings_set_network_status(const char *state, const char *detail);

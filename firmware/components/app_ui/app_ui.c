@@ -698,6 +698,16 @@ void app_ui_set_gauge_selected_cb(app_ui_gauge_selected_cb_t cb)
     settings_set_gauge_selected_cb(cb);
 }
 
+void app_ui_set_reading_selected_cb(app_ui_reading_selected_cb_t cb)
+{
+    settings_set_reading_selected_cb(cb);
+}
+
+void app_ui_set_readings(const char (*channels)[GAUGE_CONFIG_MAX_ID_LEN], int count)
+{
+    settings_set_readings(channels, count);
+}
+
 void app_ui_set_gauge_step_cb(app_ui_gauge_step_cb_t cb)
 {
     s.gauge_step_cb = cb;
